@@ -5,7 +5,7 @@
  *
  * Sheet ID esperado: 1TWbOOjTnm68n2QioiwRsHvXSuARev2PLIhqr1pVctp8
  */
-const SHEET_NAME = 'Hoja 1'; // <-- nombre exacto de la pestaña
+const SHEET_NAME = 'Eventos 2026'; // nombre exacto de la pestaña
 const DEAL_ID_COL = 21;      // U = Kommo Deal ID
 
 // Columnas que escribe el bot (1-based). NO toca L,M,N,O,P,T
