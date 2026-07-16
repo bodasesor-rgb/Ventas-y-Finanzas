@@ -10,14 +10,20 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use(ventasRouter);
 
-const phase = process.env.APPS_SCRIPT_VENTAS_URL?.trim() ? 2 : 1;
+const scriptUrl = (
+  process.env.URL_BODASESOR_DIRECCION_SHEETS ||
+  process.env.APPS_SCRIPT_VENTAS_URL ||
+  ""
+).trim();
+const phase = scriptUrl ? 2 : 1;
 
 app.listen(PORT, () => {
   console.log(
     `[ventas] listening on :${PORT} | phase=${phase}` +
       (phase === 1
-        ? " (log only — falta APPS_SCRIPT_VENTAS_URL)"
+        ? " (log only — falta URL_BODASESOR_DIRECCION_SHEETS /exec)"
         : " (escribe a Sheet vía Apps Script)")
   );
 });
+
 

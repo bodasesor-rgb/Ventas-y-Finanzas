@@ -15,9 +15,21 @@ export async function writeFilaToAppsScript(
   dealId: string,
   values: string[]
 ): Promise<AppsScriptWriteResult> {
-  const url = process.env.APPS_SCRIPT_VENTAS_URL?.trim();
+  // Hostinger usa URL_BODASESOR_DIRECCION_SHEETS; APPS_SCRIPT_VENTAS_URL queda como alias
+  const url = (
+    process.env.URL_BODASESOR_DIRECCION_SHEETS ||
+    process.env.APPS_SCRIPT_VENTAS_URL ||
+    ""
+  ).trim();
   if (!url) {
-    throw new Error("Falta APPS_SCRIPT_VENTAS_URL en variables de entorno");
+    throw new Error(
+      "Falta URL_BODASESOR_DIRECCION_SHEETS (URL /exec del Apps Script)"
+    );
+  }
+  if (!url.includes("script.google.com") || !url.includes("/exec")) {
+    throw new Error(
+      "URL_BODASESOR_DIRECCION_SHEETS debe ser la URL de Apps Script que termina en /exec (no el link del Sheet ni el ID de implementación)"
+    );
   }
 
   const res = await fetch(url, {

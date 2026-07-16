@@ -10,7 +10,15 @@ import type { KommoLead, KommoWebhookBody } from "./types";
 
 export const ventasRouter = Router();
 
-const PHASE = process.env.APPS_SCRIPT_VENTAS_URL?.trim() ? 2 : 1;
+function appsScriptUrl(): string {
+  return (
+    process.env.URL_BODASESOR_DIRECCION_SHEETS ||
+    process.env.APPS_SCRIPT_VENTAS_URL ||
+    ""
+  ).trim();
+}
+
+const PHASE = appsScriptUrl() ? 2 : 1;
 
 /**
  * Recibe webhook de deal ganado, mapea la fila y:
@@ -74,7 +82,7 @@ ventasRouter.post(
         error?: string;
       } = { attempted: false, ok: false };
 
-      if (process.env.APPS_SCRIPT_VENTAS_URL?.trim()) {
+      if (appsScriptUrl()) {
         sheetWrite.attempted = true;
         try {
           const result = await writeFilaToAppsScript(fila.kommoDealId, values);
@@ -96,7 +104,7 @@ ventasRouter.post(
         }
       } else {
         console.log(
-          "[ventas][fase1] FILA QUE SE APPENDARÍA (sin APPS_SCRIPT_VENTAS_URL)"
+          "[ventas][fase1] FILA QUE SE APPENDARÍA (sin URL Apps Script /exec)"
         );
       }
 
@@ -125,7 +133,7 @@ ventasRouter.post(
           ? sheetWrite.ok
             ? `Fila ${sheetWrite.action} en Sheet (fila ${sheetWrite.row}).`
             : `Mapeo OK pero falló escritura a Sheet: ${sheetWrite.error}`
-          : "Fila mapeada. Falta APPS_SCRIPT_VENTAS_URL para escribir al Sheet.",
+          : "Fila mapeada. Falta URL_BODASESOR_DIRECCION_SHEETS (/exec) para escribir al Sheet.",
         dataSource,
         kommoApiError,
         dealId: fila.kommoDealId,
@@ -145,14 +153,17 @@ ventasRouter.post(
 );
 
 ventasRouter.get("/health", (_req, res) => {
+  const scriptUrl = appsScriptUrl();
   res.status(200).json({
     ok: true,
     service: "ventas-y-finanzas",
-    phase: PHASE,
+    phase: scriptUrl ? 2 : 1,
     env: {
       hasKommoBaseUrl: Boolean(process.env.KOMMO_BASE_URL),
       hasKommoAccessToken: Boolean(process.env.KOMMO_ACCESS_TOKEN),
-      hasAppsScriptUrl: Boolean(process.env.APPS_SCRIPT_VENTAS_URL?.trim()),
+      hasAppsScriptUrl: Boolean(scriptUrl),
+      appsScriptUrlLooksValid:
+        scriptUrl.includes("script.google.com") && scriptUrl.includes("/exec"),
     },
   });
 });
