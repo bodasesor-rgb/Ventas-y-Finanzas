@@ -1,26 +1,26 @@
 # Ventas y Finanzas
 
-Módulo Node.js/TypeScript: cuando un deal se marca **Cerrado/Ganado** en Kommo, registra una fila en el Sheet de ventas.
+Cuando un deal se marca **Cerrado/Ganado** en Kommo, registra una fila en el Sheet de ventas vía Google Apps Script.
 
-## Fase actual: 1 (solo log)
+## Endpoints
 
-- Endpoint: `POST /webhooks/kommo/deal-won`
-- Health: `GET /health`
-- Aún **no** escribe al Google Sheet.
+- `POST /webhooks/kommo/deal-won` — webhook Kommo
+- `GET /health` — estado + flags de env
+- `GET /health/kommo` — prueba token Kommo
 
-## Hostinger (Node.js)
+## Hostinger
 
-1. Importa este repositorio (rama `modulo-ventas`).
-2. Build command: `npm install && npm run build`
-3. Start command: `npm start`
-4. Variables de entorno: ver `.env.example` (`KOMMO_BASE_URL`, `KOMMO_ACCESS_TOKEN`).
-5. En Kommo, apunta el webhook de deal ganado a:
-   `https://TU-DOMINIO/webhooks/kommo/deal-won`
+1. Build: `npm install && npm run build`
+2. Start: `npm start`
+3. Env:
+   - `KOMMO_BASE_URL`
+   - `KOMMO_ACCESS_TOKEN`
+   - `APPS_SCRIPT_VENTAS_URL` (URL `/exec` del Apps Script)
 
-## Scripts
+Sin `APPS_SCRIPT_VENTAS_URL` → Fase 1 (solo log).  
+Con esa variable → Fase 2 (append/update idempotente por Kommo Deal ID).
 
-```bash
-npm install
-npm run build
-npm start
-```
+## Apps Script
+
+Código listo en `apps-script/Codigo.gs`.  
+Sheet: `1TWbOOjTnm68n2QioiwRsHvXSuARev2PLIhqr1pVctp8`

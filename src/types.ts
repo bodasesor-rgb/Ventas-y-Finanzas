@@ -1,17 +1,20 @@
 /**
- * Fila que el módulo de ventas appendaría / actualizaría en el Sheet.
- * Las columnas con fórmula (Por pagar, Ganancia, Margen) y las editadas a mano
- * (Costo, Pagado, Pagado a proveedor) NO se rellenan desde código.
+ * Fila del Sheet real:
+ * Cliente | Fecha del evento | Fecha de cierre | Genero | Telefono | Correo |
+ * Tipo de evento | Invitados | Dirección de evento | Horario | Venta | Costo |
+ * Pagado | Por pagar | Ganancia | Margen | Link cotización | Mes cierre |
+ * Forma de Pago | IVA | Kommo Deal ID
+ *
+ * El script NO calcula Por pagar / Ganancia / Margen ni edita Costo / Pagado / IVA.
  */
 export interface FilaVentas {
-  tipoDeEvento: string;
-  fechaDeCierre: string;
-  fechaDelEvento: string;
   cliente: string;
+  fechaDelEvento: string;
+  fechaDeCierre: string;
   genero: string;
   telefono: string;
-  enviarMensaje: string;
   correo: string;
+  tipoDeEvento: string;
   invitados: string;
   direccionDeEvento: string;
   horario: string;
@@ -19,13 +22,13 @@ export interface FilaVentas {
   costo: string;
   pagado: string;
   porPagar: string;
-  pagadoAProveedor: string;
   ganancia: string;
   margen: string;
   linkCotizacion: string;
   mesCierre: string;
   formaDePago: string;
-  /** Llave de idempotencia — última columna / oculta */
+  iva: string;
+  /** Llave de idempotencia — columna U */
   kommoDealId: string;
 }
 

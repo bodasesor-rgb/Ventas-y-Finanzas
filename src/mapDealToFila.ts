@@ -17,11 +17,6 @@ function customFieldValue(
   return String(raw).trim();
 }
 
-/**
- * Teléfono / email en Kommo suelen vivir en custom fields del contacto
- * (field_code PHONE / EMAIL) o en values tipados. Extraemos de forma
- * determinista sin inventar.
- */
 function contactPhone(contact: KommoContactEmbedded | undefined): string {
   if (!contact?.custom_fields_values) return "";
   for (const f of contact.custom_fields_values) {
@@ -66,7 +61,6 @@ function unixToIsoDate(unixSeconds: number | undefined): string {
   if (!unixSeconds || !Number.isFinite(unixSeconds)) return "";
   const d = new Date(unixSeconds * 1000);
   if (Number.isNaN(d.getTime())) return "";
-  // Fecha local México no forzada aquí: ISO date UTC (YYYY-MM-DD)
   return d.toISOString().slice(0, 10);
 }
 
@@ -79,7 +73,6 @@ function mesFromFechaCierre(fechaIso: string): string {
 
 /**
  * Mapea un deal de Kommo a la fila del Sheet de ventas.
- * Solo rellena columnas que vienen de Kommo según el diseño.
  * No calcula ganancia/margen/por pagar.
  */
 export function mapDealToFilaVentas(lead: KommoLead): FilaVentas {
@@ -92,24 +85,20 @@ export function mapDealToFilaVentas(lead: KommoLead): FilaVentas {
     unixToIsoDate(lead.created_at);
 
   return {
-    tipoDeEvento: customFieldValue(fields, KOMMO_FIELD_IDS.TIPO_DE_EVENTO),
-    fechaDeCierre,
-    // Vacío a propósito (Jotform / manual) — Fase 1
-    fechaDelEvento: "",
     cliente: (contact?.name || lead.name || "").trim(),
+    fechaDelEvento: "",
+    fechaDeCierre,
     genero: "",
     telefono: contactPhone(contact),
-    enviarMensaje: "",
     correo: contactEmail(contact),
+    tipoDeEvento: customFieldValue(fields, KOMMO_FIELD_IDS.TIPO_DE_EVENTO),
     invitados: "",
     direccionDeEvento: "",
     horario: "",
     venta: customFieldValue(fields, KOMMO_FIELD_IDS.MONTO_CIERRE),
-    // Manual / fórmulas — el script no toca
     costo: "",
     pagado: "",
     porPagar: "",
-    pagadoAProveedor: "",
     ganancia: "",
     margen: "",
     linkCotizacion: customFieldValue(
@@ -118,21 +107,21 @@ export function mapDealToFilaVentas(lead: KommoLead): FilaVentas {
     ),
     mesCierre: mesFromFechaCierre(fechaDeCierre),
     formaDePago: customFieldValue(fields, KOMMO_FIELD_IDS.FORMA_DE_PAGO),
+    iva: "",
     kommoDealId: String(lead.id),
   };
 }
 
-/** Orden de columnas del Sheet (última = deal ID para idempotencia). */
+/** Orden exacto del Sheet (A..U). */
 export function filaToOrderedValues(fila: FilaVentas): string[] {
   return [
-    fila.tipoDeEvento,
-    fila.fechaDeCierre,
-    fila.fechaDelEvento,
     fila.cliente,
+    fila.fechaDelEvento,
+    fila.fechaDeCierre,
     fila.genero,
     fila.telefono,
-    fila.enviarMensaje,
     fila.correo,
+    fila.tipoDeEvento,
     fila.invitados,
     fila.direccionDeEvento,
     fila.horario,
@@ -140,25 +129,24 @@ export function filaToOrderedValues(fila: FilaVentas): string[] {
     fila.costo,
     fila.pagado,
     fila.porPagar,
-    fila.pagadoAProveedor,
     fila.ganancia,
     fila.margen,
     fila.linkCotizacion,
     fila.mesCierre,
     fila.formaDePago,
+    fila.iva,
     fila.kommoDealId,
   ];
 }
 
 export const SHEET_HEADERS = [
-  "Tipo de evento",
-  "Fecha de cierre",
-  "Fecha del evento",
   "Cliente",
+  "Fecha del evento",
+  "Fecha de cierre",
   "Genero",
   "Telefono",
-  "Enviar Mensaje",
   "Correo",
+  "Tipo de evento",
   "Invitados",
   "Dirección de evento",
   "Horario",
@@ -166,11 +154,11 @@ export const SHEET_HEADERS = [
   "Costo",
   "Pagado",
   "Por pagar",
-  "Pagado a proveedor",
   "Ganancia",
   "Margen",
   "Link cotización",
   "Mes cierre",
   "Forma de Pago",
+  "IVA",
   "Kommo Deal ID",
 ] as const;
