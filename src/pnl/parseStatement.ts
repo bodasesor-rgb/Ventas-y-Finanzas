@@ -84,14 +84,26 @@ function collectMoney(s: string): number[] {
   return out;
 }
 
+/**
+ * Banamex pega código POS + dígito basura + monto:
+ *   9000/00126,000.00  →  6,000.00   (el "2" sobra)
+ *   9001/0011500.00    →  500.00     (el "1" sobra)
+ *   9000/0012389.76    →  389.76
+ */
+function stripBanamexPosJunk(body: string): string {
+  return body.replace(
+    /900[01]\/001\d(?=\d{1,3}(?:,\d{3})*\.\d{2})/gi,
+    " "
+  );
+}
+
 /** Limpieza suave: NO romper el tipo de cambio ni montos */
 function softClean(body: string): string {
-  return body
+  return stripBanamexPosJunk(body)
     .replace(/\b20\d{6}\b/g, " ")
     // Folio Banamex + monto: …000002,200.00 → 2,200.00
     .replace(/(\d{10,})(\d,\d{3}\.\d{2})/g, " $2 ")
     .replace(/\b\d{12,}\b/g, " ")
-    .replace(/900[01]\/001/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
