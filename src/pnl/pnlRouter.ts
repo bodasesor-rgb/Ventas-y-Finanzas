@@ -15,8 +15,15 @@ import {
   resolveStatementFile,
   saveStatementPdf,
 } from "./statementFiles";
-import { autoCreateCategoriesFromLines } from "./autoCategories";
+import {
+  autoCreateCategoriesFromLines,
+  pruneMerchantCategories,
+} from "./autoCategories";
 import { colorForCategoryId } from "./categoryColors";
+import {
+  extractStatementOfficialTotals,
+  reconcileTotals,
+} from "./statementSummary";
 import {
   addRun,
   isIncomeCategory,
@@ -241,11 +248,14 @@ pnlRouter.post(
       }
 
       const buffer = fs.readFileSync(req.file.path);
+      pruneMerchantCategories();
       const rules = loadRules();
       const { text, lines: parsed } = await parsePdfToLines(buffer, rules);
-      const { lines, created } = autoCreateCategoriesFromLines(parsed);
+      const { lines, rulesCreated } = autoCreateCategoriesFromLines(parsed);
       const summaryByCategory = summarizeByCategory(lines);
       const totals = summarizeTotals(lines);
+      const oficial = extractStatementOfficialTotals(text);
+      const reconciliation = reconcileTotals(oficial, totals);
       const period = detectPeriodFromText(text);
       const saved = saveStatementPdf(req.file.path, period);
       const mid = Math.max(0, Math.floor(text.length / 2) - 400);
@@ -268,6 +278,7 @@ pnlRouter.post(
         lines,
         summaryByCategory,
         totals,
+        reconciliation,
       };
       addRun(run);
 
@@ -275,14 +286,16 @@ pnlRouter.post(
         ok: true,
         run: runPublic(run),
         categories: loadCategories(),
+        rules: loadRules(),
         stats: {
           lines: lines.length,
           needsReview: lines.filter((l) => l.needsReview).length,
           matched: lines.filter((l) => l.matchedRuleId).length,
           period: period.label,
           savedAs: saved.storedName,
-          categoriesCreated: created,
+          rulesCreated,
           totals,
+          reconciliation,
         },
       });
     } catch (err) {
@@ -311,13 +324,16 @@ pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
     });
     return;
   }
+  pruneMerchantCategories();
   const rules = loadRules();
   const parsed = extractLinesFromText(text, rules);
-  const { lines, created } = autoCreateCategoriesFromLines(parsed);
+  const { lines, rulesCreated } = autoCreateCategoriesFromLines(parsed);
   const period = detectPeriodFromText(text);
   run.lines = lines;
   run.summaryByCategory = summarizeByCategory(lines);
   run.totals = summarizeTotals(lines);
+  const oficial = extractStatementOfficialTotals(text);
+  run.reconciliation = reconcileTotals(oficial, run.totals);
   run.periodKey = period.key;
   run.periodLabel = period.label;
   runs[idx] = run;
@@ -326,14 +342,16 @@ pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
     ok: true,
     run: runPublic(run),
     categories: loadCategories(),
+    rules: loadRules(),
     stats: {
       lines: lines.length,
       needsReview: lines.filter((l) => l.needsReview).length,
       matched: lines.filter((l) => l.matchedRuleId).length,
       textLength: text.length,
       period: period.label,
-      categoriesCreated: created,
+      rulesCreated,
       totals: run.totals,
+      reconciliation: run.reconciliation,
     },
   });
 });

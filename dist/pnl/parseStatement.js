@@ -43,8 +43,15 @@ function stripPageNoise(text) {
         .replace(/000181\.B13INDL010\.AR\.\d+\.\d+/gi, "\n")
         .replace(/Detalle de Operaciones[^\n]*/gi, "\n")
         .replace(/FECHACONCEPTORETIROSDEP[ÓO]SITOSSALDO/gi, "\n")
-        .replace(/Centro de Atenci[oó]n VIP[\s\S]{0,300}?(?=\d{1,2}(?:ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)|$)/gi, "\n")
-        .replace(/Suc\.\s*\d+[^\n]*(?:\n[^\n]{0,80}){0,5}/gi, "\n")
+        // Solo el bloque de teléfonos VIP (NO borrar la continuación del movimiento)
+        .replace(/Centro de Atenci[oó]n VIP\n?/gi, "\n")
+        .replace(/Ciudad de M[eé]xico:\s*[\d ]+/gi, "\n")
+        .replace(/Otra ciudad, sin costo:\s*[\d ]+/gi, "\n")
+        .replace(/E\.U\.A\.\s*o\s*Canad[aá]:\s*[\d ]+/gi, "\n")
+        .replace(/Otro pa[ií]s por cobrar a E\.U\.A\.:\s*[^\n]+/gi, "\n")
+        .replace(/Suc\.\s*\d+[^\n]*/gi, "\n")
+        .replace(/CAMINO A SANTA TERESA[^\n]*/gi, "\n")
+        .replace(/FUENTES DEL PEDREGAL[^\n]*/gi, "\n")
         .replace(/\n{3,}/g, "\n\n");
 }
 /**
@@ -77,8 +84,9 @@ function collectMoney(s) {
 function softClean(body) {
     return body
         .replace(/\b20\d{6}\b/g, " ")
+        // Folio Banamex + monto: …000002,200.00 → 2,200.00
+        .replace(/(\d{10,})(\d,\d{3}\.\d{2})/g, " $2 ")
         .replace(/\b\d{12,}\b/g, " ")
-        .replace(/\b\d{16}\b/g, " ")
         .replace(/900[01]\/001/gi, " ")
         .replace(/\s+/g, " ")
         .trim();
@@ -115,72 +123,63 @@ function extractMoveAndSaldo(body) {
             return { move: nums[0], saldo: null, suspicious: true };
         }
     }
-    // 2) MXN normal
+    // 2) MXN normal — primer par monto+saldo (evita comerse el siguiente movimiento)
     let s = softClean(original);
     s = s
         .replace(/U\.S\.\s*Dollar\s*T\.C\.\s*\d+\.\d{4,6}/gi, " ")
         .replace(/\bT\.C\.\s*\d+\.\d{4,6}/gi, " ")
         .replace(/\s+/g, " ")
         .trim();
-    // Quitar códigos de auth de 6 dígitos sueltos (no parte de montos)
     s = s.replace(/(?<![\d,.])\b\d{6,8}\b(?![\d,.])/g, " ").replace(/\s+/g, " ");
-    const nums = collectMoney(s);
-    if (!nums.length)
-        return null;
-    // Solo los últimos 2–3 montos importan (retiro/depósito + saldo)
-    const pool = nums.slice(-3);
-    if (pool.length === 1) {
-        return {
-            move: pool[0],
-            saldo: null,
-            suspicious: pool[0] > 100_000,
-        };
-    }
-    const saldo = pool[pool.length - 1];
-    let move = pool[pool.length - 2];
-    // Promo extranjero tipo "05263.52 32.74" → el chico es el cargo real
-    if (saldo < 200 && move > 500) {
-        const tail = s.match(/(0\d{1,3}(?:,\d{3})*\.\d{2})\s+(\d+\.\d{2})\s*$/);
-        if (tail) {
+    // Cortar basura de otras secciones del PDF
+    s = s.split(/\bAHORRO FACIL\b/i)[0];
+    s = s.split(/\bPeriododel\b/i)[0];
+    s = s.split(/\bGAT Nominal\b/i)[0];
+    const normalized = s.replace(/(\d{1,3}(?:,\d{3})*\.\d{2})(?=\d)/g, "$1 ");
+    const pair = normalized.match(/((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})\s+((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})/);
+    if (pair) {
+        const move = parseMoneyToken(pair[1]);
+        const saldo = parseMoneyToken(pair[2]);
+        if (move != null) {
             return {
-                move: parseMoneyToken(tail[2]) || saldo,
-                saldo: null,
-                suspicious: true,
+                move,
+                saldo,
+                suspicious: move > 150_000 || (saldo != null && move > saldo * 10),
             };
         }
     }
-    if (pool.length >= 3 && Math.abs(move - saldo) < 0.009) {
-        move = pool[pool.length - 3];
-    }
+    const nums = collectMoney(normalized);
+    if (!nums.length)
+        return null;
     return {
-        move,
-        saldo,
-        suspicious: move > 150_000 || (saldo > 0 && move > saldo * 10),
+        move: nums[0],
+        saldo: nums.length > 1 ? nums[1] : null,
+        suspicious: nums[0] > 100_000,
     };
 }
 function detectDirection(desc) {
+    // Solo el inicio: el PDF a veces pega el siguiente movimiento en el mismo bloque
     const d = desc.replace(/\s+/g, " ").trim();
-    if (/\bPAGO RECIBIDO\b/i.test(d) ||
-        /\bSPEI RECIBIDO\b/i.test(d) ||
-        /\bABONO X DEV\b/i.test(d) ||
-        /^ABONO\b/i.test(d) ||
-        /^DEP[OÓ]SITO\b/i.test(d) ||
-        /\bDEPOSITO CANALES\b/i.test(d)) {
+    const head = d.slice(0, 120);
+    if (/^PAGO INTERBANCARIO A\b/i.test(head) || /^PAGO A TERCEROS\b/i.test(head)) {
+        return "cargo";
+    }
+    if (/^PAGO RECIBIDO\b/i.test(head) ||
+        /^SPEI RECIBIDO\b/i.test(head) ||
+        /^ABONO\b/i.test(head) ||
+        /^DEP[OÓ]SITO\b/i.test(head) ||
+        /^DEPOSITO CANALES\b/i.test(head)) {
         return "abono";
     }
-    if (/\bPAGO INTERBANCARIO A\b/i.test(d) ||
-        /\bPAGO A TERCEROS\b/i.test(d) ||
-        /\bRETIRO\b/i.test(d) ||
-        /\bCOMISI[OÓ]N\b/i.test(d) ||
-        /\bIVA COMISI/i.test(d) ||
-        /\bCARGO\b/i.test(d) ||
-        /\bCOMPRA\b/i.test(d) ||
-        /\bTRASPASO\b/i.test(d) ||
-        /\bPROMOCION\b/i.test(d) ||
-        /^(PAYU|FACEBK|META|SHOPIFY|EBANX|CURSOR|REPLIT|SENDINBLUE|GOOGLE|NETLIFY|OPENAI|GAMMA)/i.test(d)) {
+    if (/^(RETIRO|COMISI[OÓ]N|IVA |CARGO|COMPRA|TRASPASO|PROMOCION|PAYU|FACEBK|META|SHOPIFY|EBANX|CURSOR|REPLIT|SENDINBLUE|GOOGLE|NETLIFY|OPENAI|GAMMA|LKL)/i.test(head)) {
         return "cargo";
     }
     return "cargo";
+}
+/** Parte bloques pegados: "...329.95 PAGO RECIBIDO DE..." */
+function splitMergedBodies(rawBody) {
+    const parts = rawBody.split(/(?<=\d\.\d{2})\s*-?\s*(?=(?:PAGO RECIBIDO|PAGO INTERBANCARIO|PAGO A TERCEROS|ABONO X DEV|DEP[OÓ]SITO |COMISI[OÓ]N |IVA COMISI|COMPRA |CARGO |RETIRO |TRASPASO |PAYU|FACEBK|META |SHOPIFY|EBANX|CURSOR|REPLIT|NETLIFY|OPENAI|GAMMA|SENDINBLUE|LKL\*|GOOGLE))/i);
+    return parts.map((p) => p.trim()).filter((p) => p.length > 3);
 }
 function cleanDescription(body) {
     let desc = softClean(body);
@@ -219,40 +218,50 @@ function extractBanamex(text, rules) {
             continue;
         if (/^SALDO ANTERIOR/i.test(rawBody))
             continue;
-        const money = extractMoveAndSaldo(rawBody);
-        if (!money)
-            continue;
-        const desc = cleanDescription(rawBody);
-        if (desc.length < 3)
-            continue;
-        if (/^SALDO ANTERIOR/i.test(desc))
-            continue;
-        if (/^(Resumen|Saldo promedio|Dep[oó]sitos|Otros cargos|Inter[eé]s Aplicable|PERIODO )/i.test(desc)) {
-            continue;
+        const bodies = splitMergedBodies(rawBody);
+        for (const body of bodies) {
+            if (/^SALDO ANTERIOR/i.test(body))
+                continue;
+            if (/PROMOCI[OÓ]N\s+COMPRAS\s+EXTRANJERO/i.test(body))
+                continue;
+            const money = extractMoveAndSaldo(body);
+            if (!money)
+                continue;
+            const desc = cleanDescription(body);
+            if (desc.length < 3)
+                continue;
+            if (/^(Resumen|Saldo promedio|Dep[oó]sitos|Otros cargos|Inter[eé]s Aplicable|PERIODO |AHORRO )/i.test(desc)) {
+                continue;
+            }
+            // Basura de PDF: "PAGO RECIBIDO DE SU REF." sin ordenante real
+            if (/^PAGO RECIBIDO DE SU REF\.?/i.test(desc.trim()) && desc.length < 40) {
+                continue;
+            }
+            const move = money.move;
+            const direction = detectDirection(desc);
+            const signed = direction === "abono" ? Math.abs(move) : -Math.abs(move);
+            const suspicious = money.suspicious ||
+                Math.abs(signed) > 150_000 ||
+                (direction === "abono" &&
+                    !/^(PAGO RECIBIDO|ABONO|DEP[OÓ]SITO)/i.test(desc.trim()));
+            const date = `${tok.day}/${tok.mon}`;
+            const key = `${date}|${desc.slice(0, 40)}|${signed.toFixed(2)}`;
+            if (seen.has(key))
+                continue;
+            seen.add(key);
+            const cat = (0, categorize_1.categorizeLine)(desc, signed, direction, rules);
+            out.push({
+                id: (0, crypto_1.randomUUID)(),
+                raw: `${tok.day}${monthToken(tok.mon)} ${body.slice(0, 160)}`,
+                date,
+                description: desc,
+                amount: Math.round(signed * 100) / 100,
+                direction,
+                category: cat.category,
+                matchedRuleId: cat.matchedRuleId,
+                needsReview: Boolean(cat.needsReview || suspicious),
+            });
         }
-        const move = money.move;
-        const direction = detectDirection(desc);
-        const signed = direction === "abono" ? Math.abs(move) : -Math.abs(move);
-        const suspicious = money.suspicious ||
-            Math.abs(signed) > 150_000 ||
-            (direction === "abono" && !/\bPAGO RECIBIDO\b|\bABONO\b|\bDEP[OÓ]SITO\b/i.test(desc));
-        const date = `${tok.day}/${tok.mon}`;
-        const key = `${date}|${desc.slice(0, 40)}|${signed.toFixed(2)}`;
-        if (seen.has(key))
-            continue;
-        seen.add(key);
-        const cat = (0, categorize_1.categorizeLine)(desc, signed, direction, rules);
-        out.push({
-            id: (0, crypto_1.randomUUID)(),
-            raw: `${tok.day}${monthToken(tok.mon)} ${rawBody.slice(0, 160)}`,
-            date,
-            description: desc,
-            amount: Math.round(signed * 100) / 100,
-            direction,
-            category: cat.category,
-            matchedRuleId: cat.matchedRuleId,
-            needsReview: Boolean(cat.needsReview || suspicious),
-        });
     }
     return out;
 }

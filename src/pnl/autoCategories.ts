@@ -57,13 +57,71 @@ const STOP = new Set([
   "clabe",
   "efectivo",
   "retiro",
+  "dublin",
+  "paris",
+  "foster",
+  "city",
+  "francisco",
+  "powered",
+  "digital",
+  "goods",
+  "inc",
 ]);
 
 /**
- * Extrae un nombre de comercio / concepto usable como categoría.
- * Ej: "COMPRA FACEBK *ADS 9001/.." → "Facebk"
- *     "PAGO TELCEL DIGITAL" → "Telcel"
+ * Comercio / marca → categoría AMPLIA (no crear categoría por marca).
+ * Netlify/Ebanx/OpenAI → apps (match/etiqueta en reglas).
  */
+const MERCHANT_CATEGORY: Record<string, string> = {
+  netlify: "apps",
+  openai: "apps",
+  cursor: "apps",
+  replit: "apps",
+  ebanx: "apps",
+  shopify: "apps",
+  gamma: "apps",
+  anthropic: "apps",
+  claude: "apps",
+  sendinblue: "apps",
+  brevo: "apps",
+  notion: "apps",
+  figma: "apps",
+  vercel: "apps",
+  github: "apps",
+  facebk: "ads",
+  facebook: "ads",
+  meta: "ads",
+  google: "ads",
+  payu: "ads",
+  ads: "ads",
+  pass: "pass",
+  pase: "pass",
+  telcel: "servicios",
+  cfe: "servicios",
+  uber: "servicios",
+  didi: "servicios",
+};
+
+/** Categorías que SÍ son válidas; el resto de “auto merchant” se remapea */
+const BROAD_CATS = new Set([
+  "ads",
+  "apps",
+  "pass",
+  "nomina",
+  "proveedor",
+  "renta",
+  "servicios",
+  "comisiones",
+  "impuestos",
+  "evento",
+  "pago",
+  "transferencia_persona",
+  "ingreso",
+  "venta",
+  "otro",
+  "revisar",
+]);
+
 export function extractMerchantLabel(description: string): string | null {
   let s = String(description || "")
     .replace(/\*/g, " ")
@@ -76,11 +134,12 @@ export function extractMerchantLabel(description: string): string | null {
   const tokens = s
     .split(" ")
     .map((t) => t.trim())
-    .filter((t) => t.length >= 3 && !STOP.has(t.toLowerCase()) && !/^\d+$/.test(t));
+    .filter(
+      (t) => t.length >= 3 && !STOP.has(t.toLowerCase()) && !/^\d+$/.test(t)
+    );
 
   if (!tokens.length) return null;
 
-  // Preferir token después de COMPRA/PAGO si existe
   const upper = s.toUpperCase();
   const afterPago = upper.match(
     /\b(?:COMPRA|PAGO|CARGO|ABONO)\s+([A-ZÁÉÍÓÚÑ0-9]{3,}(?:\s+[A-ZÁÉÍÓÚÑ0-9]{3,}){0,2})/
@@ -91,9 +150,7 @@ export function extractMerchantLabel(description: string): string | null {
       .filter((t) => !STOP.has(t.toLowerCase()) && t.length >= 3)
       .slice(0, 2)
       .join(" ");
-    if (chunk) {
-      return titleCase(chunk.slice(0, 40));
-    }
+    if (chunk) return titleCase(chunk.slice(0, 40));
   }
 
   return titleCase(tokens.slice(0, 2).join(" ").slice(0, 40));
@@ -107,133 +164,188 @@ function titleCase(s: string): string {
     .join(" ");
 }
 
-function ensureCategory(
-  label: string,
-  kind: CategoryDef["kind"]
-): CategoryDef {
+function ensureBroadCategory(id: string, label: string, kind: CategoryDef["kind"]): void {
   const cats = loadCategories();
-  const id = slugCategory(label);
-  const existing = cats.find((c) => c.id === id);
-  if (existing) {
-    if (!existing.color) {
-      existing.color = colorForCategoryId(existing.id, cats.indexOf(existing));
-      saveCategories(cats);
-    }
-    return existing;
-  }
-  const created: CategoryDef = {
+  if (cats.some((c) => c.id === id)) return;
+  cats.push({
     id,
     label,
     kind,
     color: colorForCategoryId(id, cats.length),
-    builtin: false,
-    autoCreated: true,
-  };
-  cats.push(created);
+    builtin: true,
+  });
   saveCategories(cats);
-  return created;
 }
 
-function ensureRule(match: string, categoryId: string, label: string): void {
+function ensureRule(match: string, categoryId: string, label: string): string {
   const rules = loadRules();
   const m = match.toLowerCase();
-  if (rules.some((r) => r.match === m && r.category === categoryId)) return;
+  const existing = rules.find((r) => r.match === m);
+  if (existing) {
+    if (existing.category !== categoryId && !BROAD_CATS.has(existing.category)) {
+      existing.category = categoryId;
+      saveRules(rules);
+    }
+    return existing.id;
+  }
   const rule: RecurringRule = {
     id: `auto-${randomUUID().slice(0, 8)}`,
     match: m,
     category: categoryId,
     label,
     frecuente: true,
-    notes: "Creada automáticamente desde PDF",
+    notes: "Match automático (comercio → categoría amplia)",
   };
   rules.push(rule);
   saveRules(rules);
+  return rule.id;
+}
+
+function guessBroadCategory(description: string, merchant: string | null): string {
+  const desc = description.toLowerCase();
+  const token = (merchant || "").split(/\s+/)[0].toLowerCase();
+
+  if (MERCHANT_CATEGORY[token]) return MERCHANT_CATEGORY[token];
+  for (const [k, cat] of Object.entries(MERCHANT_CATEGORY)) {
+    if (desc.includes(k)) return cat;
+  }
+
+  // Heurística apps / software
+  if (
+    /\b(dublin|san francisco|digital goods|ai powered|software|saas|app)\b/i.test(
+      description
+    )
+  ) {
+    return "apps";
+  }
+  if (/\b(facebk|facebook|meta|google|ads)\b/i.test(desc)) return "ads";
+  if (/\b(comisi[oó]n|iva comisi)\b/i.test(desc)) return "comisiones";
+  if (/\b(pago interbancario|traspaso|beneficiario)\b/i.test(desc)) {
+    return "transferencia_persona";
+  }
+  if (/\bpago\b/i.test(desc)) return "pago";
+  return "revisar";
+}
+
+function remapNarrowCategory(categoryId: string): string {
+  if (BROAD_CATS.has(categoryId)) return categoryId;
+  // Categorías viejas auto-creadas tipo "netlify_san" → apps
+  const base = categoryId.split("_")[0].toLowerCase();
+  if (MERCHANT_CATEGORY[base]) return MERCHANT_CATEGORY[base];
+  if (
+    /netlify|openai|cursor|replit|ebanx|shopify|gamma|anthropic|sendin|brevo|vercel|github|figma|notion/i.test(
+      categoryId
+    )
+  ) {
+    return "apps";
+  }
+  if (/facebk|facebook|meta|google|payu/i.test(categoryId)) return "ads";
+  return "revisar";
 }
 
 /**
- * Para líneas en "revisar" / sin match: crea categoría (y regla) desde el comercio.
- * También asegura categoría "pago" y colores en todas.
+ * NO crea categoría por comercio.
+ * Crea/actualiza REGLAS (match + etiqueta) apuntando a categoría amplia (apps, ads…).
  */
 export function autoCreateCategoriesFromLines(lines: BankLine[]): {
   lines: BankLine[];
   created: string[];
+  rulesCreated: string[];
 } {
-  // Asegura categoría base "pago"
-  ensureCategory("Pago", "gasto");
+  ensureBroadCategory("apps", "Apps / software", "gasto");
+  ensureBroadCategory("pago", "Pago", "gasto");
 
   const cats = loadCategories();
-  let dirtyCats = false;
+  let dirty = false;
   cats.forEach((c, i) => {
     if (!c.color) {
       c.color = colorForCategoryId(c.id, i);
-      dirtyCats = true;
+      dirty = true;
     }
   });
-  if (dirtyCats) saveCategories(cats);
+  if (dirty) saveCategories(cats);
 
-  const created: string[] = [];
+  // Añadir defaults de apps si faltan reglas conocidas
+  for (const [match, cat] of Object.entries(MERCHANT_CATEGORY)) {
+    ensureRule(match, cat, titleCase(match));
+  }
+
+  const created: string[] = []; // ya no creamos categorías merchant
+  const rulesCreated: string[] = [];
+
   const out = lines.map((line) => {
-    // Abonos reales → ingreso (nunca inventar abono desde un cargo)
     if (line.direction === "abono" && line.amount > 0) {
-      if (line.category === "revisar" || !line.category) {
-        return { ...line, category: "ingreso", needsReview: false };
-      }
-      return line;
+      return {
+        ...line,
+        category: line.category === "venta" ? "venta" : "ingreso",
+        needsReview: false,
+      };
     }
 
-    // Si el parser dijo cargo pero el monto quedó positivo, forzar gasto
     if (line.direction === "cargo" && line.amount > 0) {
       line = { ...line, amount: -Math.abs(line.amount) };
     }
 
-    // Ya tiene categoría real de gasto
-    if (
-      line.category &&
-      line.category !== "revisar" &&
-      line.category !== "otro"
-    ) {
-      const exists = loadCategories().some((c) => c.id === line.category);
-      if (!exists) {
-        const label = titleCase(line.category.replace(/_/g, " "));
-        const cat = ensureCategory(label, "gasto");
-        if (!created.includes(cat.label)) created.push(cat.label);
-        return { ...line, category: cat.id };
-      }
-      return line;
-    }
+    // Remapear categorías estrechas viejas (netlify, ebanx…)
+    let category = remapNarrowCategory(line.category || "revisar");
 
-    // Solo auto-crear si hay comercio claro y el monto no es sospechoso
-    if (Math.abs(line.amount) > 150_000) {
-      return { ...line, category: "revisar", needsReview: true };
+    if (category !== "revisar" && BROAD_CATS.has(category) && line.matchedRuleId) {
+      return { ...line, category };
     }
 
     const merchant = extractMerchantLabel(line.description);
-    if (!merchant) {
-      if (/\bpago\b/i.test(line.description) && line.direction === "cargo") {
-        return { ...line, category: "pago", needsReview: true };
+    const broad = guessBroadCategory(line.description, merchant);
+    category = broad;
+
+    if (merchant) {
+      const matchToken = merchant.split(/\s+/)[0].toLowerCase();
+      const genericMatch =
+        /^(instrucciones|interbancario|terceros|penalizacion|aut|para|suc|ref|mismo|dia|transferencia)$/i;
+      if (
+        matchToken.length >= 4 &&
+        !STOP.has(matchToken) &&
+        !genericMatch.test(matchToken)
+      ) {
+        const label = titleCase(matchToken); // "Netlify", no "Netlify San"
+        const ruleId = ensureRule(matchToken, broad, label);
+        if (!rulesCreated.includes(label)) rulesCreated.push(label);
+        return {
+          ...line,
+          category: broad,
+          matchedRuleId: line.matchedRuleId || ruleId,
+          needsReview: broad === "revisar" || Math.abs(line.amount) >= 20_000,
+        };
       }
-      return { ...line, needsReview: true };
     }
-
-    // Evitar categorías basura de 1 token genérico
-    const bad = /^(pago|cargo|compra|mexico|dublin|paris|suc)$/i;
-    if (bad.test(merchant)) {
-      return { ...line, category: "pago", needsReview: true };
-    }
-
-    const cat = ensureCategory(merchant, "gasto");
-    const matchToken = merchant.split(/\s+/)[0].toLowerCase();
-    if (matchToken.length >= 4) ensureRule(matchToken, cat.id, merchant);
-    if (!created.includes(cat.label)) created.push(cat.label);
 
     return {
       ...line,
-      category: cat.id,
-      // Deja en revisar montos altos para doble check humano
-      needsReview: Math.abs(line.amount) >= 20_000,
-      matchedRuleId: line.matchedRuleId,
+      category,
+      needsReview: category === "revisar" || Math.abs(line.amount) >= 20_000,
     };
   });
 
-  return { lines: out, created };
+  return { lines: out, created, rulesCreated };
+}
+
+/** Limpia del catálogo categorías auto-creadas que en realidad son marcas */
+export function pruneMerchantCategories(): string[] {
+  const cats = loadCategories();
+  const removed: string[] = [];
+  const cleaned = cats.filter((c) => {
+    if (BROAD_CATS.has(c.id) || c.builtin) return true;
+    if (c.autoCreated) {
+      removed.push(c.id);
+      return false;
+    }
+    // Marca colada como categoría (netlify, ebanx…)
+    const base = c.id.split("_")[0].toLowerCase();
+    if (MERCHANT_CATEGORY[base]) {
+      removed.push(c.id);
+      return false;
+    }
+    return true;
+  });
+  if (cleaned.length !== cats.length) saveCategories(cleaned);
+  return [...new Set(removed)];
 }

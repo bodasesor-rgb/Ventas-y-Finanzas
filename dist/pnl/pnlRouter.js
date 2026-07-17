@@ -15,6 +15,7 @@ const period_1 = require("./period");
 const statementFiles_1 = require("./statementFiles");
 const autoCategories_1 = require("./autoCategories");
 const categoryColors_1 = require("./categoryColors");
+const statementSummary_1 = require("./statementSummary");
 const store_1 = require("./store");
 const uploadDir = path_1.default.join(process.cwd(), "uploads");
 if (!fs_1.default.existsSync(uploadDir))
@@ -207,11 +208,14 @@ exports.pnlRouter.post("/api/pnl/upload", upload.single("statement"), async (req
             return;
         }
         const buffer = fs_1.default.readFileSync(req.file.path);
+        (0, autoCategories_1.pruneMerchantCategories)();
         const rules = (0, store_1.loadRules)();
         const { text, lines: parsed } = await (0, parseStatement_1.parsePdfToLines)(buffer, rules);
-        const { lines, created } = (0, autoCategories_1.autoCreateCategoriesFromLines)(parsed);
+        const { lines, rulesCreated } = (0, autoCategories_1.autoCreateCategoriesFromLines)(parsed);
         const summaryByCategory = (0, parseStatement_1.summarizeByCategory)(lines);
         const totals = (0, parseStatement_1.summarizeTotals)(lines);
+        const oficial = (0, statementSummary_1.extractStatementOfficialTotals)(text);
+        const reconciliation = (0, statementSummary_1.reconcileTotals)(oficial, totals);
         const period = (0, period_1.detectPeriodFromText)(text);
         const saved = (0, statementFiles_1.saveStatementPdf)(req.file.path, period);
         const mid = Math.max(0, Math.floor(text.length / 2) - 400);
@@ -233,20 +237,23 @@ exports.pnlRouter.post("/api/pnl/upload", upload.single("statement"), async (req
             lines,
             summaryByCategory,
             totals,
+            reconciliation,
         };
         (0, store_1.addRun)(run);
         res.json({
             ok: true,
             run: runPublic(run),
             categories: (0, store_1.loadCategories)(),
+            rules: (0, store_1.loadRules)(),
             stats: {
                 lines: lines.length,
                 needsReview: lines.filter((l) => l.needsReview).length,
                 matched: lines.filter((l) => l.matchedRuleId).length,
                 period: period.label,
                 savedAs: saved.storedName,
-                categoriesCreated: created,
+                rulesCreated,
                 totals,
+                reconciliation,
             },
         });
     }
@@ -274,13 +281,16 @@ exports.pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
         });
         return;
     }
+    (0, autoCategories_1.pruneMerchantCategories)();
     const rules = (0, store_1.loadRules)();
     const parsed = (0, parseStatement_1.extractLinesFromText)(text, rules);
-    const { lines, created } = (0, autoCategories_1.autoCreateCategoriesFromLines)(parsed);
+    const { lines, rulesCreated } = (0, autoCategories_1.autoCreateCategoriesFromLines)(parsed);
     const period = (0, period_1.detectPeriodFromText)(text);
     run.lines = lines;
     run.summaryByCategory = (0, parseStatement_1.summarizeByCategory)(lines);
     run.totals = (0, parseStatement_1.summarizeTotals)(lines);
+    const oficial = (0, statementSummary_1.extractStatementOfficialTotals)(text);
+    run.reconciliation = (0, statementSummary_1.reconcileTotals)(oficial, run.totals);
     run.periodKey = period.key;
     run.periodLabel = period.label;
     runs[idx] = run;
@@ -289,14 +299,16 @@ exports.pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
         ok: true,
         run: runPublic(run),
         categories: (0, store_1.loadCategories)(),
+        rules: (0, store_1.loadRules)(),
         stats: {
             lines: lines.length,
             needsReview: lines.filter((l) => l.needsReview).length,
             matched: lines.filter((l) => l.matchedRuleId).length,
             textLength: text.length,
             period: period.label,
-            categoriesCreated: created,
+            rulesCreated,
             totals: run.totals,
+            reconciliation: run.reconciliation,
         },
     });
 });

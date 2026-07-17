@@ -29,6 +29,7 @@ const BUILTIN_COLORS = {
     proveedor: "#c2410c",
     renta: "#0e7490",
     servicios: "#0369a1",
+    apps: "#6d28d9",
     comisiones: "#334155",
     impuestos: "#9f1239",
     evento: "#9333ea",

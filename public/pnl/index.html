@@ -5,21 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <title>Bodasesor — P&L Banco</title>
-  <link rel="stylesheet" href="/pnl/styles.css?v=20260717f" />
+  <link rel="stylesheet" href="/pnl/styles.css?v=20260717g" />
 </head>
 <body>
   <div class="version-banner" id="versionBanner">
-    UI v2026-07-17f — Montos $ · totales · parser Banamex corregido
+    UI v2026-07-17g — Apps (no marcas) · cuadre con totales del PDF
   </div>
 
   <header class="top">
     <div>
       <p class="brand">Bodasesor / Capybara</p>
       <h1>P&L desde estados de cuenta</h1>
-      <p class="sub">Montos con $. Totales de ingresos y gastos. La palomita “Revisar” marca movimientos dudosos para que los corrijas.</p>
+      <p class="sub">Netlify/OpenAI/Ebanx = etiqueta (regla), categoría = Apps. Los totales deben cuadrar con Depósitos y Otros cargos del estado.</p>
     </div>
     <div class="top-links">
-      <span class="version-pill">v2026-07-17f</span>
+      <span class="version-pill">v2026-07-17g</span>
       <a class="link" href="/health">API health</a>
     </div>
   </header>
@@ -91,18 +91,22 @@
       <p id="currentRunMeta" class="muted"></p>
       <div id="totalsBar" class="totals-bar" hidden>
         <div class="total-card income-total">
-          <span>Total ingresos</span>
+          <span>Ingresos parseados</span>
           <strong id="totalIngresos">$0.00</strong>
+          <small id="oficialIngresos" class="total-sub"></small>
         </div>
         <div class="total-card expense-total">
-          <span>Total gastos</span>
+          <span>Gastos parseados</span>
           <strong id="totalGastos">$0.00</strong>
+          <small id="oficialGastos" class="total-sub"></small>
         </div>
         <div class="total-card net-total">
-          <span>Neto</span>
+          <span>Neto / cuadre</span>
           <strong id="totalNeto">$0.00</strong>
+          <small id="reconcileStatus" class="total-sub"></small>
         </div>
       </div>
+      <p id="reconcileMsg" class="reconcile-msg" hidden></p>
       <p class="muted">Edita monto o descripción si algo se ve raro (usa $ al escribir, ej. <code>-1,500.00</code>). Enter/Tab guarda. La columna <strong>Revisar</strong> = “este movimiento hay que checarlo”.</p>
       <div id="summary" class="summary"></div>
       <div class="table-wrap">
@@ -124,6 +128,6 @@
     </section>
   </main>
 
-  <script src="/pnl/app.js?v=20260717f"></script>
+  <script src="/pnl/app.js?v=20260717g"></script>
 </body>
 </html>

@@ -67,4 +67,23 @@ export interface StatementRun {
     gastos: number;
     neto: number;
   };
+  /** Totales del resumen del PDF + cruce con lo parseado */
+  reconciliation?: {
+    oficial: {
+      depositos: number | null;
+      retirosEfectivo: number | null;
+      otrosCargos: number | null;
+      ingresosOficiales: number | null;
+      gastosOficiales: number | null;
+      saldoAnterior: number | null;
+      saldoCorte: number | null;
+    };
+    parseado: { ingresos: number; gastos: number; neto: number };
+    diffIngresos: number | null;
+    diffGastos: number | null;
+    matchIngresos: boolean;
+    matchGastos: boolean;
+    matchCompleto: boolean;
+    tolerancia: number;
+  };
 }

@@ -56,15 +56,76 @@ function renderTotals(run) {
   const bar = document.getElementById("totalsBar");
   if (!bar) return;
   const t = run.totals || computeTotals(run.lines);
+  const rec = run.reconciliation;
   bar.hidden = false;
   const ing = document.getElementById("totalIngresos");
   const gas = document.getElementById("totalGastos");
   const net = document.getElementById("totalNeto");
+  const oIng = document.getElementById("oficialIngresos");
+  const oGas = document.getElementById("oficialGastos");
+  const status = document.getElementById("reconcileStatus");
+  const msg = document.getElementById("reconcileMsg");
+
   if (ing) ing.textContent = money(t.ingresos);
   if (gas) gas.textContent = money(t.gastos);
   if (net) {
     net.textContent = money(t.neto);
     net.style.color = t.neto >= 0 ? "#0b6b3a" : "#9a3412";
+  }
+
+  const ingCard = ing?.closest(".total-card");
+  const gasCard = gas?.closest(".total-card");
+  ingCard?.classList.remove("ok-match", "bad-match");
+  gasCard?.classList.remove("ok-match", "bad-match");
+
+  if (rec?.oficial) {
+    if (oIng) {
+      oIng.textContent =
+        rec.oficial.ingresosOficiales != null
+          ? `Estado: ${money(rec.oficial.ingresosOficiales)} (Depósitos)${
+              rec.diffIngresos != null
+                ? ` · diff ${money(rec.diffIngresos)}`
+                : ""
+            }`
+          : "Estado: (sin leer Depósitos)";
+    }
+    if (oGas) {
+      oGas.textContent =
+        rec.oficial.gastosOficiales != null
+          ? `Estado: ${money(rec.oficial.gastosOficiales)} (Otros cargos)${
+              rec.diffGastos != null ? ` · diff ${money(rec.diffGastos)}` : ""
+            }`
+          : "Estado: (sin leer Otros cargos)";
+    }
+    if (ingCard) {
+      ingCard.classList.add(rec.matchIngresos ? "ok-match" : "bad-match");
+    }
+    if (gasCard) {
+      gasCard.classList.add(rec.matchGastos ? "ok-match" : "bad-match");
+    }
+    if (status) {
+      status.textContent = rec.matchCompleto
+        ? "✓ Cuadra con el PDF"
+        : "✗ No cuadra — revisa movimientos";
+      status.style.color = rec.matchCompleto ? "#0b6b3a" : "#9a3412";
+    }
+    if (msg) {
+      msg.hidden = false;
+      msg.className =
+        "reconcile-msg " + (rec.matchCompleto ? "ok" : "bad");
+      msg.textContent = rec.matchCompleto
+        ? "Los totales parseados coinciden con Depósitos y Otros cargos del estado de cuenta."
+        : `Falta cuadrar con el PDF. Depósitos estado ${money(
+            rec.oficial.ingresosOficiales || 0
+          )} vs parseado ${money(t.ingresos)}. Cargos estado ${money(
+            rec.oficial.gastosOficiales || 0
+          )} vs parseado ${money(t.gastos)}. Corrige montos marcados en Revisar.`;
+    }
+  } else {
+    if (oIng) oIng.textContent = "";
+    if (oGas) oGas.textContent = "";
+    if (status) status.textContent = "";
+    if (msg) msg.hidden = true;
   }
 }
 
@@ -669,20 +730,19 @@ async function init() {
       if (!res.ok || !data.ok) throw new Error(data.error || "Error upload");
       const period = data.stats.period || data.run.periodLabel || "";
       const savedAs = data.stats.savedAs || data.run.storedName || "";
-      const created = (data.stats.categoriesCreated || []).join(", ");
+      const rulesNew = (data.stats.rulesCreated || []).join(", ");
+      const rec = data.stats.reconciliation;
+      const quadra = rec?.matchCompleto ? " · ✓ cuadra con PDF" : " · ✗ no cuadra aún";
       status.textContent = `OK: ${data.stats.lines} movs · mes ${period} · ${savedAs} · ${data.stats.needsReview} a revisar${
-        created ? ` · categorías nuevas: ${created}` : ""
-      }`;
+        rulesNew ? ` · reglas/match: ${rulesNew}` : ""
+      }${quadra}`;
       if (data.categories) {
         categories = data.categories;
         renderCategories();
+      }
+      if (data.rules) {
+        rules = data.rules;
         renderRules();
-      } else {
-        try {
-          const catData = await api("/api/pnl/categories");
-          categories = catData.categories || categories;
-          renderCategories();
-        } catch (_) {}
       }
       renderRun(data.run);
       await refreshLibrary();
@@ -774,13 +834,19 @@ async function init() {
         const data = await api(`/api/pnl/runs/${currentRun.id}/reparse`, {
           method: "POST",
         });
-        const created = (data.stats.categoriesCreated || []).join(", ");
+        const rulesNew = (data.stats.rulesCreated || []).join(", ");
+        const rec = data.stats.reconciliation;
         status.textContent = `Reparse OK: ${data.stats.lines} movs · mes ${
           data.stats.period || ""
-        }${created ? ` · nuevas: ${created}` : ""}`;
+        }${rulesNew ? ` · match: ${rulesNew}` : ""}${
+          rec?.matchCompleto ? " · ✓ cuadra" : " · ✗ no cuadra"
+        }`;
         if (data.categories) {
           categories = data.categories;
           renderCategories();
+        }
+        if (data.rules) {
+          rules = data.rules;
           renderRules();
         }
         renderRun(data.run);
