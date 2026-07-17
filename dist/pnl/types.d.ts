@@ -1,0 +1,31 @@
+export type PnlCategory = "ads" | "pass" | "nomina" | "proveedor" | "renta" | "servicios" | "transferencia_persona" | "ingreso" | "otro" | "revisar";
+export interface RecurringRule {
+    id: string;
+    /** Texto a buscar en la descripción del movimiento (minúsculas) */
+    match: string;
+    category: PnlCategory;
+    label: string;
+    /** Si true, se trata como gasto recurrente fijo */
+    frecuente: boolean;
+    notes?: string;
+}
+export interface BankLine {
+    id: string;
+    raw: string;
+    date?: string;
+    description: string;
+    amount: number;
+    /** cargo = negativo/gasto, abono = ingreso */
+    direction: "cargo" | "abono" | "unknown";
+    category: PnlCategory;
+    matchedRuleId?: string;
+    needsReview: boolean;
+}
+export interface StatementRun {
+    id: string;
+    filename: string;
+    uploadedAt: string;
+    textPreview: string;
+    lines: BankLine[];
+    summaryByCategory: Record<string, number>;
+}
