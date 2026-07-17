@@ -85,7 +85,17 @@ ventasRouter.post(
       if (appsScriptUrl()) {
         sheetWrite.attempted = true;
         try {
-          const result = await writeFilaToAppsScript(fila.kommoDealId, values);
+          // Solo escribe Eventos YYYY. Metricas / P&L = fórmulas en Sheet.
+          const sheetName = `Eventos ${
+            fila.fechaDeCierre
+              ? fila.fechaDeCierre.slice(0, 4)
+              : String(new Date().getUTCFullYear())
+          }`;
+          const result = await writeFilaToAppsScript(
+            fila.kommoDealId,
+            values,
+            sheetName
+          );
           sheetWrite = {
             attempted: true,
             ok: true,

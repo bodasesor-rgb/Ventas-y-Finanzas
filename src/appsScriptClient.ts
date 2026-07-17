@@ -13,7 +13,8 @@ export interface AppsScriptWriteResult {
  */
 export async function writeFilaToAppsScript(
   dealId: string,
-  values: string[]
+  values: string[],
+  sheetName = "Eventos 2026"
 ): Promise<AppsScriptWriteResult> {
   // Hostinger usa URL_BODASESOR_DIRECCION_SHEETS; APPS_SCRIPT_VENTAS_URL queda como alias
   const url = (
@@ -35,7 +36,7 @@ export async function writeFilaToAppsScript(
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ dealId, values }),
+    body: JSON.stringify({ dealId, values, sheetName }),
     redirect: "follow",
   });
 
