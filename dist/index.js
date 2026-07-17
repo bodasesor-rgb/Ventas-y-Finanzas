@@ -44,5 +44,14 @@ const scriptUrl = (process.env.URL_BODASESOR_DIRECCION_SHEETS ||
 const phase = scriptUrl ? 2 : 1;
 app.listen(PORT, "0.0.0.0", () => {
     console.log(`[ventas+pnl] 0.0.0.0:${PORT} | ventas phase=${phase} | UI=/pnl/`);
+    // Backup: si Kommo no dispara el webhook, igual subimos cierres al Sheet
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { startClosedDealsPoller } = require("./pollClosedDeals");
+        startClosedDealsPoller(60_000);
+    }
+    catch (err) {
+        console.error("[boot] poller de cierres NO arrancó", err);
+    }
 });
 //# sourceMappingURL=index.js.map

@@ -19,13 +19,17 @@
 - Start: `npm start`
 - Env: `KOMMO_BASE_URL`, `KOMMO_ACCESS_TOKEN`, `URL_BODASESOR_DIRECCION_SHEETS`
 
-## Sheet (una sola vez)
+## Sheet (Apps Script)
 
-1. Pegar `apps-script/Codigo.gs` (v4)
-2. Ejecutar **`setupAll_`** en el editor → enlaza Eventos + Metricas + P&L (fórmulas)
-3. Nueva versión App web
+1. Pegar `apps-script/Codigo.gs` (**v5**: inserta en la 1ª fila vacía de Cliente, no al final)
+2. Ejecutar **`setupAll_`** solo la primera vez
+3. **Implementar → Administrar implementaciones → Editar (lápiz) → Nueva versión → Implementar**  
+   (misma URL `/exec`; si creas otra implementación, hay que actualizar Hostinger)
 
-No hace falta volver a pegar el script salvo que cambiemos lógica.
+### Cierres automáticos
+- Webhook: `POST /webhooks/kommo/deal-won`
+- **Poll cada 60s** (backup): si Kommo no manda el webhook, igual sincroniza deals con `closed_at` o status ganado (142)
+- Manual: `GET /api/ventas/poll-now` o `GET /api/ventas/sync/:dealId`
 
 ## P&L PDF — alcance actual (MVP)
 

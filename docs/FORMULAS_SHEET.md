@@ -2,12 +2,11 @@
 
 ## Cómo aplicar (recomendado)
 
-1. Pega el Apps Script actual (`apps-script/Codigo.gs`, VERSION `2026-07-17-v4`).
+1. Pega el Apps Script actual (`apps-script/Codigo.gs`, VERSION `2026-07-17-v5`).
 2. Guarda.
-3. En el editor: selecciona la función **`setupAll_`** → ▶ Ejecutar → autoriza.
-4. Debe salir el alert “Setup OK”.
-5. **Implementar → Nueva versión** de la App web (para que `doPost` quede en v4).
-6. Confirma que Hostinger sigue con la URL `/exec` nueva.
+3. En el editor: selecciona la función **`setupAll_`** → ▶ Ejecutar → autoriza (solo 1ª vez).
+4. **Implementar → Administrar implementaciones → Editar → Nueva versión → Implementar** (misma URL `/exec`).
+5. Confirma en un sync que `version` sea `2026-07-17-v5`.
 
 Eso hace:
 

@@ -4,6 +4,7 @@ exports.ventasRouter = void 0;
 const express_1 = require("express");
 const kommoApi_1 = require("./kommoApi");
 const mapDealToFila_1 = require("./mapDealToFila");
+const pollClosedDeals_1 = require("./pollClosedDeals");
 const ventasSync_1 = require("./ventasSync");
 exports.ventasRouter = (0, express_1.Router)();
 function appsScriptUrl() {
@@ -22,14 +23,22 @@ const PHASE = () => (appsScriptUrl() ? 2 : 1);
  */
 exports.ventasRouter.post("/webhooks/kommo/deal-won", (req, res) => {
     const body = (req.body || {});
+    console.log("[ventas] webhook hit", {
+        contentType: req.headers["content-type"],
+        keys: Object.keys(body || {}),
+        leadKeys: body?.leads ? Object.keys(body.leads) : [],
+    });
     const leadId = (0, kommoApi_1.extractLeadIdFromWebhook)(body);
     if (!leadId) {
         console.warn("[ventas] Webhook sin lead id", {
             keys: Object.keys(body || {}),
             contentType: req.headers["content-type"],
+            bodyPreview: JSON.stringify(body).slice(0, 500),
         });
-        res.status(400).json({
+        // 200 para que Kommo no desactive el webhook por 4xx repetidos
+        res.status(200).json({
             ok: false,
+            accepted: false,
             phase: PHASE(),
             error: "No se encontró lead id en el webhook",
         });
@@ -112,6 +121,35 @@ exports.ventasRouter.get("/api/ventas/lead/:dealId", async (req, res) => {
         });
     }
 });
+/** Estado del poller automático (backup del webhook). */
+exports.ventasRouter.get("/api/ventas/poll", (_req, res) => {
+    res.status(200).json({ ok: true, poll: (0, pollClosedDeals_1.getPollStatus)() });
+});
+/** Fuerza una pasada del poller ahora. */
+exports.ventasRouter.post("/api/ventas/poll", async (_req, res) => {
+    try {
+        const result = await (0, pollClosedDeals_1.pollClosedDealsOnce)(40);
+        res.status(200).json({ ok: true, result });
+    }
+    catch (err) {
+        res.status(500).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+});
+exports.ventasRouter.get("/api/ventas/poll-now", async (_req, res) => {
+    try {
+        const result = await (0, pollClosedDeals_1.pollClosedDealsOnce)(40);
+        res.status(200).json({ ok: true, result });
+    }
+    catch (err) {
+        res.status(500).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+});
 /** Últimos deals tocados en Kommo (para elegir cuál sincronizar). */
 exports.ventasRouter.get("/api/ventas/recent", async (req, res) => {
     const limit = Number(req.query.limit) || 15;
@@ -163,6 +201,10 @@ exports.ventasRouter.get("/health", (_req, res) => {
         },
         lastAccepted: (0, ventasSync_1.getLastWebhookAccepted)(),
         lastSyncDealId: (0, ventasSync_1.getLastVentasSync)()?.dealId ?? null,
+        poll: {
+            lastPollAt: (0, pollClosedDeals_1.getPollStatus)().lastPollAt,
+            lastSynced: (0, pollClosedDeals_1.getPollStatus)().lastResult?.synced || [],
+        },
     });
 });
 exports.ventasRouter.get("/health/kommo", async (_req, res) => {

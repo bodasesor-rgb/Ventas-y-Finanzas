@@ -7,6 +7,10 @@ import {
 import { mapDealToFilaVentas } from "./mapDealToFila";
 import type { KommoWebhookBody } from "./types";
 import {
+  getPollStatus,
+  pollClosedDealsOnce,
+} from "./pollClosedDeals";
+import {
   getLastVentasSync,
   getLastWebhookAccepted,
   rememberWebhookAccepted,
@@ -37,15 +41,23 @@ ventasRouter.post(
   "/webhooks/kommo/deal-won",
   (req: Request, res: Response) => {
     const body = (req.body || {}) as KommoWebhookBody;
+    console.log("[ventas] webhook hit", {
+      contentType: req.headers["content-type"],
+      keys: Object.keys(body || {}),
+      leadKeys: body?.leads ? Object.keys(body.leads) : [],
+    });
     const leadId = extractLeadIdFromWebhook(body);
 
     if (!leadId) {
       console.warn("[ventas] Webhook sin lead id", {
         keys: Object.keys(body || {}),
         contentType: req.headers["content-type"],
+        bodyPreview: JSON.stringify(body).slice(0, 500),
       });
-      res.status(400).json({
+      // 200 para que Kommo no desactive el webhook por 4xx repetidos
+      res.status(200).json({
         ok: false,
+        accepted: false,
         phase: PHASE(),
         error: "No se encontró lead id en el webhook",
       });
@@ -136,6 +148,36 @@ ventasRouter.get("/api/ventas/lead/:dealId", async (req, res) => {
   }
 });
 
+/** Estado del poller automático (backup del webhook). */
+ventasRouter.get("/api/ventas/poll", (_req, res) => {
+  res.status(200).json({ ok: true, poll: getPollStatus() });
+});
+
+/** Fuerza una pasada del poller ahora. */
+ventasRouter.post("/api/ventas/poll", async (_req, res) => {
+  try {
+    const result = await pollClosedDealsOnce(40);
+    res.status(200).json({ ok: true, result });
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+ventasRouter.get("/api/ventas/poll-now", async (_req, res) => {
+  try {
+    const result = await pollClosedDealsOnce(40);
+    res.status(200).json({ ok: true, result });
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
 /** Últimos deals tocados en Kommo (para elegir cuál sincronizar). */
 ventasRouter.get("/api/ventas/recent", async (req, res) => {
   const limit = Number(req.query.limit) || 15;
@@ -187,6 +229,10 @@ ventasRouter.get("/health", (_req, res) => {
     },
     lastAccepted: getLastWebhookAccepted(),
     lastSyncDealId: getLastVentasSync()?.dealId ?? null,
+    poll: {
+      lastPollAt: getPollStatus().lastPollAt,
+      lastSynced: getPollStatus().lastResult?.synced || [],
+    },
   });
 });
 

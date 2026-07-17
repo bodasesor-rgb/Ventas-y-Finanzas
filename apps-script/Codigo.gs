@@ -1,16 +1,17 @@
 /**
  * ============================================================
  * Apps Script — Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-07-17-v4
+ * VERSION: 2026-07-17-v5
  * ============================================================
  * doPost  → append/update Eventos YYYY (Kommo)
  * setupAll_ → EJECUTAR UNA VEZ desde el editor para enlazar
  *             fórmulas Eventos + tabla mensual + Metricas + P&L
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-07-17-v4';
+var SCRIPT_VERSION = '2026-07-17-v5';
 var DEFAULT_SHEET_NAME = 'Eventos 2026';
 var DEAL_ID_COL = 20; // T
+var CLIENTE_COL = 1; // A
 var METRICAS_SHEET = 'Metricas 2026';
 var PL_SHEET = 'P&L 2026';
 
@@ -20,6 +21,45 @@ function isWritableSheet_(name) {
 
 // A–J + P–R + T. No toca K,L,M,N,O,S
 var WRITE_COLS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 16, 17, 18, 20];
+
+/**
+ * Primera fila vacía en columna Cliente (A), desde la fila 2.
+ * Así el nuevo cierre va junto al bloque de clientes, no al final
+ * del Sheet (getLastRow pega abajo si hay basura en la fila 1000).
+ */
+function findFirstEmptyClientRow_(sheet) {
+  var lastRow = Math.max(sheet.getLastRow(), 1);
+  var scanTo = Math.max(lastRow, 2);
+  // Mirar un poco más abajo por si hay huecos
+  scanTo = Math.max(scanTo, 2);
+  var values = sheet.getRange(2, CLIENTE_COL, scanTo, CLIENTE_COL).getValues();
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][0]).trim() === '') {
+      return i + 2;
+    }
+  }
+  return scanTo + 1;
+}
+
+function findRowByDealId_(sheet, dealId) {
+  var lastRow = Math.max(sheet.getLastRow(), 1);
+  if (lastRow < 2) return -1;
+  var ids = sheet.getRange(2, DEAL_ID_COL, lastRow, DEAL_ID_COL).getValues();
+  for (var i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]).trim() === dealId) {
+      return i + 2;
+    }
+  }
+  return -1;
+}
+
+function writeRowValues_(sheet, rowIndex, values) {
+  for (var c = 0; c < WRITE_COLS.length; c++) {
+    var col = WRITE_COLS[c];
+    sheet.getRange(rowIndex, col).setValue(values[col - 1]);
+  }
+  applyCalcFormulas_(sheet, rowIndex);
+}
 
 function doPost(e) {
   try {
@@ -76,44 +116,24 @@ function doPost(e) {
       });
     }
 
-    var lastRow = Math.max(sheet.getLastRow(), 1);
-    var ids =
-      lastRow > 1
-        ? sheet.getRange(2, DEAL_ID_COL, lastRow, DEAL_ID_COL).getValues()
-        : [];
-
-    var rowIndex = -1;
-    for (var i = 0; i < ids.length; i++) {
-      if (String(ids[i][0]).trim() === dealId) {
-        rowIndex = i + 2;
-        break;
-      }
-    }
+    var rowIndex = findRowByDealId_(sheet, dealId);
+    var action;
 
     if (rowIndex === -1) {
-      rowIndex = sheet.getLastRow() + 1;
+      rowIndex = findFirstEmptyClientRow_(sheet);
+      // Fila nueva completa A–T (luego fórmulas M/N/O)
       sheet.getRange(rowIndex, 1, 1, DEAL_ID_COL).setValues([values]);
       applyCalcFormulas_(sheet, rowIndex);
-      return json_({
-        ok: true,
-        version: SCRIPT_VERSION,
-        action: 'appended',
-        row: rowIndex,
-        dealId: dealId,
-        sheetName: sheetName,
-      });
+      action = 'appended';
+    } else {
+      writeRowValues_(sheet, rowIndex, values);
+      action = 'updated';
     }
-
-    for (var c = 0; c < WRITE_COLS.length; c++) {
-      var col = WRITE_COLS[c];
-      sheet.getRange(rowIndex, col).setValue(values[col - 1]);
-    }
-    applyCalcFormulas_(sheet, rowIndex);
 
     return json_({
       ok: true,
       version: SCRIPT_VERSION,
-      action: 'updated',
+      action: action,
       row: rowIndex,
       dealId: dealId,
       sheetName: sheetName,
