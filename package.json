@@ -1,7 +1,7 @@
 {
   "name": "ventas-y-finanzas",
   "version": "1.0.0",
-  "description": "Módulo de ventas: webhook Kommo → fila en Sheet de ventas",
+  "description": "Ventas Kommo→Sheet + P&L banco (PDF/reglas) Bodasesor",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
