@@ -14,6 +14,7 @@ const CATEGORIES = [
 let rules = [];
 let currentRun = null;
 let selectedFile = null;
+let runsCache = [];
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
@@ -36,6 +37,26 @@ function escapeAttr(s) {
     .replace(/&/g, "&amp;")
     .replace(/"/g, "&quot;")
     .replace(/</g, "&lt;");
+}
+
+function escapeHtml(s) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function fmtDate(iso) {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleString("es-MX", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+  } catch {
+    return iso;
+  }
 }
 
 function renderRules() {
@@ -78,8 +99,109 @@ function renderRules() {
   });
 }
 
+function renderLibrary(months) {
+  const root = document.getElementById("library");
+  if (!root) return;
+  if (!months || !months.length) {
+    root.innerHTML =
+      '<p class="muted">Aún no hay PDFs guardados. Arrastra un estado de cuenta.</p>';
+    return;
+  }
+
+  root.innerHTML = months
+    .map((g) => {
+      const stmts = (g.statements || [])
+        .map((r) => {
+          const title = escapeHtml(r.storedName || r.filename || r.id);
+          const when = escapeHtml(fmtDate(r.uploadedAt));
+          const count = (r.lines && r.lines.length) || 0;
+          const hasPdf = Boolean(r.storedRelativePath);
+          return `
+            <div class="stmt-row" data-run-id="${escapeAttr(r.id)}">
+              <div class="stmt-meta">
+                <strong>${title}</strong>
+                <span>${when} · ${count} movs · ${escapeHtml(r.filename || "")}</span>
+              </div>
+              <button type="button" data-act="open">Abrir movimientos</button>
+              ${
+                hasPdf
+                  ? `<button type="button" class="secondary" data-act="pdf">Ver PDF</button>
+                     <a class="btn secondary" href="/api/pnl/runs/${encodeURIComponent(
+                       r.id
+                     )}/pdf" target="_blank" rel="noopener">Nueva pestaña</a>`
+                  : `<span class="muted">sin PDF en disco</span>`
+              }
+            </div>
+          `;
+        })
+        .join("");
+      return `
+        <article class="month-block">
+          <h3>${escapeHtml(g.periodLabel || g.periodKey)}
+            <span class="month-count">· ${(g.statements || []).length} PDF</span>
+          </h3>
+          ${stmts}
+        </article>
+      `;
+    })
+    .join("");
+
+  root.querySelectorAll(".stmt-row").forEach((el) => {
+    const runId = el.getAttribute("data-run-id");
+    el.querySelector('[data-act="open"]')?.addEventListener("click", async () => {
+      try {
+        const data = await api(`/api/pnl/runs/${encodeURIComponent(runId)}`);
+        renderRun(data.run);
+        document
+          .getElementById("linesTable")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      } catch (e) {
+        alert(e.message);
+      }
+    });
+    el.querySelector('[data-act="pdf"]')?.addEventListener("click", () => {
+      openPdfViewer(runId, el.querySelector("strong")?.textContent || "PDF");
+    });
+  });
+}
+
+function openPdfViewer(runId, title) {
+  const frame = document.getElementById("pdfFrame");
+  const box = document.getElementById("pdfViewer");
+  const titleEl = document.getElementById("pdfViewerTitle");
+  if (!frame || !box) return;
+  if (titleEl) titleEl.textContent = title || "PDF";
+  frame.src = `/api/pnl/runs/${encodeURIComponent(runId)}/pdf`;
+  box.hidden = false;
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+async function refreshLibrary() {
+  try {
+    const data = await api("/api/pnl/library");
+    renderLibrary(data.months || []);
+  } catch (err) {
+    console.error(err);
+    const root = document.getElementById("library");
+    if (root) {
+      root.innerHTML =
+        '<p class="muted">No pude cargar la biblioteca de PDFs.</p>';
+    }
+  }
+}
+
 function renderRun(run) {
   currentRun = run;
+  const meta = document.getElementById("currentRunMeta");
+  if (meta) {
+    const parts = [
+      run.periodLabel ? `Mes: ${run.periodLabel}` : null,
+      run.storedName ? `Archivo: ${run.storedName}` : null,
+      run.filename ? `Original: ${run.filename}` : null,
+    ].filter(Boolean);
+    meta.textContent = parts.join(" · ");
+  }
+
   const summary = document.getElementById("summary");
   summary.innerHTML = "";
 
@@ -145,6 +267,7 @@ function renderRun(run) {
         });
         const fresh = await api(`/api/pnl/runs/${run.id}`);
         renderRun(fresh.run);
+        refreshLibrary();
       } catch (e) {
         alert(e.message);
       }
@@ -166,7 +289,16 @@ async function init() {
   renderRules();
 
   const runs = await api("/api/pnl/runs");
-  if (runs.runs?.[0]) renderRun(runs.runs[0]);
+  runsCache = runs.runs || [];
+  if (runsCache[0]) renderRun(runsCache[0]);
+  await refreshLibrary();
+
+  document.getElementById("btnClosePdf")?.addEventListener("click", () => {
+    const box = document.getElementById("pdfViewer");
+    const frame = document.getElementById("pdfFrame");
+    if (frame) frame.src = "about:blank";
+    if (box) box.hidden = true;
+  });
 
   document.getElementById("addRule").onclick = () => {
     rules.push({
@@ -220,8 +352,13 @@ async function init() {
       const res = await fetch("/api/pnl/upload", { method: "POST", body: fd });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || "Error upload");
-      status.textContent = `OK: ${data.stats.lines} movimientos · ${data.stats.matched} con regla · ${data.stats.needsReview} a revisar · texto ${data.run.parseDebug?.textLength || "?"} chars`;
+      const period = data.stats.period || data.run.periodLabel || "";
+      const savedAs = data.stats.savedAs || data.run.storedName || "";
+      status.textContent = `OK: ${data.stats.lines} movs · mes ${period} · guardado como ${savedAs} · ${data.stats.needsReview} a revisar`;
       renderRun(data.run);
+      await refreshLibrary();
+      const runsRes = await api("/api/pnl/runs");
+      runsCache = runsRes.runs || [];
     } catch (e) {
       status.textContent = "Error: " + e.message;
     } finally {
@@ -247,7 +384,8 @@ async function init() {
     } catch (_) {
       /* algunos navegadores bloquean DataTransfer; usamos selectedFile */
     }
-    fileName.textContent = file.name + " (" + Math.round(file.size / 1024) + " KB)";
+    fileName.textContent =
+      file.name + " (" + Math.round(file.size / 1024) + " KB)";
     dropZone.classList.add("has-file");
     processBtn.disabled = false;
     status.textContent = autoUpload
@@ -270,12 +408,12 @@ async function init() {
       dropZone.classList.remove("dragover");
     });
   });
-  // también en window para que no abra el PDF en otra pestaña
   window.addEventListener("dragover", (e) => e.preventDefault());
   window.addEventListener("drop", (e) => e.preventDefault());
 
   dropZone.addEventListener("drop", (e) => {
-    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    const file =
+      e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
     if (file) setFile(file, true);
   });
   fileInput.addEventListener("change", () => {
@@ -307,8 +445,11 @@ async function init() {
         const data = await api(`/api/pnl/runs/${currentRun.id}/reparse`, {
           method: "POST",
         });
-        status.textContent = `Reparse OK: ${data.stats.lines} movimientos`;
+        status.textContent = `Reparse OK: ${data.stats.lines} movs · mes ${
+          data.stats.period || ""
+        }`;
         renderRun(data.run);
+        await refreshLibrary();
       } catch (e) {
         status.textContent = e.message;
       }

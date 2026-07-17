@@ -11,15 +11,18 @@ const fs_1 = __importDefault(require("fs"));
 const crypto_1 = require("crypto");
 const categorize_1 = require("./categorize");
 const parseStatement_1 = require("./parseStatement");
+const period_1 = require("./period");
+const statementFiles_1 = require("./statementFiles");
 const store_1 = require("./store");
 const uploadDir = path_1.default.join(process.cwd(), "uploads");
 if (!fs_1.default.existsSync(uploadDir))
     fs_1.default.mkdirSync(uploadDir, { recursive: true });
 const upload = (0, multer_1.default)({
     dest: uploadDir,
-    limits: { fileSize: 15 * 1024 * 1024 },
+    limits: { fileSize: 20 * 1024 * 1024 },
     fileFilter: (_req, file, cb) => {
-        if (file.mimetype === "application/pdf" || file.originalname.toLowerCase().endsWith(".pdf")) {
+        if (file.mimetype === "application/pdf" ||
+            file.originalname.toLowerCase().endsWith(".pdf")) {
             cb(null, true);
         }
         else {
@@ -28,6 +31,10 @@ const upload = (0, multer_1.default)({
     },
 });
 exports.pnlRouter = (0, express_1.Router)();
+function runPublic(run) {
+    const { textFull: _t, ...rest } = run;
+    return rest;
+}
 exports.pnlRouter.get("/api/pnl/rules", (_req, res) => {
     res.json({ ok: true, rules: (0, store_1.loadRules)() });
 });
@@ -50,8 +57,28 @@ exports.pnlRouter.put("/api/pnl/rules", (req, res) => {
     (0, store_1.saveRules)(cleaned);
     res.json({ ok: true, rules: cleaned });
 });
+/** Lista de PDFs agrupada por mes */
+exports.pnlRouter.get("/api/pnl/library", (_req, res) => {
+    const runs = (0, store_1.loadRuns)().map(runPublic);
+    const byMonth = {};
+    for (const run of runs) {
+        const key = run.periodKey || "sin-mes";
+        if (!byMonth[key])
+            byMonth[key] = [];
+        byMonth[key].push(run);
+    }
+    const months = Object.keys(byMonth).sort().reverse();
+    res.json({
+        ok: true,
+        months: months.map((key) => ({
+            periodKey: key,
+            periodLabel: byMonth[key][0]?.periodLabel || key,
+            statements: byMonth[key],
+        })),
+    });
+});
 exports.pnlRouter.get("/api/pnl/runs", (_req, res) => {
-    res.json({ ok: true, runs: (0, store_1.loadRuns)() });
+    res.json({ ok: true, runs: (0, store_1.loadRuns)().map(runPublic) });
 });
 exports.pnlRouter.get("/api/pnl/runs/:id", (req, res) => {
     const run = (0, store_1.loadRuns)().find((r) => r.id === req.params.id);
@@ -59,7 +86,23 @@ exports.pnlRouter.get("/api/pnl/runs/:id", (req, res) => {
         res.status(404).json({ ok: false, error: "Run no encontrado" });
         return;
     }
-    res.json({ ok: true, run });
+    res.json({ ok: true, run: runPublic(run) });
+});
+/** Ver / descargar el PDF guardado */
+exports.pnlRouter.get("/api/pnl/runs/:id/pdf", (req, res) => {
+    const run = (0, store_1.loadRuns)().find((r) => r.id === req.params.id);
+    if (!run?.storedRelativePath) {
+        res.status(404).json({ ok: false, error: "PDF no encontrado" });
+        return;
+    }
+    const full = (0, statementFiles_1.resolveStatementFile)(run.storedRelativePath);
+    if (!full) {
+        res.status(404).json({ ok: false, error: "Archivo no está en disco" });
+        return;
+    }
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${run.storedName || "estado-cuenta.pdf"}"`);
+    fs_1.default.createReadStream(full).pipe(res);
 });
 exports.pnlRouter.post("/api/pnl/upload", upload.single("statement"), async (req, res) => {
     try {
@@ -71,11 +114,17 @@ exports.pnlRouter.post("/api/pnl/upload", upload.single("statement"), async (req
         const rules = (0, store_1.loadRules)();
         const { text, lines } = await (0, parseStatement_1.parsePdfToLines)(buffer, rules);
         const summaryByCategory = (0, parseStatement_1.summarizeByCategory)(lines);
+        const period = (0, period_1.detectPeriodFromText)(text);
+        const saved = (0, statementFiles_1.saveStatementPdf)(req.file.path, period);
         const mid = Math.max(0, Math.floor(text.length / 2) - 400);
         const run = {
             id: (0, crypto_1.randomUUID)(),
             filename: req.file.originalname,
             uploadedAt: new Date().toISOString(),
+            periodKey: period.key,
+            periodLabel: period.label,
+            storedName: saved.storedName,
+            storedRelativePath: saved.relativePath,
             textPreview: text.slice(0, 2000),
             textFull: text.slice(0, 300000),
             parseDebug: {
@@ -87,20 +136,15 @@ exports.pnlRouter.post("/api/pnl/upload", upload.single("statement"), async (req
             summaryByCategory,
         };
         (0, store_1.addRun)(run);
-        // limpiar archivo temporal
-        try {
-            fs_1.default.unlinkSync(req.file.path);
-        }
-        catch {
-            /* ignore */
-        }
         res.json({
             ok: true,
-            run,
+            run: runPublic(run),
             stats: {
                 lines: lines.length,
                 needsReview: lines.filter((l) => l.needsReview).length,
                 matched: lines.filter((l) => l.matchedRuleId).length,
+                period: period.label,
+                savedAs: saved.storedName,
             },
         });
     }
@@ -112,7 +156,6 @@ exports.pnlRouter.post("/api/pnl/upload", upload.single("statement"), async (req
         });
     }
 });
-/** Reparsea el texto guardado del run (sin volver a subir PDF) */
 exports.pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
     const runs = (0, store_1.loadRuns)();
     const idx = runs.findIndex((r) => r.id === req.params.id);
@@ -125,28 +168,31 @@ exports.pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
     if (!text || text.length < 50) {
         res.status(400).json({
             ok: false,
-            error: "Texto incompleto. Vuelve a soltar el PDF en la zona (versión nueva guarda todo el texto).",
+            error: "Texto incompleto. Vuelve a soltar el PDF.",
         });
         return;
     }
     const rules = (0, store_1.loadRules)();
     const lines = (0, parseStatement_1.extractLinesFromText)(text, rules);
+    const period = (0, period_1.detectPeriodFromText)(text);
     run.lines = lines;
     run.summaryByCategory = (0, parseStatement_1.summarizeByCategory)(lines);
+    run.periodKey = period.key;
+    run.periodLabel = period.label;
     runs[idx] = run;
     (0, store_1.saveRuns)(runs);
     res.json({
         ok: true,
-        run,
+        run: runPublic(run),
         stats: {
             lines: lines.length,
             needsReview: lines.filter((l) => l.needsReview).length,
             matched: lines.filter((l) => l.matchedRuleId).length,
             textLength: text.length,
+            period: period.label,
         },
     });
 });
-/** Recategorizar un movimiento a mano */
 exports.pnlRouter.patch("/api/pnl/runs/:runId/lines/:lineId", (req, res) => {
     const runs = (0, store_1.loadRuns)();
     const run = runs.find((r) => r.id === req.params.runId);
@@ -172,7 +218,6 @@ exports.pnlRouter.patch("/api/pnl/runs/:runId/lines/:lineId", (req, res) => {
     (0, store_1.saveRuns)(runs);
     res.json({ ok: true, line, summaryByCategory: run.summaryByCategory });
 });
-/** Probar una regla contra texto libre */
 exports.pnlRouter.post("/api/pnl/test-rule", (req, res) => {
     const { description, amount = -100, match, category } = req.body || {};
     const rules = (0, store_1.loadRules)();

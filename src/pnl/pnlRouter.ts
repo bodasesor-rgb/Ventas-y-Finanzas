@@ -9,6 +9,11 @@ import {
   parsePdfToLines,
   summarizeByCategory,
 } from "./parseStatement";
+import { detectPeriodFromText } from "./period";
+import {
+  resolveStatementFile,
+  saveStatementPdf,
+} from "./statementFiles";
 import { addRun, loadRules, loadRuns, saveRules, saveRuns } from "./store";
 import type { RecurringRule, StatementRun } from "./types";
 
@@ -17,9 +22,12 @@ if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
 const upload = multer({
   dest: uploadDir,
-  limits: { fileSize: 15 * 1024 * 1024 },
+  limits: { fileSize: 20 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    if (file.mimetype === "application/pdf" || file.originalname.toLowerCase().endsWith(".pdf")) {
+    if (
+      file.mimetype === "application/pdf" ||
+      file.originalname.toLowerCase().endsWith(".pdf")
+    ) {
       cb(null, true);
     } else {
       cb(new Error("Solo PDF"));
@@ -28,6 +36,11 @@ const upload = multer({
 });
 
 export const pnlRouter = Router();
+
+function runPublic(run: StatementRun) {
+  const { textFull: _t, ...rest } = run;
+  return rest;
+}
 
 pnlRouter.get("/api/pnl/rules", (_req, res) => {
   res.json({ ok: true, rules: loadRules() });
@@ -53,8 +66,28 @@ pnlRouter.put("/api/pnl/rules", (req, res) => {
   res.json({ ok: true, rules: cleaned });
 });
 
+/** Lista de PDFs agrupada por mes */
+pnlRouter.get("/api/pnl/library", (_req, res) => {
+  const runs = loadRuns().map(runPublic);
+  const byMonth: Record<string, typeof runs> = {};
+  for (const run of runs) {
+    const key = run.periodKey || "sin-mes";
+    if (!byMonth[key]) byMonth[key] = [];
+    byMonth[key].push(run);
+  }
+  const months = Object.keys(byMonth).sort().reverse();
+  res.json({
+    ok: true,
+    months: months.map((key) => ({
+      periodKey: key,
+      periodLabel: byMonth[key][0]?.periodLabel || key,
+      statements: byMonth[key],
+    })),
+  });
+});
+
 pnlRouter.get("/api/pnl/runs", (_req, res) => {
-  res.json({ ok: true, runs: loadRuns() });
+  res.json({ ok: true, runs: loadRuns().map(runPublic) });
 });
 
 pnlRouter.get("/api/pnl/runs/:id", (req, res) => {
@@ -63,7 +96,27 @@ pnlRouter.get("/api/pnl/runs/:id", (req, res) => {
     res.status(404).json({ ok: false, error: "Run no encontrado" });
     return;
   }
-  res.json({ ok: true, run });
+  res.json({ ok: true, run: runPublic(run) });
+});
+
+/** Ver / descargar el PDF guardado */
+pnlRouter.get("/api/pnl/runs/:id/pdf", (req, res) => {
+  const run = loadRuns().find((r) => r.id === req.params.id);
+  if (!run?.storedRelativePath) {
+    res.status(404).json({ ok: false, error: "PDF no encontrado" });
+    return;
+  }
+  const full = resolveStatementFile(run.storedRelativePath);
+  if (!full) {
+    res.status(404).json({ ok: false, error: "Archivo no está en disco" });
+    return;
+  }
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    `inline; filename="${run.storedName || "estado-cuenta.pdf"}"`
+  );
+  fs.createReadStream(full).pipe(res);
 });
 
 pnlRouter.post(
@@ -80,12 +133,18 @@ pnlRouter.post(
       const rules = loadRules();
       const { text, lines } = await parsePdfToLines(buffer, rules);
       const summaryByCategory = summarizeByCategory(lines);
+      const period = detectPeriodFromText(text);
+      const saved = saveStatementPdf(req.file.path, period);
       const mid = Math.max(0, Math.floor(text.length / 2) - 400);
 
       const run: StatementRun = {
         id: randomUUID(),
         filename: req.file.originalname,
         uploadedAt: new Date().toISOString(),
+        periodKey: period.key,
+        periodLabel: period.label,
+        storedName: saved.storedName,
+        storedRelativePath: saved.relativePath,
         textPreview: text.slice(0, 2000),
         textFull: text.slice(0, 300000),
         parseDebug: {
@@ -98,20 +157,15 @@ pnlRouter.post(
       };
       addRun(run);
 
-      // limpiar archivo temporal
-      try {
-        fs.unlinkSync(req.file.path);
-      } catch {
-        /* ignore */
-      }
-
       res.json({
         ok: true,
-        run,
+        run: runPublic(run),
         stats: {
           lines: lines.length,
           needsReview: lines.filter((l) => l.needsReview).length,
           matched: lines.filter((l) => l.matchedRuleId).length,
+          period: period.label,
+          savedAs: saved.storedName,
         },
       });
     } catch (err) {
@@ -124,7 +178,6 @@ pnlRouter.post(
   }
 );
 
-/** Reparsea el texto guardado del run (sin volver a subir PDF) */
 pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
   const runs = loadRuns();
   const idx = runs.findIndex((r) => r.id === req.params.id);
@@ -137,29 +190,32 @@ pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
   if (!text || text.length < 50) {
     res.status(400).json({
       ok: false,
-      error: "Texto incompleto. Vuelve a soltar el PDF en la zona (versión nueva guarda todo el texto).",
+      error: "Texto incompleto. Vuelve a soltar el PDF.",
     });
     return;
   }
   const rules = loadRules();
   const lines = extractLinesFromText(text, rules);
+  const period = detectPeriodFromText(text);
   run.lines = lines;
   run.summaryByCategory = summarizeByCategory(lines);
+  run.periodKey = period.key;
+  run.periodLabel = period.label;
   runs[idx] = run;
   saveRuns(runs);
   res.json({
     ok: true,
-    run,
+    run: runPublic(run),
     stats: {
       lines: lines.length,
       needsReview: lines.filter((l) => l.needsReview).length,
       matched: lines.filter((l) => l.matchedRuleId).length,
       textLength: text.length,
+      period: period.label,
     },
   });
 });
 
-/** Recategorizar un movimiento a mano */
 pnlRouter.patch("/api/pnl/runs/:runId/lines/:lineId", (req, res) => {
   const runs = loadRuns();
   const run = runs.find((r) => r.id === req.params.runId);
@@ -186,7 +242,6 @@ pnlRouter.patch("/api/pnl/runs/:runId/lines/:lineId", (req, res) => {
   res.json({ ok: true, line, summaryByCategory: run.summaryByCategory });
 });
 
-/** Probar una regla contra texto libre */
 pnlRouter.post("/api/pnl/test-rule", (req, res) => {
   const { description, amount = -100, match, category } = req.body || {};
   const rules = loadRules();

@@ -6,4 +6,5 @@ node_modules/
 .DS_Store
 uploads/
 data/*.json
+data/statements/
 !data/.gitkeep

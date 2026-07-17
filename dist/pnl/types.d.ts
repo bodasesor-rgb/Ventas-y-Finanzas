@@ -25,6 +25,14 @@ export interface StatementRun {
     id: string;
     filename: string;
     uploadedAt: string;
+    /** Mes del estado: YYYY-MM */
+    periodKey?: string;
+    /** ej. junio 2026 */
+    periodLabel?: string;
+    /** Nombre guardado: 2026-06_estado-cuenta.pdf */
+    storedName?: string;
+    /** Ruta relativa bajo data/statements/ */
+    storedRelativePath?: string;
     textPreview: string;
     /** Texto completo (hasta ~300k) para reparse / debug Banamex */
     textFull?: string;

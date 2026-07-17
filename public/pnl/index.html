@@ -11,7 +11,7 @@
     <div>
       <p class="brand">Bodasesor / Capybara</p>
       <h1>P&L desde estados de cuenta</h1>
-      <p class="sub">Sube un PDF → reglas (ads, pass…) categorizan. Pagos a personas quedan en revisar.</p>
+      <p class="sub">Sube un PDF → se guarda por mes (AAAA-MM) → reglas categorizan. Pagos a personas quedan en revisar.</p>
     </div>
     <a class="link" href="/health">API health</a>
   </header>
@@ -33,7 +33,20 @@
     </section>
 
     <section class="panel">
-      <h2>2. Pagos frecuentes (reglas)</h2>
+      <h2>2. Estados guardados por mes</h2>
+      <p class="muted">Archivo: <code>AAAA-MM_estado-cuenta.pdf</code> (mes del estado, no de la subida).</p>
+      <div id="library" class="library"></div>
+      <div id="pdfViewer" class="pdf-viewer" hidden>
+        <div class="pdf-viewer-bar">
+          <strong id="pdfViewerTitle">PDF</strong>
+          <button type="button" id="btnClosePdf" class="secondary">Cerrar</button>
+        </div>
+        <iframe id="pdfFrame" title="Vista del estado de cuenta"></iframe>
+      </div>
+    </section>
+
+    <section class="panel wide">
+      <h2>3. Pagos frecuentes (reglas)</h2>
       <p class="muted">Si el texto del movimiento contiene el “match”, se asigna la categoría. Sin IA.</p>
       <div class="table-wrap">
         <table id="rulesTable">
@@ -55,7 +68,8 @@
     </section>
 
     <section class="panel wide">
-      <h2>3. Resultado del último PDF</h2>
+      <h2>4. Resultado del PDF seleccionado</h2>
+      <p id="currentRunMeta" class="muted"></p>
       <div id="summary" class="summary"></div>
       <div class="table-wrap">
         <table id="linesTable">
