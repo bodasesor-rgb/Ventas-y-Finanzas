@@ -1,26 +1,32 @@
 # Ventas y Finanzas
 
-Cuando un deal se marca **Cerrado/Ganado** en Kommo, registra una fila en el Sheet de ventas vía Google Apps Script.
+## Módulos
 
-## Endpoints
+1. **Ventas (Kommo → Sheet Eventos)**  
+   `POST /webhooks/kommo/deal-won`
 
-- `POST /webhooks/kommo/deal-won` — webhook Kommo
-- `GET /health` — estado + flags de env
-- `GET /health/kommo` — prueba token Kommo
+2. **P&L Banco (PDF + reglas)**  
+   UI: `https://TU-DOMINIO/pnl/`  
+   - Sube estados de cuenta PDF  
+   - Tabla de pagos frecuentes (ads, pass, etc.)  
+   - Pagos a personas → categoría `transferencia_persona` / `revisar` (manual)
 
 ## Hostinger
 
-1. Build: `npm install && npm run build`
-2. Start: `npm start`
-3. Env:
-   - `KOMMO_BASE_URL`
-   - `KOMMO_ACCESS_TOKEN`
-   - `APPS_SCRIPT_VENTAS_URL` (URL `/exec` del Apps Script)
+- Build: `npm install && npm run build`
+- Start: `npm start`
+- Env: `KOMMO_BASE_URL`, `KOMMO_ACCESS_TOKEN`, `URL_BODASESOR_DIRECCION_SHEETS`
 
-Sin `APPS_SCRIPT_VENTAS_URL` → Fase 1 (solo log).  
-Con esa variable → Fase 2 (append/update idempotente por Kommo Deal ID).
+## Sheet (una sola vez)
 
-## Apps Script
+1. Pegar `apps-script/Codigo.gs` (v4)
+2. Ejecutar **`setupAll_`** en el editor → enlaza Eventos + Metricas + P&L (fórmulas)
+3. Nueva versión App web
 
-Código listo en `apps-script/Codigo.gs`.  
-Sheet: `1TWbOOjTnm68n2QioiwRsHvXSuARev2PLIhqr1pVctp8`
+No hace falta volver a pegar el script salvo que cambiemos lógica.
+
+## P&L PDF — alcance actual (MVP)
+
+- Parse determinista (regex fecha+monto + keywords)
+- Reglas editables en UI (persistidas en `data/recurring-rules.json`)
+- **Aún no** escribe al Sheet P&L automáticamente (siguiente paso si el parse te sirve con tus PDFs reales)

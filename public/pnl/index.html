@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bodasesor — P&L Banco</title>
+  <link rel="stylesheet" href="/pnl/styles.css" />
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="brand">Bodasesor / Capybara</p>
+      <h1>P&L desde estados de cuenta</h1>
+      <p class="sub">Sube un PDF → reglas (ads, pass…) categorizan. Pagos a personas quedan en revisar.</p>
+    </div>
+    <a class="link" href="/health">API health</a>
+  </header>
+
+  <main class="grid">
+    <section class="panel">
+      <h2>1. Subir estado de cuenta (PDF)</h2>
+      <form id="uploadForm">
+        <input type="file" id="file" accept="application/pdf,.pdf" required />
+        <button type="submit">Procesar PDF</button>
+      </form>
+      <p id="uploadStatus" class="muted"></p>
+    </section>
+
+    <section class="panel">
+      <h2>2. Pagos frecuentes (reglas)</h2>
+      <p class="muted">Si el texto del movimiento contiene el “match”, se asigna la categoría. Sin IA.</p>
+      <div class="table-wrap">
+        <table id="rulesTable">
+          <thead>
+            <tr>
+              <th>Match</th>
+              <th>Etiqueta</th>
+              <th>Categoría</th>
+              <th>Frecuente</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <button type="button" id="addRule" class="secondary">+ Regla</button>
+      <button type="button" id="saveRules">Guardar reglas</button>
+      <p id="rulesStatus" class="muted"></p>
+    </section>
+
+    <section class="panel wide">
+      <h2>3. Resultado del último PDF</h2>
+      <div id="summary" class="summary"></div>
+      <div class="table-wrap">
+        <table id="linesTable">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Descripción</th>
+              <th>Monto</th>
+              <th>Categoría</th>
+              <th>Revisar</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/pnl/app.js"></script>
+</body>
+</html>

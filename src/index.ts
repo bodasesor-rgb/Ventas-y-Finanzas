@@ -1,14 +1,22 @@
 import express from "express";
+import path from "path";
 import { ventasRouter } from "./ventasRouter";
+import { pnlRouter } from "./pnl/pnlRouter";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-// Kommo a veces envía application/x-www-form-urlencoded con JSON embebido
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 
 app.use(ventasRouter);
+app.use(pnlRouter);
+
+app.use(express.static(path.join(process.cwd(), "public")));
+
+app.get("/", (_req, res) => {
+  res.redirect("/pnl/");
+});
 
 const scriptUrl = (
   process.env.URL_BODASESOR_DIRECCION_SHEETS ||
@@ -19,11 +27,6 @@ const phase = scriptUrl ? 2 : 1;
 
 app.listen(PORT, () => {
   console.log(
-    `[ventas] listening on :${PORT} | phase=${phase}` +
-      (phase === 1
-        ? " (log only — falta URL_BODASESOR_DIRECCION_SHEETS /exec)"
-        : " (escribe a Sheet vía Apps Script)")
+    `[ventas+pnl] :${PORT} | ventas phase=${phase} | UI=/pnl/`
   );
 });
-
-
