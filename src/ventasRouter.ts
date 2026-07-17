@@ -166,6 +166,15 @@ ventasRouter.post(
 
 ventasRouter.get("/health", (_req, res) => {
   const scriptUrl = appsScriptUrl();
+  // Últimos chars del path para verificar que Hostinger apunta al /exec correcto
+  let appsScriptUrlTail = "";
+  try {
+    const u = new URL(scriptUrl);
+    const parts = u.pathname.split("/").filter(Boolean);
+    appsScriptUrlTail = parts.slice(-2).join("/"); // ej. AKfycb.../exec
+  } catch {
+    appsScriptUrlTail = "";
+  }
   res.status(200).json({
     ok: true,
     service: "ventas-y-finanzas",
@@ -176,6 +185,7 @@ ventasRouter.get("/health", (_req, res) => {
       hasAppsScriptUrl: Boolean(scriptUrl),
       appsScriptUrlLooksValid:
         scriptUrl.includes("script.google.com") && scriptUrl.includes("/exec"),
+      appsScriptUrlTail,
     },
   });
 });
