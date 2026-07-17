@@ -26,7 +26,8 @@
           <span class="drop-hint">o haz clic para elegir archivo</span>
           <span id="fileName" class="drop-file"></span>
         </label>
-        <button type="submit" id="processBtn" disabled>Procesar PDF</button>
+        <button type="button" id="processBtn" disabled>Procesar PDF</button>
+        <button type="button" id="reparseBtn" class="secondary">Reprocesar último</button>
       </form>
       <p id="uploadStatus" class="muted"></p>
     </section>
@@ -70,6 +71,8 @@
           <tbody></tbody>
         </table>
       </div>
+      <h3 style="margin-top:1rem;font-size:0.95rem;">Texto extraído (muestra)</h3>
+      <pre id="textPreview" class="text-preview"></pre>
     </section>
   </main>
 

@@ -4,7 +4,11 @@ import path from "path";
 import fs from "fs";
 import { randomUUID } from "crypto";
 import { categorizeLine } from "./categorize";
-import { parsePdfToLines, summarizeByCategory } from "./parseStatement";
+import {
+  extractLinesFromText,
+  parsePdfToLines,
+  summarizeByCategory,
+} from "./parseStatement";
 import { addRun, loadRules, loadRuns, saveRules, saveRuns } from "./store";
 import type { RecurringRule, StatementRun } from "./types";
 
@@ -76,12 +80,19 @@ pnlRouter.post(
       const rules = loadRules();
       const { text, lines } = await parsePdfToLines(buffer, rules);
       const summaryByCategory = summarizeByCategory(lines);
+      const mid = Math.max(0, Math.floor(text.length / 2) - 400);
 
       const run: StatementRun = {
         id: randomUUID(),
         filename: req.file.originalname,
         uploadedAt: new Date().toISOString(),
-        textPreview: text.slice(0, 1500),
+        textPreview: text.slice(0, 2000),
+        textFull: text.slice(0, 300000),
+        parseDebug: {
+          textLength: text.length,
+          pagesHint: (text.match(/P[aá]gina\s+\d+\s+de\s+\d+/i) || [])[0],
+          sampleMid: text.slice(mid, mid + 800),
+        },
         lines,
         summaryByCategory,
       };
@@ -112,6 +123,41 @@ pnlRouter.post(
     }
   }
 );
+
+/** Reparsea el texto guardado del run (sin volver a subir PDF) */
+pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
+  const runs = loadRuns();
+  const idx = runs.findIndex((r) => r.id === req.params.id);
+  if (idx < 0) {
+    res.status(404).json({ ok: false, error: "Run no encontrado" });
+    return;
+  }
+  const run = runs[idx];
+  const text = run.textFull || run.textPreview || "";
+  if (!text || text.length < 50) {
+    res.status(400).json({
+      ok: false,
+      error: "Texto incompleto. Vuelve a soltar el PDF en la zona (versión nueva guarda todo el texto).",
+    });
+    return;
+  }
+  const rules = loadRules();
+  const lines = extractLinesFromText(text, rules);
+  run.lines = lines;
+  run.summaryByCategory = summarizeByCategory(lines);
+  runs[idx] = run;
+  saveRuns(runs);
+  res.json({
+    ok: true,
+    run,
+    stats: {
+      lines: lines.length,
+      needsReview: lines.filter((l) => l.needsReview).length,
+      matched: lines.filter((l) => l.matchedRuleId).length,
+      textLength: text.length,
+    },
+  });
+});
 
 /** Recategorizar un movimiento a mano */
 pnlRouter.patch("/api/pnl/runs/:runId/lines/:lineId", (req, res) => {

@@ -39,6 +39,13 @@ export interface StatementRun {
   filename: string;
   uploadedAt: string;
   textPreview: string;
+  /** Texto completo (hasta ~300k) para reparse / debug Banamex */
+  textFull?: string;
+  parseDebug?: {
+    textLength: number;
+    pagesHint?: string;
+    sampleMid: string;
+  };
   lines: BankLine[];
   summaryByCategory: Record<string, number>;
 }
