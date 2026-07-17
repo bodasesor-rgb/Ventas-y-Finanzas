@@ -1,4 +1,5 @@
 import type { BankLine, PnlCategory, RecurringRule } from "./types";
+import { isIncomeCategory } from "./store";
 
 /** Heurística: SPEI a nombre propio / “a favor de” → revisar (persona) */
 const PERSON_HINTS =
@@ -12,12 +13,15 @@ export function categorizeLine(
 ): Pick<BankLine, "category" | "matchedRuleId" | "needsReview"> {
   const desc = description.toLowerCase();
 
-  // Ingresos claros
+  // Ingresos claros (categoría kind=ingreso)
   if (direction === "abono" || amount > 0) {
     for (const rule of rules) {
-      if (rule.category === "ingreso" && desc.includes(rule.match.toLowerCase())) {
+      if (
+        isIncomeCategory(rule.category) &&
+        desc.includes(rule.match.toLowerCase())
+      ) {
         return {
-          category: "ingreso",
+          category: rule.category,
           matchedRuleId: rule.id,
           needsReview: false,
         };
@@ -33,7 +37,9 @@ export function categorizeLine(
       return {
         category: rule.category,
         matchedRuleId: rule.id,
-        needsReview: rule.category === "transferencia_persona",
+        needsReview:
+          rule.category === "transferencia_persona" ||
+          rule.category === "revisar",
       };
     }
   }
@@ -42,6 +48,14 @@ export function categorizeLine(
     return {
       category: "transferencia_persona",
       needsReview: true,
+    };
+  }
+
+  // Abono sin regla → ingreso genérico (verde), no “revisar”
+  if (direction === "abono" || amount > 0) {
+    return {
+      category: "ingreso" as PnlCategory,
+      needsReview: false,
     };
   }
 

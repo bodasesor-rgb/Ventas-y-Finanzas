@@ -35,6 +35,92 @@ function runPublic(run) {
     const { textFull: _t, ...rest } = run;
     return rest;
 }
+exports.pnlRouter.get("/api/pnl/categories", (_req, res) => {
+    res.json({ ok: true, categories: (0, store_1.loadCategories)() });
+});
+exports.pnlRouter.put("/api/pnl/categories", (req, res) => {
+    const categories = req.body?.categories;
+    if (!Array.isArray(categories)) {
+        res.status(400).json({ ok: false, error: "categories debe ser array" });
+        return;
+    }
+    const cleaned = [];
+    const seen = new Set();
+    for (const c of categories) {
+        if (!c || !c.id || !c.label)
+            continue;
+        const id = (0, store_1.slugCategory)(String(c.id));
+        if (seen.has(id))
+            continue;
+        seen.add(id);
+        const kind = c.kind === "ingreso" || c.kind === "gasto" || c.kind === "neutro"
+            ? c.kind
+            : "gasto";
+        cleaned.push({
+            id,
+            label: String(c.label).trim().slice(0, 80),
+            kind,
+            builtin: Boolean(c.builtin),
+        });
+    }
+    if (!cleaned.some((c) => c.id === "revisar")) {
+        cleaned.push({
+            id: "revisar",
+            label: "Revisar",
+            kind: "neutro",
+            builtin: true,
+        });
+    }
+    if (!cleaned.some((c) => c.id === "ingreso")) {
+        cleaned.push({
+            id: "ingreso",
+            label: "Ingreso",
+            kind: "ingreso",
+            builtin: true,
+        });
+    }
+    (0, store_1.saveCategories)(cleaned);
+    res.json({ ok: true, categories: cleaned });
+});
+exports.pnlRouter.post("/api/pnl/categories", (req, res) => {
+    const label = String(req.body?.label || "").trim();
+    const kindRaw = String(req.body?.kind || "gasto");
+    const kind = kindRaw === "ingreso" || kindRaw === "neutro" ? kindRaw : "gasto";
+    if (!label) {
+        res.status(400).json({ ok: false, error: "Falta label" });
+        return;
+    }
+    const categories = (0, store_1.loadCategories)();
+    let id = (0, store_1.slugCategory)(label);
+    let n = 2;
+    while (categories.some((c) => c.id === id)) {
+        id = `${(0, store_1.slugCategory)(label)}_${n}`;
+        n += 1;
+    }
+    const created = { id, label, kind, builtin: false };
+    categories.push(created);
+    (0, store_1.saveCategories)(categories);
+    res.json({ ok: true, category: created, categories });
+});
+exports.pnlRouter.delete("/api/pnl/categories/:id", (req, res) => {
+    const id = String(req.params.id || "");
+    const categories = (0, store_1.loadCategories)();
+    const found = categories.find((c) => c.id === id);
+    if (!found) {
+        res.status(404).json({ ok: false, error: "Categoría no encontrada" });
+        return;
+    }
+    if (found.builtin || id === "revisar" || id === "ingreso") {
+        res.status(400).json({
+            ok: false,
+            error: "No se puede borrar una categoría base",
+        });
+        return;
+    }
+    const next = categories.filter((c) => c.id !== id);
+    (0, store_1.saveCategories)(next);
+    res.json({ ok: true, categories: next });
+});
 exports.pnlRouter.get("/api/pnl/rules", (_req, res) => {
     res.json({ ok: true, rules: (0, store_1.loadRules)() });
 });
@@ -210,9 +296,12 @@ exports.pnlRouter.patch("/api/pnl/runs/:runId/lines/:lineId", (req, res) => {
         res.status(400).json({ ok: false, error: "Falta category" });
         return;
     }
-    line.category = category;
+    line.category = String(category);
     line.needsReview =
-        category === "revisar" || category === "transferencia_persona";
+        line.category === "revisar" ||
+            line.category === "transferencia_persona";
+    if ((0, store_1.isIncomeCategory)(line.category))
+        line.needsReview = false;
     line.matchedRuleId = undefined;
     run.summaryByCategory = (0, parseStatement_1.summarizeByCategory)(run.lines);
     (0, store_1.saveRuns)(runs);

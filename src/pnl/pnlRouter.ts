@@ -14,8 +14,18 @@ import {
   resolveStatementFile,
   saveStatementPdf,
 } from "./statementFiles";
-import { addRun, loadRules, loadRuns, saveRules, saveRuns } from "./store";
-import type { RecurringRule, StatementRun } from "./types";
+import {
+  addRun,
+  isIncomeCategory,
+  loadCategories,
+  loadRules,
+  loadRuns,
+  saveCategories,
+  saveRules,
+  saveRuns,
+  slugCategory,
+} from "./store";
+import type { CategoryDef, RecurringRule, StatementRun } from "./types";
 
 const uploadDir = path.join(process.cwd(), "uploads");
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
@@ -41,6 +51,96 @@ function runPublic(run: StatementRun) {
   const { textFull: _t, ...rest } = run;
   return rest;
 }
+
+pnlRouter.get("/api/pnl/categories", (_req, res) => {
+  res.json({ ok: true, categories: loadCategories() });
+});
+
+pnlRouter.put("/api/pnl/categories", (req, res) => {
+  const categories = req.body?.categories as CategoryDef[];
+  if (!Array.isArray(categories)) {
+    res.status(400).json({ ok: false, error: "categories debe ser array" });
+    return;
+  }
+  const cleaned: CategoryDef[] = [];
+  const seen = new Set<string>();
+  for (const c of categories) {
+    if (!c || !c.id || !c.label) continue;
+    const id = slugCategory(String(c.id));
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const kind =
+      c.kind === "ingreso" || c.kind === "gasto" || c.kind === "neutro"
+        ? c.kind
+        : "gasto";
+    cleaned.push({
+      id,
+      label: String(c.label).trim().slice(0, 80),
+      kind,
+      builtin: Boolean(c.builtin),
+    });
+  }
+  if (!cleaned.some((c) => c.id === "revisar")) {
+    cleaned.push({
+      id: "revisar",
+      label: "Revisar",
+      kind: "neutro",
+      builtin: true,
+    });
+  }
+  if (!cleaned.some((c) => c.id === "ingreso")) {
+    cleaned.push({
+      id: "ingreso",
+      label: "Ingreso",
+      kind: "ingreso",
+      builtin: true,
+    });
+  }
+  saveCategories(cleaned);
+  res.json({ ok: true, categories: cleaned });
+});
+
+pnlRouter.post("/api/pnl/categories", (req, res) => {
+  const label = String(req.body?.label || "").trim();
+  const kindRaw = String(req.body?.kind || "gasto");
+  const kind =
+    kindRaw === "ingreso" || kindRaw === "neutro" ? kindRaw : "gasto";
+  if (!label) {
+    res.status(400).json({ ok: false, error: "Falta label" });
+    return;
+  }
+  const categories = loadCategories();
+  let id = slugCategory(label);
+  let n = 2;
+  while (categories.some((c) => c.id === id)) {
+    id = `${slugCategory(label)}_${n}`;
+    n += 1;
+  }
+  const created: CategoryDef = { id, label, kind, builtin: false };
+  categories.push(created);
+  saveCategories(categories);
+  res.json({ ok: true, category: created, categories });
+});
+
+pnlRouter.delete("/api/pnl/categories/:id", (req, res) => {
+  const id = String(req.params.id || "");
+  const categories = loadCategories();
+  const found = categories.find((c) => c.id === id);
+  if (!found) {
+    res.status(404).json({ ok: false, error: "Categoría no encontrada" });
+    return;
+  }
+  if (found.builtin || id === "revisar" || id === "ingreso") {
+    res.status(400).json({
+      ok: false,
+      error: "No se puede borrar una categoría base",
+    });
+    return;
+  }
+  const next = categories.filter((c) => c.id !== id);
+  saveCategories(next);
+  res.json({ ok: true, categories: next });
+});
 
 pnlRouter.get("/api/pnl/rules", (_req, res) => {
   res.json({ ok: true, rules: loadRules() });
@@ -233,9 +333,11 @@ pnlRouter.patch("/api/pnl/runs/:runId/lines/:lineId", (req, res) => {
     res.status(400).json({ ok: false, error: "Falta category" });
     return;
   }
-  line.category = category;
+  line.category = String(category);
   line.needsReview =
-    category === "revisar" || category === "transferencia_persona";
+    line.category === "revisar" ||
+    line.category === "transferencia_persona";
+  if (isIncomeCategory(line.category)) line.needsReview = false;
   line.matchedRuleId = undefined;
   run.summaryByCategory = summarizeByCategory(run.lines);
   saveRuns(runs);

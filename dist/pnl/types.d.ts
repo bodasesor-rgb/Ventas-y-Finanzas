@@ -1,4 +1,14 @@
-export type PnlCategory = "ads" | "pass" | "nomina" | "proveedor" | "renta" | "servicios" | "transferencia_persona" | "ingreso" | "otro" | "revisar";
+/** Valor libre: slug de categoría (ads, ingreso, o personalizada) */
+export type PnlCategory = string;
+export type CategoryKind = "gasto" | "ingreso" | "neutro";
+export interface CategoryDef {
+    /** Valor usado en reglas y líneas (slug) */
+    id: string;
+    label: string;
+    kind: CategoryKind;
+    /** Si false, el usuario la creó y puede borrarla */
+    builtin?: boolean;
+}
 export interface RecurringRule {
     id: string;
     /** Texto a buscar en la descripción del movimiento (minúsculas) */

@@ -1,16 +1,18 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.categorizeLine = categorizeLine;
+const store_1 = require("./store");
 /** Heurística: SPEI a nombre propio / “a favor de” → revisar (persona) */
 const PERSON_HINTS = /\b(spei|transferencia|traspaso)\b.*\b(a favor|beneficiario|nombre)\b|\b(nomina|nómina|sueldo|honorarios)\b/i;
 function categorizeLine(description, amount, direction, rules) {
     const desc = description.toLowerCase();
-    // Ingresos claros
+    // Ingresos claros (categoría kind=ingreso)
     if (direction === "abono" || amount > 0) {
         for (const rule of rules) {
-            if (rule.category === "ingreso" && desc.includes(rule.match.toLowerCase())) {
+            if ((0, store_1.isIncomeCategory)(rule.category) &&
+                desc.includes(rule.match.toLowerCase())) {
                 return {
-                    category: "ingreso",
+                    category: rule.category,
                     matchedRuleId: rule.id,
                     needsReview: false,
                 };
@@ -25,7 +27,8 @@ function categorizeLine(description, amount, direction, rules) {
             return {
                 category: rule.category,
                 matchedRuleId: rule.id,
-                needsReview: rule.category === "transferencia_persona",
+                needsReview: rule.category === "transferencia_persona" ||
+                    rule.category === "revisar",
             };
         }
     }
@@ -33,6 +36,13 @@ function categorizeLine(description, amount, direction, rules) {
         return {
             category: "transferencia_persona",
             needsReview: true,
+        };
+    }
+    // Abono sin regla → ingreso genérico (verde), no “revisar”
+    if (direction === "abono" || amount > 0) {
+        return {
+            category: "ingreso",
+            needsReview: false,
         };
     }
     return {

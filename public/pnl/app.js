@@ -1,16 +1,4 @@
-const CATEGORIES = [
-  "ads",
-  "pass",
-  "nomina",
-  "proveedor",
-  "renta",
-  "servicios",
-  "transferencia_persona",
-  "ingreso",
-  "otro",
-  "revisar",
-];
-
+let categories = [];
 let rules = [];
 let currentRun = null;
 let selectedFile = null;
@@ -59,6 +47,115 @@ function fmtDate(iso) {
   }
 }
 
+function categoryIds() {
+  return categories.map((c) => c.id);
+}
+
+function categoryLabel(id) {
+  const c = categories.find((x) => x.id === id);
+  return c ? c.label : id;
+}
+
+function isIncomeCat(id) {
+  const c = categories.find((x) => x.id === id);
+  if (c) return c.kind === "ingreso";
+  return id === "ingreso" || id === "venta";
+}
+
+function categoryOptionsHtml(selected) {
+  const ids = categoryIds();
+  if (selected && !ids.includes(selected)) {
+    ids.push(selected);
+  }
+  return ids
+    .map((id) => {
+      const label = categoryLabel(id);
+      const mark = isIncomeCat(id) ? " (+)" : "";
+      return `<option value="${escapeAttr(id)}" ${
+        id === selected ? "selected" : ""
+      }>${escapeHtml(label)}${mark}</option>`;
+    })
+    .join("");
+}
+
+function renderCategories() {
+  const root = document.getElementById("categoriesList");
+  if (!root) return;
+  if (!categories.length) {
+    root.innerHTML = '<p class="muted">Sin categorías.</p>';
+    return;
+  }
+  root.innerHTML = categories
+    .map((c) => {
+      const canDel = !c.builtin && c.id !== "revisar" && c.id !== "ingreso";
+      return `
+        <span class="cat-pill ${c.kind === "ingreso" ? "income" : ""}" data-id="${escapeAttr(c.id)}">
+          <strong>${escapeHtml(c.label)}</strong>
+          <span class="cat-kind">${escapeHtml(c.kind)}</span>
+          ${
+            canDel
+              ? `<button type="button" data-del-cat="${escapeAttr(c.id)}" title="Eliminar">✕</button>`
+              : ""
+          }
+        </span>
+      `;
+    })
+    .join("");
+
+  root.querySelectorAll("[data-del-cat]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.getAttribute("data-del-cat");
+      if (!confirm(`¿Eliminar categoría "${id}"?`)) return;
+      try {
+        const data = await api(`/api/pnl/categories/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+        });
+        categories = data.categories;
+        renderCategories();
+        renderRules();
+        if (currentRun) renderRun(currentRun);
+        setCatStatus("Categoría eliminada.");
+      } catch (e) {
+        setCatStatus(e.message, true);
+      }
+    });
+  });
+}
+
+function setCatStatus(msg, isErr) {
+  const el = document.getElementById("categoriesStatus");
+  if (!el) return;
+  el.textContent = msg || "";
+  el.style.color = isErr ? "var(--warn)" : "";
+}
+
+async function addCategory(kind) {
+  const hint =
+    kind === "ingreso"
+      ? "Nombre de la categoría de ingreso (ej. Anticipo boda):"
+      : "Nombre de la categoría (ej. Decoración, Catering):";
+  const label = prompt(hint);
+  if (!label || !label.trim()) return;
+  try {
+    const data = await api("/api/pnl/categories", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label: label.trim(), kind }),
+    });
+    categories = data.categories;
+    renderCategories();
+    renderRules();
+    if (currentRun) renderRun(currentRun);
+    setCatStatus(
+      kind === "ingreso"
+        ? `Categoría de ingreso creada: ${data.category.label}`
+        : `Categoría creada: ${data.category.label}`
+    );
+  } catch (e) {
+    setCatStatus(e.message, true);
+  }
+}
+
 function renderRules() {
   const tbody = document.querySelector("#rulesTable tbody");
   tbody.innerHTML = "";
@@ -69,10 +166,7 @@ function renderRules() {
       <td><input data-i="${idx}" data-f="label" value="${escapeAttr(r.label)}" /></td>
       <td>
         <select data-i="${idx}" data-f="category">
-          ${CATEGORIES.map(
-            (c) =>
-              `<option value="${c}" ${c === r.category ? "selected" : ""}>${c}</option>`
-          ).join("")}
+          ${categoryOptionsHtml(r.category)}
         </select>
       </td>
       <td><input type="checkbox" data-i="${idx}" data-f="frecuente" ${
@@ -190,6 +284,13 @@ async function refreshLibrary() {
   }
 }
 
+function lineIsIncome(line) {
+  if (isIncomeCat(line.category)) return true;
+  if (line.direction === "abono") return true;
+  if (Number(line.amount) > 0) return true;
+  return false;
+}
+
 function renderRun(run) {
   currentRun = run;
   const meta = document.getElementById("currentRunMeta");
@@ -227,10 +328,12 @@ function renderRun(run) {
       a[0].localeCompare(b[0])
     )) {
       const chip = document.createElement("span");
+      const income = isIncomeCat(cat) || total > 0;
       chip.className =
         "chip" +
-        (cat === "revisar" || cat === "transferencia_persona" ? " warn" : "");
-      chip.textContent = `${cat}: ${money(total)}`;
+        (cat === "revisar" || cat === "transferencia_persona" ? " warn" : "") +
+        (income ? " income" : "");
+      chip.textContent = `${categoryLabel(cat)}: ${money(total)}`;
       summary.appendChild(chip);
     }
   }
@@ -239,17 +342,16 @@ function renderRun(run) {
   tbody.innerHTML = "";
   for (const line of run.lines || []) {
     const tr = document.createElement("tr");
+    const income = lineIsIncome(line);
     if (line.needsReview) tr.classList.add("review");
+    if (income) tr.classList.add("income");
     tr.innerHTML = `
       <td>${escapeAttr(line.date || "")}</td>
       <td>${escapeAttr(line.description)}</td>
-      <td class="amount">${money(line.amount)}</td>
+      <td class="amount ${income ? "income" : ""}">${money(line.amount)}</td>
       <td>
         <select data-line="${line.id}">
-          ${CATEGORIES.map(
-            (c) =>
-              `<option value="${c}" ${c === line.category ? "selected" : ""}>${c}</option>`
-          ).join("")}
+          ${categoryOptionsHtml(line.category)}
         </select>
       </td>
       <td>${line.needsReview ? "sí" : ""}</td>
@@ -284,8 +386,13 @@ function renderRun(run) {
 }
 
 async function init() {
-  const data = await api("/api/pnl/rules");
-  rules = data.rules;
+  const [catData, rulesData] = await Promise.all([
+    api("/api/pnl/categories"),
+    api("/api/pnl/rules"),
+  ]);
+  categories = catData.categories || [];
+  rules = rulesData.rules || [];
+  renderCategories();
   renderRules();
 
   const runs = await api("/api/pnl/runs");
@@ -300,12 +407,19 @@ async function init() {
     if (box) box.hidden = true;
   });
 
+  document.getElementById("addCategory")?.addEventListener("click", () => {
+    addCategory("gasto");
+  });
+  document.getElementById("addIncomeCategory")?.addEventListener("click", () => {
+    addCategory("ingreso");
+  });
+
   document.getElementById("addRule").onclick = () => {
     rules.push({
       id: "new-" + Date.now(),
       match: "",
       label: "",
-      category: "otro",
+      category: categories[0]?.id || "otro",
       frecuente: true,
     });
     renderRules();

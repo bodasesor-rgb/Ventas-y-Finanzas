@@ -3,6 +3,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.DEFAULT_CATEGORIES = void 0;
+exports.slugCategory = slugCategory;
+exports.loadCategories = loadCategories;
+exports.saveCategories = saveCategories;
+exports.categoryKind = categoryKind;
+exports.isIncomeCategory = isIncomeCategory;
 exports.loadRules = loadRules;
 exports.saveRules = saveRules;
 exports.loadRuns = loadRuns;
@@ -13,9 +19,86 @@ const path_1 = __importDefault(require("path"));
 const DATA_DIR = path_1.default.join(process.cwd(), "data");
 const RULES_FILE = path_1.default.join(DATA_DIR, "recurring-rules.json");
 const RUNS_FILE = path_1.default.join(DATA_DIR, "statement-runs.json");
+const CATEGORIES_FILE = path_1.default.join(DATA_DIR, "categories.json");
 function ensureDataDir() {
     if (!fs_1.default.existsSync(DATA_DIR))
         fs_1.default.mkdirSync(DATA_DIR, { recursive: true });
+}
+exports.DEFAULT_CATEGORIES = [
+    { id: "ads", label: "Ads / publicidad", kind: "gasto", builtin: true },
+    { id: "pass", label: "Pase / peaje", kind: "gasto", builtin: true },
+    { id: "nomina", label: "Nómina", kind: "gasto", builtin: true },
+    { id: "proveedor", label: "Proveedor", kind: "gasto", builtin: true },
+    { id: "renta", label: "Renta", kind: "gasto", builtin: true },
+    { id: "servicios", label: "Servicios / software", kind: "gasto", builtin: true },
+    { id: "comisiones", label: "Comisiones bancarias", kind: "gasto", builtin: true },
+    { id: "impuestos", label: "Impuestos", kind: "gasto", builtin: true },
+    { id: "evento", label: "Costo de evento", kind: "gasto", builtin: true },
+    { id: "transferencia_persona", label: "Transferencia a persona", kind: "neutro", builtin: true },
+    { id: "ingreso", label: "Ingreso", kind: "ingreso", builtin: true },
+    { id: "venta", label: "Venta / anticipo cliente", kind: "ingreso", builtin: true },
+    { id: "otro", label: "Otro", kind: "neutro", builtin: true },
+    { id: "revisar", label: "Revisar", kind: "neutro", builtin: true },
+];
+function slugCategory(label) {
+    return String(label || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .slice(0, 40) || `cat_${Date.now()}`;
+}
+let categoriesCache = null;
+function loadCategories() {
+    if (categoriesCache)
+        return categoriesCache;
+    ensureDataDir();
+    if (!fs_1.default.existsSync(CATEGORIES_FILE)) {
+        saveCategories(exports.DEFAULT_CATEGORIES);
+        return categoriesCache;
+    }
+    try {
+        const raw = JSON.parse(fs_1.default.readFileSync(CATEGORIES_FILE, "utf8"));
+        if (!Array.isArray(raw) || raw.length === 0) {
+            saveCategories(exports.DEFAULT_CATEGORIES);
+            return categoriesCache;
+        }
+        const byId = new Map(raw.map((c) => [c.id, c]));
+        let changed = false;
+        for (const d of exports.DEFAULT_CATEGORIES) {
+            if (!byId.has(d.id)) {
+                raw.push({ ...d });
+                changed = true;
+            }
+        }
+        if (changed) {
+            saveCategories(raw);
+            return categoriesCache;
+        }
+        categoriesCache = raw;
+        return categoriesCache;
+    }
+    catch {
+        saveCategories(exports.DEFAULT_CATEGORIES);
+        return categoriesCache;
+    }
+}
+function saveCategories(categories) {
+    ensureDataDir();
+    categoriesCache = categories.map((c) => ({ ...c }));
+    fs_1.default.writeFileSync(CATEGORIES_FILE, JSON.stringify(categoriesCache, null, 2), "utf8");
+}
+function categoryKind(id) {
+    const found = loadCategories().find((c) => c.id === id);
+    if (found)
+        return found.kind;
+    if (id === "ingreso" || id === "venta")
+        return "ingreso";
+    return "neutro";
+}
+function isIncomeCategory(id) {
+    return categoryKind(id) === "ingreso";
 }
 const DEFAULT_RULES = [
     {

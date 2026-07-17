@@ -46,7 +46,18 @@
     </section>
 
     <section class="panel wide">
-      <h2>3. Pagos frecuentes (reglas)</h2>
+      <h2>3. Categorías</h2>
+      <p class="muted">Agrega las que uses en tu P&amp;L. Los ingresos se marcan en verde.</p>
+      <div id="categoriesList" class="cat-list"></div>
+      <div class="cat-actions">
+        <button type="button" id="addCategory" class="secondary">+ Agregar categoría</button>
+        <button type="button" id="addIncomeCategory">+ Agregar categoría de ingreso</button>
+      </div>
+      <p id="categoriesStatus" class="muted"></p>
+    </section>
+
+    <section class="panel wide">
+      <h2>4. Pagos frecuentes (reglas)</h2>
       <p class="muted">Si el texto del movimiento contiene el “match”, se asigna la categoría. Sin IA.</p>
       <div class="table-wrap">
         <table id="rulesTable">
@@ -68,7 +79,7 @@
     </section>
 
     <section class="panel wide">
-      <h2>4. Resultado del PDF seleccionado</h2>
+      <h2>5. Resultado del PDF seleccionado</h2>
       <p id="currentRunMeta" class="muted"></p>
       <div id="summary" class="summary"></div>
       <div class="table-wrap">
