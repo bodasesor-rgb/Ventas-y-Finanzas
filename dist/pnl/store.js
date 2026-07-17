@@ -16,6 +16,7 @@ exports.saveRuns = saveRuns;
 exports.addRun = addRun;
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
+const categoryColors_1 = require("./categoryColors");
 const DATA_DIR = path_1.default.join(process.cwd(), "data");
 const RULES_FILE = path_1.default.join(DATA_DIR, "recurring-rules.json");
 const RUNS_FILE = path_1.default.join(DATA_DIR, "statement-runs.json");
@@ -25,20 +26,21 @@ function ensureDataDir() {
         fs_1.default.mkdirSync(DATA_DIR, { recursive: true });
 }
 exports.DEFAULT_CATEGORIES = [
-    { id: "ads", label: "Ads / publicidad", kind: "gasto", builtin: true },
-    { id: "pass", label: "Pase / peaje", kind: "gasto", builtin: true },
-    { id: "nomina", label: "Nómina", kind: "gasto", builtin: true },
-    { id: "proveedor", label: "Proveedor", kind: "gasto", builtin: true },
-    { id: "renta", label: "Renta", kind: "gasto", builtin: true },
-    { id: "servicios", label: "Servicios / software", kind: "gasto", builtin: true },
-    { id: "comisiones", label: "Comisiones bancarias", kind: "gasto", builtin: true },
-    { id: "impuestos", label: "Impuestos", kind: "gasto", builtin: true },
-    { id: "evento", label: "Costo de evento", kind: "gasto", builtin: true },
-    { id: "transferencia_persona", label: "Transferencia a persona", kind: "neutro", builtin: true },
-    { id: "ingreso", label: "Ingreso", kind: "ingreso", builtin: true },
-    { id: "venta", label: "Venta / anticipo cliente", kind: "ingreso", builtin: true },
-    { id: "otro", label: "Otro", kind: "neutro", builtin: true },
-    { id: "revisar", label: "Revisar", kind: "neutro", builtin: true },
+    { id: "ads", label: "Ads / publicidad", kind: "gasto", builtin: true, color: (0, categoryColors_1.colorForCategoryId)("ads") },
+    { id: "pass", label: "Pase / peaje", kind: "gasto", builtin: true, color: (0, categoryColors_1.colorForCategoryId)("pass") },
+    { id: "nomina", label: "Nómina", kind: "gasto", builtin: true, color: (0, categoryColors_1.colorForCategoryId)("nomina") },
+    { id: "proveedor", label: "Proveedor", kind: "gasto", builtin: true, color: (0, categoryColors_1.colorForCategoryId)("proveedor") },
+    { id: "renta", label: "Renta", kind: "gasto", builtin: true, color: (0, categoryColors_1.colorForCategoryId)("renta") },
+    { id: "servicios", label: "Servicios / software", kind: "gasto", builtin: true, color: (0, categoryColors_1.colorForCategoryId)("servicios") },
+    { id: "comisiones", label: "Comisiones bancarias", kind: "gasto", builtin: true, color: (0, categoryColors_1.colorForCategoryId)("comisiones") },
+    { id: "impuestos", label: "Impuestos", kind: "gasto", builtin: true, color: (0, categoryColors_1.colorForCategoryId)("impuestos") },
+    { id: "evento", label: "Costo de evento", kind: "gasto", builtin: true, color: (0, categoryColors_1.colorForCategoryId)("evento") },
+    { id: "pago", label: "Pago", kind: "gasto", builtin: true, color: (0, categoryColors_1.colorForCategoryId)("pago") },
+    { id: "transferencia_persona", label: "Transferencia a persona", kind: "neutro", builtin: true, color: (0, categoryColors_1.colorForCategoryId)("transferencia_persona") },
+    { id: "ingreso", label: "Ingreso", kind: "ingreso", builtin: true, color: (0, categoryColors_1.colorForCategoryId)("ingreso") },
+    { id: "venta", label: "Venta / anticipo cliente", kind: "ingreso", builtin: true, color: (0, categoryColors_1.colorForCategoryId)("venta") },
+    { id: "otro", label: "Otro", kind: "neutro", builtin: true, color: (0, categoryColors_1.colorForCategoryId)("otro") },
+    { id: "revisar", label: "Revisar", kind: "neutro", builtin: true, color: (0, categoryColors_1.colorForCategoryId)("revisar") },
 ];
 function slugCategory(label) {
     return String(label || "")
@@ -72,6 +74,12 @@ function loadCategories() {
                 changed = true;
             }
         }
+        raw.forEach((c, i) => {
+            if (!c.color) {
+                c.color = (0, categoryColors_1.colorForCategoryId)(c.id, i);
+                changed = true;
+            }
+        });
         if (changed) {
             saveCategories(raw);
             return categoriesCache;

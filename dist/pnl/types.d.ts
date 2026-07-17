@@ -6,8 +6,12 @@ export interface CategoryDef {
     id: string;
     label: string;
     kind: CategoryKind;
+    /** Color hex para vincular la categoría en la UI */
+    color?: string;
     /** Si false, el usuario la creó y puede borrarla */
     builtin?: boolean;
+    /** Creada automáticamente al leer un PDF */
+    autoCreated?: boolean;
 }
 export interface RecurringRule {
     id: string;

@@ -311,30 +311,32 @@ input.desc-edit:focus {
   gap: 0.35rem;
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 0.28rem 0.55rem 0.28rem 0.7rem;
+  padding: 0.28rem 0.55rem 0.28rem 0.55rem;
   background: #fff;
   font-size: 0.85rem;
 }
-.cat-pill.income {
-  border-color: #1a8f55;
-  background: #e8f6ef;
-  color: #0b6b3a;
+.cat-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  opacity: 0.9;
 }
 .cat-pill .cat-kind {
   font-size: 0.72rem;
-  color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
-.cat-pill.income .cat-kind { color: #0b6b3a; }
 .cat-pill button {
   margin: 0;
   padding: 0.1rem 0.4rem;
   background: transparent;
-  color: var(--muted);
   font-size: 0.85rem;
 }
-.cat-pill button:hover { color: var(--warn); }
+.cat-pill button:hover { opacity: 0.7; }
+select.cat-select {
+  border-width: 2px;
+  font-weight: 600;
+}
 .cat-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
 .cat-actions button { margin-top: 0; }
 

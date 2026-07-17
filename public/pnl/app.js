@@ -56,6 +56,47 @@ function categoryLabel(id) {
   return c ? c.label : id;
 }
 
+function categoryColor(id) {
+  const c = categories.find((x) => x.id === id);
+  if (c?.color) return c.color;
+  if (id === "ingreso" || id === "venta") return "#0b6b3a";
+  if (id === "revisar") return "#9a4d1c";
+  // hash simple
+  let hash = 0;
+  const s = String(id || "x");
+  for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+  const palette = [
+    "#0f6b5c",
+    "#1d4ed8",
+    "#7c3aed",
+    "#b45309",
+    "#be123c",
+    "#0e7490",
+    "#4d7c0f",
+    "#c2410c",
+  ];
+  return palette[hash % palette.length];
+}
+
+function contrastText(bg) {
+  const hex = String(bg || "").replace("#", "");
+  if (hex.length !== 6) return "#fff";
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.62 ? "#1c1914" : "#ffffff";
+}
+
+function tintBg(hex, alpha) {
+  const h = String(hex || "#888").replace("#", "");
+  if (h.length !== 6) return `rgba(0,0,0,${alpha})`;
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
 function isIncomeCat(id) {
   const c = categories.find((x) => x.id === id);
   if (c) return c.kind === "ingreso";
@@ -88,13 +129,23 @@ function renderCategories() {
   root.innerHTML = categories
     .map((c) => {
       const canDel = !c.builtin && c.id !== "revisar" && c.id !== "ingreso";
+      const color = c.color || categoryColor(c.id);
+      const fg = contrastText(color);
+      const auto = c.autoCreated ? " · auto" : "";
       return `
-        <span class="cat-pill ${c.kind === "ingreso" ? "income" : ""}" data-id="${escapeAttr(c.id)}">
+        <span class="cat-pill" data-id="${escapeAttr(c.id)}" style="background:${escapeAttr(
+          color
+        )};color:${escapeAttr(fg)};border-color:${escapeAttr(color)}">
+          <span class="cat-dot" style="background:${escapeAttr(fg)}"></span>
           <strong>${escapeHtml(c.label)}</strong>
-          <span class="cat-kind">${escapeHtml(c.kind)}</span>
+          <span class="cat-kind" style="color:${escapeAttr(fg)};opacity:.85">${escapeHtml(
+            c.kind
+          )}${auto}</span>
           ${
             canDel
-              ? `<button type="button" data-del-cat="${escapeAttr(c.id)}" title="Eliminar">✕</button>`
+              ? `<button type="button" data-del-cat="${escapeAttr(
+                  c.id
+                )}" title="Eliminar" style="color:${escapeAttr(fg)}">✕</button>`
               : ""
           }
         </span>
@@ -328,11 +379,12 @@ function renderRun(run) {
       a[0].localeCompare(b[0])
     )) {
       const chip = document.createElement("span");
-      const income = isIncomeCat(cat) || total > 0;
-      chip.className =
-        "chip" +
-        (cat === "revisar" || cat === "transferencia_persona" ? " warn" : "") +
-        (income ? " income" : "");
+      const color = categoryColor(cat);
+      const fg = contrastText(color);
+      chip.className = "chip chip-cat";
+      chip.style.background = color;
+      chip.style.color = fg;
+      chip.style.borderColor = color;
       chip.textContent = `${categoryLabel(cat)}: ${money(total)}`;
       summary.appendChild(chip);
     }
@@ -343,8 +395,11 @@ function renderRun(run) {
   for (const line of run.lines || []) {
     const tr = document.createElement("tr");
     const income = lineIsIncome(line);
+    const color = categoryColor(line.category);
     if (line.needsReview) tr.classList.add("review");
     if (income) tr.classList.add("income");
+    tr.style.background = tintBg(color, income ? 0.18 : 0.1);
+    tr.style.boxShadow = `inset 4px 0 0 ${color}`;
     tr.innerHTML = `
       <td>${escapeAttr(line.date || "")}</td>
       <td>
@@ -355,10 +410,16 @@ function renderRun(run) {
       <td class="amount ${income ? "income" : ""}">
         <input class="amount-edit" type="number" step="0.01" data-field="amount" data-line="${escapeAttr(
           line.id
-        )}" value="${escapeAttr(String(line.amount))}" />
+        )}" value="${escapeAttr(String(line.amount))}" style="${
+      income ? "color:#0b6b3a;font-weight:700" : ""
+    }" />
       </td>
       <td>
-        <select data-field="category" data-line="${escapeAttr(line.id)}">
+        <select class="cat-select" data-field="category" data-line="${escapeAttr(
+          line.id
+        )}" style="border-color:${escapeAttr(color)};background:${escapeAttr(
+      tintBg(color, 0.15)
+    )}">
           ${categoryOptionsHtml(line.category)}
         </select>
       </td>
@@ -552,7 +613,21 @@ async function init() {
       if (!res.ok || !data.ok) throw new Error(data.error || "Error upload");
       const period = data.stats.period || data.run.periodLabel || "";
       const savedAs = data.stats.savedAs || data.run.storedName || "";
-      status.textContent = `OK: ${data.stats.lines} movs · mes ${period} · guardado como ${savedAs} · ${data.stats.needsReview} a revisar`;
+      const created = (data.stats.categoriesCreated || []).join(", ");
+      status.textContent = `OK: ${data.stats.lines} movs · mes ${period} · ${savedAs} · ${data.stats.needsReview} a revisar${
+        created ? ` · categorías nuevas: ${created}` : ""
+      }`;
+      if (data.categories) {
+        categories = data.categories;
+        renderCategories();
+        renderRules();
+      } else {
+        try {
+          const catData = await api("/api/pnl/categories");
+          categories = catData.categories || categories;
+          renderCategories();
+        } catch (_) {}
+      }
       renderRun(data.run);
       await refreshLibrary();
       const runsRes = await api("/api/pnl/runs");
@@ -643,9 +718,15 @@ async function init() {
         const data = await api(`/api/pnl/runs/${currentRun.id}/reparse`, {
           method: "POST",
         });
+        const created = (data.stats.categoriesCreated || []).join(", ");
         status.textContent = `Reparse OK: ${data.stats.lines} movs · mes ${
           data.stats.period || ""
-        }`;
+        }${created ? ` · nuevas: ${created}` : ""}`;
+        if (data.categories) {
+          categories = data.categories;
+          renderCategories();
+          renderRules();
+        }
         renderRun(data.run);
         await refreshLibrary();
       } catch (e) {

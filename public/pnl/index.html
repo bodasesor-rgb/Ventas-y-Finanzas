@@ -5,21 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <title>Bodasesor — P&L Banco</title>
-  <link rel="stylesheet" href="/pnl/styles.css?v=20260717d" />
+  <link rel="stylesheet" href="/pnl/styles.css?v=20260717e" />
 </head>
 <body>
   <div class="version-banner" id="versionBanner">
-    UI v2026-07-17d — Categorías · ingresos en verde · montos editables
+    UI v2026-07-17e — Auto-categorías con color · montos editables
   </div>
 
   <header class="top">
     <div>
       <p class="brand">Bodasesor / Capybara</p>
       <h1>P&L desde estados de cuenta</h1>
-      <p class="sub">Sube un PDF → se guarda por mes → categoriza. Ingresos en verde. Montos editables si algo se ve raro.</p>
+      <p class="sub">Al leer el PDF, si aparece un comercio/pago nuevo se crea la categoría y se vincula con un color.</p>
     </div>
     <div class="top-links">
-      <span class="version-pill">v2026-07-17d</span>
+      <span class="version-pill">v2026-07-17e</span>
       <a class="link" href="/health">API health</a>
     </div>
   </header>
@@ -41,8 +41,8 @@
     </section>
 
     <section class="panel highlight-panel">
-      <h2>2. Categorías</h2>
-      <p class="muted">Los ingresos van en <span class="income-sample">verde</span>. Usa los botones para crear las tuyas.</p>
+      <h2>2. Categorías (con color)</h2>
+      <p class="muted">Cada categoría tiene color. Si el PDF trae un pago/comercio nuevo, se crea sola. Ingresos en <span class="income-sample">verde</span>.</p>
       <div id="categoriesList" class="cat-list"></div>
       <div class="cat-actions">
         <button type="button" id="addCategory" class="btn-big secondary">+ Agregar categoría</button>
@@ -110,6 +110,6 @@
     </section>
   </main>
 
-  <script src="/pnl/app.js?v=20260717d"></script>
+  <script src="/pnl/app.js?v=20260717e"></script>
 </body>
 </html>

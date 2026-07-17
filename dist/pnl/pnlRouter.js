@@ -13,6 +13,8 @@ const categorize_1 = require("./categorize");
 const parseStatement_1 = require("./parseStatement");
 const period_1 = require("./period");
 const statementFiles_1 = require("./statementFiles");
+const autoCategories_1 = require("./autoCategories");
+const categoryColors_1 = require("./categoryColors");
 const store_1 = require("./store");
 const uploadDir = path_1.default.join(process.cwd(), "uploads");
 if (!fs_1.default.existsSync(uploadDir))
@@ -60,7 +62,9 @@ exports.pnlRouter.put("/api/pnl/categories", (req, res) => {
             id,
             label: String(c.label).trim().slice(0, 80),
             kind,
+            color: c.color || (0, categoryColors_1.colorForCategoryId)(id, cleaned.length),
             builtin: Boolean(c.builtin),
+            autoCreated: Boolean(c.autoCreated),
         });
     }
     if (!cleaned.some((c) => c.id === "revisar")) {
@@ -97,7 +101,13 @@ exports.pnlRouter.post("/api/pnl/categories", (req, res) => {
         id = `${(0, store_1.slugCategory)(label)}_${n}`;
         n += 1;
     }
-    const created = { id, label, kind, builtin: false };
+    const created = {
+        id,
+        label,
+        kind,
+        color: (0, categoryColors_1.colorForCategoryId)(id, categories.length),
+        builtin: false,
+    };
     categories.push(created);
     (0, store_1.saveCategories)(categories);
     res.json({ ok: true, category: created, categories });
@@ -198,7 +208,8 @@ exports.pnlRouter.post("/api/pnl/upload", upload.single("statement"), async (req
         }
         const buffer = fs_1.default.readFileSync(req.file.path);
         const rules = (0, store_1.loadRules)();
-        const { text, lines } = await (0, parseStatement_1.parsePdfToLines)(buffer, rules);
+        const { text, lines: parsed } = await (0, parseStatement_1.parsePdfToLines)(buffer, rules);
+        const { lines, created } = (0, autoCategories_1.autoCreateCategoriesFromLines)(parsed);
         const summaryByCategory = (0, parseStatement_1.summarizeByCategory)(lines);
         const period = (0, period_1.detectPeriodFromText)(text);
         const saved = (0, statementFiles_1.saveStatementPdf)(req.file.path, period);
@@ -225,12 +236,14 @@ exports.pnlRouter.post("/api/pnl/upload", upload.single("statement"), async (req
         res.json({
             ok: true,
             run: runPublic(run),
+            categories: (0, store_1.loadCategories)(),
             stats: {
                 lines: lines.length,
                 needsReview: lines.filter((l) => l.needsReview).length,
                 matched: lines.filter((l) => l.matchedRuleId).length,
                 period: period.label,
                 savedAs: saved.storedName,
+                categoriesCreated: created,
             },
         });
     }
@@ -259,7 +272,8 @@ exports.pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
         return;
     }
     const rules = (0, store_1.loadRules)();
-    const lines = (0, parseStatement_1.extractLinesFromText)(text, rules);
+    const parsed = (0, parseStatement_1.extractLinesFromText)(text, rules);
+    const { lines, created } = (0, autoCategories_1.autoCreateCategoriesFromLines)(parsed);
     const period = (0, period_1.detectPeriodFromText)(text);
     run.lines = lines;
     run.summaryByCategory = (0, parseStatement_1.summarizeByCategory)(lines);
@@ -270,12 +284,14 @@ exports.pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
     res.json({
         ok: true,
         run: runPublic(run),
+        categories: (0, store_1.loadCategories)(),
         stats: {
             lines: lines.length,
             needsReview: lines.filter((l) => l.needsReview).length,
             matched: lines.filter((l) => l.matchedRuleId).length,
             textLength: text.length,
             period: period.label,
+            categoriesCreated: created,
         },
     });
 });

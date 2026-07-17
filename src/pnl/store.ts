@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { colorForCategoryId } from "./categoryColors";
 import type { CategoryDef, RecurringRule, StatementRun } from "./types";
 
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -12,20 +13,21 @@ function ensureDataDir(): void {
 }
 
 export const DEFAULT_CATEGORIES: CategoryDef[] = [
-  { id: "ads", label: "Ads / publicidad", kind: "gasto", builtin: true },
-  { id: "pass", label: "Pase / peaje", kind: "gasto", builtin: true },
-  { id: "nomina", label: "Nómina", kind: "gasto", builtin: true },
-  { id: "proveedor", label: "Proveedor", kind: "gasto", builtin: true },
-  { id: "renta", label: "Renta", kind: "gasto", builtin: true },
-  { id: "servicios", label: "Servicios / software", kind: "gasto", builtin: true },
-  { id: "comisiones", label: "Comisiones bancarias", kind: "gasto", builtin: true },
-  { id: "impuestos", label: "Impuestos", kind: "gasto", builtin: true },
-  { id: "evento", label: "Costo de evento", kind: "gasto", builtin: true },
-  { id: "transferencia_persona", label: "Transferencia a persona", kind: "neutro", builtin: true },
-  { id: "ingreso", label: "Ingreso", kind: "ingreso", builtin: true },
-  { id: "venta", label: "Venta / anticipo cliente", kind: "ingreso", builtin: true },
-  { id: "otro", label: "Otro", kind: "neutro", builtin: true },
-  { id: "revisar", label: "Revisar", kind: "neutro", builtin: true },
+  { id: "ads", label: "Ads / publicidad", kind: "gasto", builtin: true, color: colorForCategoryId("ads") },
+  { id: "pass", label: "Pase / peaje", kind: "gasto", builtin: true, color: colorForCategoryId("pass") },
+  { id: "nomina", label: "Nómina", kind: "gasto", builtin: true, color: colorForCategoryId("nomina") },
+  { id: "proveedor", label: "Proveedor", kind: "gasto", builtin: true, color: colorForCategoryId("proveedor") },
+  { id: "renta", label: "Renta", kind: "gasto", builtin: true, color: colorForCategoryId("renta") },
+  { id: "servicios", label: "Servicios / software", kind: "gasto", builtin: true, color: colorForCategoryId("servicios") },
+  { id: "comisiones", label: "Comisiones bancarias", kind: "gasto", builtin: true, color: colorForCategoryId("comisiones") },
+  { id: "impuestos", label: "Impuestos", kind: "gasto", builtin: true, color: colorForCategoryId("impuestos") },
+  { id: "evento", label: "Costo de evento", kind: "gasto", builtin: true, color: colorForCategoryId("evento") },
+  { id: "pago", label: "Pago", kind: "gasto", builtin: true, color: colorForCategoryId("pago") },
+  { id: "transferencia_persona", label: "Transferencia a persona", kind: "neutro", builtin: true, color: colorForCategoryId("transferencia_persona") },
+  { id: "ingreso", label: "Ingreso", kind: "ingreso", builtin: true, color: colorForCategoryId("ingreso") },
+  { id: "venta", label: "Venta / anticipo cliente", kind: "ingreso", builtin: true, color: colorForCategoryId("venta") },
+  { id: "otro", label: "Otro", kind: "neutro", builtin: true, color: colorForCategoryId("otro") },
+  { id: "revisar", label: "Revisar", kind: "neutro", builtin: true, color: colorForCategoryId("revisar") },
 ];
 
 export function slugCategory(label: string): string {
@@ -63,6 +65,12 @@ export function loadCategories(): CategoryDef[] {
         changed = true;
       }
     }
+    raw.forEach((c, i) => {
+      if (!c.color) {
+        c.color = colorForCategoryId(c.id, i);
+        changed = true;
+      }
+    });
     if (changed) {
       saveCategories(raw);
       return categoriesCache!;
