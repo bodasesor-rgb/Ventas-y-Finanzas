@@ -4,8 +4,13 @@ export declare function parsePdfToLines(buffer: Buffer, rules: RecurringRule[]):
     lines: BankLine[];
 }>;
 /**
- * Extrae movimiento + saldo.
- * Prioridad: cola USD/T.C. → par final de montos MXN.
+ * Extrae montos; soporta saldo negativo Banamex escrito como "329.95-".
+ * Orden: quitar T.C./POS → separar montos pegados → aplicar signo −.
+ */
+export declare function collectMoney(s: string): number[];
+/**
+ * Extrae movimiento + saldo (legado / debug).
+ * El parser principal usa cadena de saldos.
  */
 export declare function extractMoveAndSaldo(body: string): {
     move: number;
