@@ -328,17 +328,48 @@ pnlRouter.patch("/api/pnl/runs/:runId/lines/:lineId", (req, res) => {
     res.status(404).json({ ok: false, error: "Línea no encontrada" });
     return;
   }
-  const { category } = req.body || {};
-  if (!category) {
-    res.status(400).json({ ok: false, error: "Falta category" });
+  const { category, amount, description, needsReview } = req.body || {};
+  if (
+    category === undefined &&
+    amount === undefined &&
+    description === undefined &&
+    needsReview === undefined
+  ) {
+    res.status(400).json({
+      ok: false,
+      error: "Envía category, amount, description y/ o needsReview",
+    });
     return;
   }
-  line.category = String(category);
-  line.needsReview =
-    line.category === "revisar" ||
-    line.category === "transferencia_persona";
-  if (isIncomeCategory(line.category)) line.needsReview = false;
-  line.matchedRuleId = undefined;
+
+  if (category !== undefined) {
+    line.category = String(category);
+    line.matchedRuleId = undefined;
+  }
+  if (description !== undefined) {
+    line.description = String(description).trim().slice(0, 300);
+  }
+  if (amount !== undefined) {
+    const n = Number(amount);
+    if (!Number.isFinite(n)) {
+      res.status(400).json({ ok: false, error: "amount inválido" });
+      return;
+    }
+    line.amount = Math.round(n * 100) / 100;
+    line.direction = line.amount >= 0 ? "abono" : "cargo";
+    if (line.amount > 0 && (line.category === "revisar" || !line.category)) {
+      line.category = "ingreso";
+    }
+  }
+  if (needsReview !== undefined) {
+    line.needsReview = Boolean(needsReview);
+  } else if (category !== undefined) {
+    line.needsReview =
+      line.category === "revisar" ||
+      line.category === "transferencia_persona";
+    if (isIncomeCategory(line.category)) line.needsReview = false;
+  }
+
   run.summaryByCategory = summarizeByCategory(run.lines);
   saveRuns(runs);
   res.json({ ok: true, line, summaryByCategory: run.summaryByCategory });

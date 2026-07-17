@@ -22,7 +22,15 @@ try {
 catch (err) {
     console.error("[boot] pnl router NO cargó (ventas sigue activa)", err);
 }
-app.use(express_1.default.static(path_1.default.join(process.cwd(), "public")));
+app.use(express_1.default.static(path_1.default.join(process.cwd(), "public"), {
+    etag: false,
+    lastModified: false,
+    setHeaders(res, filePath) {
+        if (/\.(js|css|html)$/i.test(filePath)) {
+            res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+        }
+    },
+}));
 app.get("/", (_req, res) => {
     res.redirect("/pnl/");
 });

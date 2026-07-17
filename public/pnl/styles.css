@@ -206,6 +206,34 @@ tr.review { background: #fff4e8; }
 tr.income { background: #e8f6ef; }
 .amount { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .amount.income { color: #0b6b3a; font-weight: 700; }
+input.amount-edit {
+  width: 7.5rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-align: right;
+  padding: 0.35rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+tr.income input.amount-edit {
+  color: #0b6b3a;
+  border-color: #1a8f55;
+  background: #f3fbf6;
+}
+input.desc-edit {
+  width: 100%;
+  min-width: 12rem;
+  padding: 0.35rem 0.4rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+}
+input.desc-edit:focus {
+  border-color: var(--accent);
+  background: #fff;
+}
+.line-save-ok { outline: 2px solid #1a8f55; }
 .summary {
   display: flex;
   flex-wrap: wrap;

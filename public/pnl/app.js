@@ -347,31 +347,97 @@ function renderRun(run) {
     if (income) tr.classList.add("income");
     tr.innerHTML = `
       <td>${escapeAttr(line.date || "")}</td>
-      <td>${escapeAttr(line.description)}</td>
-      <td class="amount ${income ? "income" : ""}">${money(line.amount)}</td>
       <td>
-        <select data-line="${line.id}">
+        <input class="desc-edit" data-field="description" data-line="${escapeAttr(
+          line.id
+        )}" value="${escapeAttr(line.description)}" />
+      </td>
+      <td class="amount ${income ? "income" : ""}">
+        <input class="amount-edit" type="number" step="0.01" data-field="amount" data-line="${escapeAttr(
+          line.id
+        )}" value="${escapeAttr(String(line.amount))}" />
+      </td>
+      <td>
+        <select data-field="category" data-line="${escapeAttr(line.id)}">
           ${categoryOptionsHtml(line.category)}
         </select>
       </td>
-      <td>${line.needsReview ? "sí" : ""}</td>
+      <td>
+        <input type="checkbox" data-field="needsReview" data-line="${escapeAttr(
+          line.id
+        )}" ${line.needsReview ? "checked" : ""} title="Marcar para revisar" />
+      </td>
     `;
     tbody.appendChild(tr);
   }
 
-  tbody.querySelectorAll("select[data-line]").forEach((sel) => {
+  async function patchLine(lineId, body) {
+    await api(`/api/pnl/runs/${run.id}/lines/${lineId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const fresh = await api(`/api/pnl/runs/${run.id}`);
+    renderRun(fresh.run);
+    refreshLibrary();
+  }
+
+  tbody.querySelectorAll("select[data-field='category']").forEach((sel) => {
     sel.addEventListener("change", async () => {
       try {
-        await api(`/api/pnl/runs/${run.id}/lines/${sel.dataset.line}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ category: sel.value }),
-        });
-        const fresh = await api(`/api/pnl/runs/${run.id}`);
-        renderRun(fresh.run);
-        refreshLibrary();
+        await patchLine(sel.dataset.line, { category: sel.value });
       } catch (e) {
         alert(e.message);
+      }
+    });
+  });
+
+  tbody.querySelectorAll("input[data-field='needsReview']").forEach((el) => {
+    el.addEventListener("change", async () => {
+      try {
+        await patchLine(el.dataset.line, { needsReview: el.checked });
+      } catch (e) {
+        alert(e.message);
+      }
+    });
+  });
+
+  tbody.querySelectorAll("input[data-field='amount']").forEach((el) => {
+    const save = async () => {
+      const n = Number(el.value);
+      if (!Number.isFinite(n)) {
+        alert("Monto inválido");
+        return;
+      }
+      try {
+        el.classList.add("line-save-ok");
+        await patchLine(el.dataset.line, { amount: n });
+      } catch (e) {
+        alert(e.message);
+      }
+    };
+    el.addEventListener("change", save);
+    el.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        save();
+      }
+    });
+  });
+
+  tbody.querySelectorAll("input[data-field='description']").forEach((el) => {
+    const save = async () => {
+      try {
+        await patchLine(el.dataset.line, { description: el.value });
+      } catch (e) {
+        alert(e.message);
+      }
+    };
+    el.addEventListener("change", save);
+    el.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        save();
       }
     });
   });
