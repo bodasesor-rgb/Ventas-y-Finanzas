@@ -1,45 +1,49 @@
 /**
- * UN solo deploy (/exec) para el Sheet de ventas/finanzas.
+ * ============================================================
+ * Apps Script — Bodasesor Ventas / Finanzas (UN solo /exec)
+ * ============================================================
+ * INCLUYE:
+ * 1) Lee JSON: { dealId, values[20], sheetName }
+ * 2) Solo escribe pestañas "Eventos YYYY" (Metricas/P&L = no)
+ * 3) Idempotencia por Kommo Deal ID (columna T = 20)
+ * 4) Append o update (no duplica)
+ * 5) NO pisa: Costo(K), Pagado(L), Por pagar(M), Ganancia(N),
+ *    Margen(O), IVA(S) — esos son manual / fórmulas
+ * 6) Al append (y si faltan en update) pone fórmulas:
+ *    M = Venta-Pagado | N = Venta-Costo | O = Ganancia/Venta
  *
- * Pestañas:
- * - Eventos 2026  → el bot SÍ escribe
- * - Metricas 2026 → NO (fórmulas)
- * - P&L 2026      → NO (fórmulas)
- *
- * Columnas Eventos (A–T, sin Genero):
- * Cliente | Fecha evento | Fecha cierre | Telefono | Correo | Tipo evento |
- * Invitados | Dirección | Horario | Venta | Costo | Pagado | Por pagar |
- * Ganancia | Margen | Link | Mes cierre | Forma de Pago | IVA | Kommo Deal ID
+ * COLUMNAS Eventos (A–T):
+ * A Cliente | B Fecha evento | C Fecha cierre | D Telefono | E Correo
+ * F Tipo evento | G Invitados | H Dirección | I Horario | J Venta
+ * K Costo | L Pagado | M Por pagar | N Ganancia | O Margen
+ * P Link | Q Mes cierre | R Forma de Pago | S IVA | T Kommo Deal ID
+ * ============================================================
  */
 const DEFAULT_SHEET_NAME = 'Eventos 2026';
-const DEAL_ID_COL = 20; // T = Kommo Deal ID
+const DEAL_ID_COL = 20; // T
 
 function isWritableSheet_(name) {
   return /^Eventos \d{4}$/.test(name);
 }
 
-// Escribe Kommo. NO toca K,L,M,N,O,S (Costo, Pagado, fórmulas, IVA)
-// 1-based: A..J + P..R + T  = 1-10, 16-18, 20
+// Columnas que el bot SÍ escribe (1-based). Resto intocable.
 const WRITE_COLS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 16, 17, 18, 20];
 
 function doPost(e) {
   try {
     const data = JSON.parse(e.postData.contents);
-    const values = data.values;
-    const dealId = String(data.dealId || (values && values[19]) || '').trim();
+    const values = (data.values || []).slice(0, DEAL_ID_COL);
+    const dealId = String(data.dealId || values[19] || '').trim();
     const sheetName = String(data.sheetName || DEFAULT_SHEET_NAME).trim();
 
-    if (!dealId || !values || values.length < DEAL_ID_COL) {
-      return json_({ ok: false, error: 'Faltan dealId o values' });
+    if (!dealId || values.length < DEAL_ID_COL) {
+      return json_({ ok: false, error: 'Faltan dealId o values (se esperan 20 columnas A–T)' });
     }
 
     if (!isWritableSheet_(sheetName)) {
       return json_({
         ok: false,
-        error:
-          'Pestaña no escribible: ' +
-          sheetName +
-          '. Solo Eventos YYYY.',
+        error: 'Pestaña no escribible: ' + sheetName + '. Solo Eventos YYYY.',
       });
     }
 
@@ -64,11 +68,10 @@ function doPost(e) {
 
     if (rowIndex === -1) {
       rowIndex = sheet.getLastRow() + 1;
-      sheet.getRange(rowIndex, 1, 1, values.length).setValues([values]);
-      // Fórmulas calculadas en la fila nueva
-      sheet.getRange(rowIndex, 13).setFormula('=IF(J' + rowIndex + '="","",J' + rowIndex + '-IF(L' + rowIndex + '="",0,L' + rowIndex + '))'); // Por pagar
-      sheet.getRange(rowIndex, 14).setFormula('=IF(J' + rowIndex + '="","",J' + rowIndex + '-IF(K' + rowIndex + '="",0,K' + rowIndex + '))'); // Ganancia
-      sheet.getRange(rowIndex, 15).setFormula('=IF(OR(J' + rowIndex + '="",J' + rowIndex + '=0),"",N' + rowIndex + '/J' + rowIndex + ')'); // Margen
+      // Asegura array de 20 celdas
+      while (values.length < DEAL_ID_COL) values.push('');
+      sheet.getRange(rowIndex, 1, 1, DEAL_ID_COL).setValues([values]);
+      applyCalcFormulas_(sheet, rowIndex);
       return json_({
         ok: true,
         action: 'appended',
@@ -78,9 +81,12 @@ function doPost(e) {
       });
     }
 
+    // Update: solo columnas Kommo; no toca K,L,M,N,O,S
     WRITE_COLS.forEach(function (col) {
       sheet.getRange(rowIndex, col).setValue(values[col - 1]);
     });
+    applyCalcFormulas_(sheet, rowIndex);
+
     return json_({
       ok: true,
       action: 'updated',
@@ -91,6 +97,26 @@ function doPost(e) {
   } catch (err) {
     return json_({ ok: false, error: String(err) });
   }
+}
+
+/** Por pagar (M), Ganancia (N), Margen (O) */
+function applyCalcFormulas_(sheet, row) {
+  sheet
+    .getRange(row, 13)
+    .setFormula(
+      '=IF(J' + row + '="","",J' + row + '-IF(L' + row + '="",0,L' + row + '))'
+    );
+  sheet
+    .getRange(row, 14)
+    .setFormula(
+      '=IF(J' + row + '="","",J' + row + '-IF(K' + row + '="",0,K' + row + '))'
+    );
+  sheet
+    .getRange(row, 15)
+    .setFormula(
+      '=IF(OR(J' + row + '="",J' + row + '=0),"",N' + row + '/J' + row + ')'
+    );
+  sheet.getRange(row, 15).setNumberFormat('0.00%');
 }
 
 function json_(obj) {
