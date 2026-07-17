@@ -1,65 +1,86 @@
 /**
  * ============================================================
  * Apps Script — Bodasesor Ventas / Finanzas (UN solo /exec)
+ * VERSION: 2026-07-17-v3
  * ============================================================
- * INCLUYE:
- * 1) Lee JSON: { dealId, values[20], sheetName }
- * 2) Solo escribe pestañas "Eventos YYYY" (Metricas/P&L = no)
- * 3) Idempotencia por Kommo Deal ID (columna T = 20)
- * 4) Append o update (no duplica)
- * 5) NO pisa: Costo(K), Pagado(L), Por pagar(M), Ganancia(N),
- *    Margen(O), IVA(S) — esos son manual / fórmulas
- * 6) Al append (y si faltan en update) pone fórmulas:
- *    M = Venta-Pagado | N = Venta-Costo | O = Ganancia/Venta
- *
- * COLUMNAS Eventos (A–T):
- * A Cliente | B Fecha evento | C Fecha cierre | D Telefono | E Correo
- * F Tipo evento | G Invitados | H Dirección | I Horario | J Venta
- * K Costo | L Pagado | M Por pagar | N Ganancia | O Margen
- * P Link | Q Mes cierre | R Forma de Pago | S IVA | T Kommo Deal ID
+ * Columnas A–T (20). Deal ID = T.
+ * Solo escribe Eventos YYYY.
  * ============================================================
  */
-const DEFAULT_SHEET_NAME = 'Eventos 2026';
-const DEAL_ID_COL = 20; // T
+var SCRIPT_VERSION = '2026-07-17-v3';
+var DEFAULT_SHEET_NAME = 'Eventos 2026';
+var DEAL_ID_COL = 20; // T
 
 function isWritableSheet_(name) {
   return /^Eventos \d{4}$/.test(name);
 }
 
-// Columnas que el bot SÍ escribe (1-based). Resto intocable.
-const WRITE_COLS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 16, 17, 18, 20];
+// A–J + P–R + T. No toca K,L,M,N,O,S
+var WRITE_COLS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 16, 17, 18, 20];
 
 function doPost(e) {
   try {
-    const data = JSON.parse(e.postData.contents);
-    const values = (data.values || []).slice(0, DEAL_ID_COL);
-    const dealId = String(data.dealId || values[19] || '').trim();
-    const sheetName = String(data.sheetName || DEFAULT_SHEET_NAME).trim();
+    var raw = e && e.postData && e.postData.contents ? e.postData.contents : '';
+    if (!raw) {
+      return json_({
+        ok: false,
+        version: SCRIPT_VERSION,
+        error: 'Sin postData.contents (el POST llegó vacío)',
+      });
+    }
 
-    if (!dealId || values.length < DEAL_ID_COL) {
-      return json_({ ok: false, error: 'Faltan dealId o values (se esperan 20 columnas A–T)' });
+    var data = JSON.parse(raw);
+    var values = data.values;
+    if (!values || !Array.isArray(values)) {
+      return json_({
+        ok: false,
+        version: SCRIPT_VERSION,
+        error: 'values no es array',
+        typeofValues: typeof values,
+        rawPreview: String(raw).slice(0, 200),
+      });
+    }
+
+    values = values.slice(0, DEAL_ID_COL);
+    while (values.length < DEAL_ID_COL) values.push('');
+
+    var dealId = String(data.dealId || values[19] || '').trim();
+    var sheetName = String(data.sheetName || DEFAULT_SHEET_NAME).trim();
+
+    if (!dealId) {
+      return json_({
+        ok: false,
+        version: SCRIPT_VERSION,
+        error: 'Falta dealId',
+        valuesLength: values.length,
+      });
     }
 
     if (!isWritableSheet_(sheetName)) {
       return json_({
         ok: false,
-        error: 'Pestaña no escribible: ' + sheetName + '. Solo Eventos YYYY.',
+        version: SCRIPT_VERSION,
+        error: 'Pestaña no escribible: ' + sheetName,
       });
     }
 
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
     if (!sheet) {
-      return json_({ ok: false, error: 'No existe pestaña: ' + sheetName });
+      return json_({
+        ok: false,
+        version: SCRIPT_VERSION,
+        error: 'No existe pestaña: ' + sheetName,
+      });
     }
 
-    const lastRow = Math.max(sheet.getLastRow(), 1);
-    const ids =
+    var lastRow = Math.max(sheet.getLastRow(), 1);
+    var ids =
       lastRow > 1
         ? sheet.getRange(2, DEAL_ID_COL, lastRow, DEAL_ID_COL).getValues()
         : [];
 
-    let rowIndex = -1;
-    for (let i = 0; i < ids.length; i++) {
+    var rowIndex = -1;
+    for (var i = 0; i < ids.length; i++) {
       if (String(ids[i][0]).trim() === dealId) {
         rowIndex = i + 2;
         break;
@@ -68,12 +89,11 @@ function doPost(e) {
 
     if (rowIndex === -1) {
       rowIndex = sheet.getLastRow() + 1;
-      // Asegura array de 20 celdas
-      while (values.length < DEAL_ID_COL) values.push('');
       sheet.getRange(rowIndex, 1, 1, DEAL_ID_COL).setValues([values]);
       applyCalcFormulas_(sheet, rowIndex);
       return json_({
         ok: true,
+        version: SCRIPT_VERSION,
         action: 'appended',
         row: rowIndex,
         dealId: dealId,
@@ -81,25 +101,29 @@ function doPost(e) {
       });
     }
 
-    // Update: solo columnas Kommo; no toca K,L,M,N,O,S
-    WRITE_COLS.forEach(function (col) {
+    for (var c = 0; c < WRITE_COLS.length; c++) {
+      var col = WRITE_COLS[c];
       sheet.getRange(rowIndex, col).setValue(values[col - 1]);
-    });
+    }
     applyCalcFormulas_(sheet, rowIndex);
 
     return json_({
       ok: true,
+      version: SCRIPT_VERSION,
       action: 'updated',
       row: rowIndex,
       dealId: dealId,
       sheetName: sheetName,
     });
   } catch (err) {
-    return json_({ ok: false, error: String(err) });
+    return json_({
+      ok: false,
+      version: SCRIPT_VERSION,
+      error: String(err),
+    });
   }
 }
 
-/** Por pagar (M), Ganancia (N), Margen (O) */
 function applyCalcFormulas_(sheet, row) {
   sheet
     .getRange(row, 13)
@@ -123,4 +147,9 @@ function json_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(
     ContentService.MimeType.JSON
   );
+}
+
+/** Prueba rápida en el editor: Ejecutar → testPing */
+function testPing() {
+  Logger.log(SCRIPT_VERSION);
 }

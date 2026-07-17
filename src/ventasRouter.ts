@@ -79,6 +79,7 @@ ventasRouter.post(
         ok: boolean;
         action?: string;
         row?: number;
+        version?: string;
         error?: string;
       } = { attempted: false, ok: false };
 
@@ -101,6 +102,7 @@ ventasRouter.post(
             ok: true,
             action: result.action,
             row: result.row,
+            version: result.version,
           };
           console.log("[ventas][fase2] Sheet write OK", sheetWrite);
         } catch (writeErr) {

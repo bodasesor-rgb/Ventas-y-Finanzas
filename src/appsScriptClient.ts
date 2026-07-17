@@ -1,5 +1,6 @@
 export interface AppsScriptWriteResult {
   ok: boolean;
+  version?: string;
   action?: "appended" | "updated";
   row?: number;
   dealId?: string;
