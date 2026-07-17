@@ -11,11 +11,11 @@ export const KOMMO_FIELD_IDS = {
   FORMA_DE_PAGO: 1049180,
   /** Tipo de evento → columna "Tipo de evento" */
   TIPO_DE_EVENTO: 1048782,
-  /** Dirección de evento — Fase 1: no se escribe al Sheet (queda vacío / Jotform) */
+  /** Dirección de evento → columna "Dirección de evento" */
   DIRECCION_EVENTO: 1048774,
-  /** Fecha y horario — Fase 1: no se escribe al Sheet */
+  /** Fecha y horario → columnas "Fecha del evento" + "Horario" */
   FECHA_Y_HORARIO: 1048778,
-  /** Número de invitados — Fase 1: no se escribe al Sheet */
+  /** Número de invitados → columna "Invitados" */
   NUMERO_INVITADOS: 1048780,
   /** Requerimientos — no mapea al Sheet de ventas */
   REQUERIMIENTOS: 1048776,

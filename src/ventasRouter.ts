@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import {
   extractLeadIdFromWebhook,
+  fetchLeadWithContact,
   fetchRecentLeads,
 } from "./kommoApi";
 import { mapDealToFilaVentas } from "./mapDealToFila";
@@ -69,8 +70,7 @@ ventasRouter.post(
   }
 );
 
-/** Re-sincroniza un deal por ID (si el webhook no disparó). */
-ventasRouter.post("/api/ventas/sync/:dealId", async (req, res) => {
+async function handleManualSync(req: Request, res: Response): Promise<void> {
   const dealId = Number(req.params.dealId);
   if (!Number.isFinite(dealId) || dealId <= 0) {
     res.status(400).json({ ok: false, error: "dealId inválido" });
@@ -96,7 +96,11 @@ ventasRouter.post("/api/ventas/sync/:dealId", async (req, res) => {
       error: err instanceof Error ? err.message : String(err),
     });
   }
-});
+}
+
+/** Re-sincroniza un deal por ID (POST o GET para abrir en navegador). */
+ventasRouter.post("/api/ventas/sync/:dealId", handleManualSync);
+ventasRouter.get("/api/ventas/sync/:dealId", handleManualSync);
 
 /** Último webhook aceptado + último sync completado. */
 ventasRouter.get("/api/ventas/last", (_req, res) => {
@@ -105,6 +109,31 @@ ventasRouter.get("/api/ventas/last", (_req, res) => {
     accepted: getLastWebhookAccepted(),
     lastSync: getLastVentasSync(),
   });
+});
+
+/** Debug: deal Kommo crudo + fila mapeada (para ver campos). */
+ventasRouter.get("/api/ventas/lead/:dealId", async (req, res) => {
+  const dealId = Number(req.params.dealId);
+  if (!Number.isFinite(dealId) || dealId <= 0) {
+    res.status(400).json({ ok: false, error: "dealId inválido" });
+    return;
+  }
+  try {
+    const lead = await fetchLeadWithContact(dealId);
+    const fila = mapDealToFilaVentas(lead);
+    const fields = (lead.custom_fields_values || []).map((f) => ({
+      field_id: f.field_id,
+      field_name: f.field_name,
+      field_type: f.field_type,
+      value: f.values?.[0]?.value ?? null,
+    }));
+    res.status(200).json({ ok: true, dealId: String(dealId), fila, fields, lead });
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 });
 
 /** Últimos deals tocados en Kommo (para elegir cuál sincronizar). */

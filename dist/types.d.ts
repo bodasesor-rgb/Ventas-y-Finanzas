@@ -32,9 +32,11 @@ export interface KommoCustomFieldValue {
     field_id: number;
     field_name?: string;
     field_code?: string;
+    field_type?: string;
     values?: Array<{
-        value?: string | number | boolean;
+        value?: string | number | boolean | Record<string, unknown>;
         enum_id?: number;
+        enum_code?: string;
     }>;
 }
 export interface KommoContactEmbedded {

@@ -48,8 +48,7 @@ exports.ventasRouter.post("/webhooks/kommo/deal-won", (req, res) => {
         console.error("[ventas] Error en sync background", err);
     });
 });
-/** Re-sincroniza un deal por ID (si el webhook no disparó). */
-exports.ventasRouter.post("/api/ventas/sync/:dealId", async (req, res) => {
+async function handleManualSync(req, res) {
     const dealId = Number(req.params.dealId);
     if (!Number.isFinite(dealId) || dealId <= 0) {
         res.status(400).json({ ok: false, error: "dealId inválido" });
@@ -76,7 +75,10 @@ exports.ventasRouter.post("/api/ventas/sync/:dealId", async (req, res) => {
             error: err instanceof Error ? err.message : String(err),
         });
     }
-});
+}
+/** Re-sincroniza un deal por ID (POST o GET para abrir en navegador). */
+exports.ventasRouter.post("/api/ventas/sync/:dealId", handleManualSync);
+exports.ventasRouter.get("/api/ventas/sync/:dealId", handleManualSync);
 /** Último webhook aceptado + último sync completado. */
 exports.ventasRouter.get("/api/ventas/last", (_req, res) => {
     res.status(200).json({
@@ -84,6 +86,31 @@ exports.ventasRouter.get("/api/ventas/last", (_req, res) => {
         accepted: (0, ventasSync_1.getLastWebhookAccepted)(),
         lastSync: (0, ventasSync_1.getLastVentasSync)(),
     });
+});
+/** Debug: deal Kommo crudo + fila mapeada (para ver campos). */
+exports.ventasRouter.get("/api/ventas/lead/:dealId", async (req, res) => {
+    const dealId = Number(req.params.dealId);
+    if (!Number.isFinite(dealId) || dealId <= 0) {
+        res.status(400).json({ ok: false, error: "dealId inválido" });
+        return;
+    }
+    try {
+        const lead = await (0, kommoApi_1.fetchLeadWithContact)(dealId);
+        const fila = (0, mapDealToFila_1.mapDealToFilaVentas)(lead);
+        const fields = (lead.custom_fields_values || []).map((f) => ({
+            field_id: f.field_id,
+            field_name: f.field_name,
+            field_type: f.field_type,
+            value: f.values?.[0]?.value ?? null,
+        }));
+        res.status(200).json({ ok: true, dealId: String(dealId), fila, fields, lead });
+    }
+    catch (err) {
+        res.status(502).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
 });
 /** Últimos deals tocados en Kommo (para elegir cuál sincronizar). */
 exports.ventasRouter.get("/api/ventas/recent", async (req, res) => {

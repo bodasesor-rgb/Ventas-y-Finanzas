@@ -1,16 +1,43 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SHEET_HEADERS = void 0;
+exports.parseFechaYHorario = parseFechaYHorario;
 exports.mapDealToFilaVentas = mapDealToFilaVentas;
 exports.filaToOrderedValues = filaToOrderedValues;
 const kommoFieldIds_1 = require("./kommoFieldIds");
+function findField(fields, fieldId) {
+    return fields?.find((f) => f.field_id === fieldId);
+}
+function customFieldRaw(fields, fieldId) {
+    const field = findField(fields, fieldId);
+    return field?.values?.[0]?.value;
+}
 function customFieldValue(fields, fieldId) {
-    if (!fields?.length)
-        return "";
-    const field = fields.find((f) => f.field_id === fieldId);
-    const raw = field?.values?.[0]?.value;
+    const raw = customFieldRaw(fields, fieldId);
     if (raw === undefined || raw === null)
         return "";
+    if (typeof raw === "object") {
+        // Dirección inteligente Kommo a veces viene como objeto
+        const o = raw;
+        const parts = [
+            o.address_line_1,
+            o.address_line_2,
+            o.city,
+            o.state,
+            o.zip,
+            o.country,
+        ]
+            .map((x) => (x == null ? "" : String(x).trim()))
+            .filter(Boolean);
+        if (parts.length)
+            return parts.join(", ");
+        try {
+            return JSON.stringify(raw);
+        }
+        catch {
+            return "";
+        }
+    }
     return String(raw).trim();
 }
 function contactPhone(contact) {
@@ -59,6 +86,63 @@ function unixToIsoDate(unixSeconds) {
         return "";
     return d.toISOString().slice(0, 10);
 }
+/** Fecha/hora en zona México (eventos locales). */
+function mexicoParts(unixSeconds) {
+    const d = new Date(unixSeconds * 1000);
+    if (Number.isNaN(d.getTime()))
+        return { fecha: "", horario: "" };
+    const fecha = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Mexico_City",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).format(d);
+    const horario = new Intl.DateTimeFormat("es-MX", {
+        timeZone: "America/Mexico_City",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+    }).format(d);
+    return { fecha, horario };
+}
+/**
+ * Campo Kommo "Fecha y horario" → columnas Fecha del evento + Horario.
+ * Acepta unix, ISO, o texto tipo "14/08/2026 18:00".
+ */
+function parseFechaYHorario(raw) {
+    if (raw === undefined || raw === null || raw === "") {
+        return { fecha: "", horario: "" };
+    }
+    if (typeof raw === "number" && Number.isFinite(raw) && raw > 1e9) {
+        return mexicoParts(raw > 1e12 ? Math.floor(raw / 1000) : raw);
+    }
+    const s = String(raw).trim();
+    if (/^\d{9,13}$/.test(s)) {
+        const n = Number(s);
+        return mexicoParts(n > 1e12 ? Math.floor(n / 1000) : n);
+    }
+    // ISO / "2026-08-14T18:00:00"
+    const iso = Date.parse(s);
+    if (!Number.isNaN(iso)) {
+        return mexicoParts(Math.floor(iso / 1000));
+    }
+    // "14/08/2026 18:00" o "14-08-2026 18:00"
+    const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?:\s+(\d{1,2}):(\d{2}))?/);
+    if (m) {
+        const day = m[1].padStart(2, "0");
+        const month = m[2].padStart(2, "0");
+        let year = m[3];
+        if (year.length === 2)
+            year = `20${year}`;
+        const fecha = `${year}-${month}-${day}`;
+        const horario = m[4] != null ? `${m[4].padStart(2, "0")}:${m[5]}` : "";
+        return { fecha, horario };
+    }
+    // Solo fecha ISO ya recortada
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s))
+        return { fecha: s, horario: "" };
+    return { fecha: s, horario: "" };
+}
 function mesFromFechaCierre(fechaIso) {
     if (!fechaIso || fechaIso.length < 7)
         return "";
@@ -73,16 +157,17 @@ function mapDealToFilaVentas(lead) {
     const fechaDeCierre = unixToIsoDate(lead.closed_at) ||
         unixToIsoDate(lead.updated_at) ||
         unixToIsoDate(lead.created_at);
+    const { fecha: fechaDelEvento, horario } = parseFechaYHorario(customFieldRaw(fields, kommoFieldIds_1.KOMMO_FIELD_IDS.FECHA_Y_HORARIO));
     return {
         cliente: (contact?.name || lead.name || "").trim(),
-        fechaDelEvento: "",
+        fechaDelEvento,
         fechaDeCierre,
         telefono: contactPhone(contact),
         correo: contactEmail(contact),
         tipoDeEvento: customFieldValue(fields, kommoFieldIds_1.KOMMO_FIELD_IDS.TIPO_DE_EVENTO),
-        invitados: "",
-        direccionDeEvento: "",
-        horario: "",
+        invitados: customFieldValue(fields, kommoFieldIds_1.KOMMO_FIELD_IDS.NUMERO_INVITADOS),
+        direccionDeEvento: customFieldValue(fields, kommoFieldIds_1.KOMMO_FIELD_IDS.DIRECCION_EVENTO),
+        horario,
         venta: customFieldValue(fields, kommoFieldIds_1.KOMMO_FIELD_IDS.MONTO_CIERRE),
         costo: "",
         pagado: "",
