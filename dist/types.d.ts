@@ -55,17 +55,19 @@ export interface KommoLead {
         contacts?: KommoContactEmbedded[];
     };
 }
+/** Payload Kommo: JSON o form-urlencoded (a veces array, a veces objeto {0:…}). */
+export type KommoWebhookLeadBucket = Array<Partial<KommoLead> & {
+    id?: number | string;
+}> | (Partial<KommoLead> & {
+    id?: number | string;
+}) | Record<string, Partial<KommoLead> & {
+    id?: number | string;
+}> | undefined;
 export interface KommoWebhookBody {
     leads?: {
-        status?: Array<Partial<KommoLead> & {
-            id: number | string;
-        }>;
-        update?: Array<Partial<KommoLead> & {
-            id: number | string;
-        }>;
-        add?: Array<Partial<KommoLead> & {
-            id: number | string;
-        }>;
+        status?: KommoWebhookLeadBucket;
+        update?: KommoWebhookLeadBucket;
+        add?: KommoWebhookLeadBucket;
     };
     account?: {
         subdomain?: string;

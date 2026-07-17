@@ -3,7 +3,9 @@
 ## Módulos
 
 1. **Ventas (Kommo → Sheet Eventos)**  
-   `POST /webhooks/kommo/deal-won`
+   `POST /webhooks/kommo/deal-won` (ACK &lt;2s; escribe Sheet en background)  
+   Si no llegó: `GET /api/ventas/recent` → `POST /api/ventas/sync/:dealId`  
+   Estado: `GET /api/ventas/last`
 
 2. **P&L Banco (PDF + reglas)**  
    UI: `https://TU-DOMINIO/pnl/`  

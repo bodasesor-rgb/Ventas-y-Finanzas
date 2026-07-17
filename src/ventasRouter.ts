@@ -1,12 +1,16 @@
 import { Router, type Request, type Response } from "express";
-import { writeFilaToAppsScript } from "./appsScriptClient";
-import { extractLeadIdFromWebhook, fetchLeadWithContact } from "./kommoApi";
 import {
-  filaToOrderedValues,
-  mapDealToFilaVentas,
-  SHEET_HEADERS,
-} from "./mapDealToFila";
-import type { KommoLead, KommoWebhookBody } from "./types";
+  extractLeadIdFromWebhook,
+  fetchRecentLeads,
+} from "./kommoApi";
+import { mapDealToFilaVentas } from "./mapDealToFila";
+import type { KommoWebhookBody } from "./types";
+import {
+  getLastVentasSync,
+  getLastWebhookAccepted,
+  rememberWebhookAccepted,
+  syncDealToSheet,
+} from "./ventasSync";
 
 export const ventasRouter = Router();
 
@@ -18,160 +22,125 @@ function appsScriptUrl(): string {
   ).trim();
 }
 
-const PHASE = appsScriptUrl() ? 2 : 1;
+const PHASE = () => (appsScriptUrl() ? 2 : 1);
 
 /**
- * Recibe webhook de deal ganado, mapea la fila y:
- * - Fase 1: solo log
- * - Fase 2: escribe al Sheet vía Apps Script (idempotente por deal ID)
+ * Webhook Kommo deal ganado / status change.
+ *
+ * IMPORTANTE: Kommo exige respuesta HTTP exitosa en ≤ 2 segundos.
+ * Antes escribiamos al Sheet antes de responder (~3s) y Kommo marcaba
+ * el webhook como fallido / lo desactivaba. Ahora ACK inmediato y
+ * el Sheet se escribe en segundo plano.
  */
 ventasRouter.post(
   "/webhooks/kommo/deal-won",
-  async (req: Request, res: Response) => {
-    const startedAt = new Date().toISOString();
+  (req: Request, res: Response) => {
+    const body = (req.body || {}) as KommoWebhookBody;
+    const leadId = extractLeadIdFromWebhook(body);
 
-    try {
-      const body = req.body as KommoWebhookBody;
-      const leadId = extractLeadIdFromWebhook(body);
-
-      if (!leadId) {
-        console.warn("[ventas] Webhook sin lead id", {
-          startedAt,
-          keys: Object.keys(body || {}),
-        });
-        res.status(400).json({
-          ok: false,
-          phase: PHASE,
-          error: "No se encontró lead id en el webhook",
-        });
-        return;
-      }
-
-      let lead: KommoLead;
-      let dataSource: "kommo_api" | "webhook_partial" = "kommo_api";
-      let kommoApiError: string | null = null;
-
-      try {
-        lead = await fetchLeadWithContact(leadId);
-      } catch (apiErr) {
-        dataSource = "webhook_partial";
-        kommoApiError =
-          apiErr instanceof Error ? apiErr.message : String(apiErr);
-        console.warn(
-          "[ventas] No se pudo fetch Kommo API; usando payload parcial",
-          kommoApiError
-        );
-        const partial =
-          body.leads?.status?.[0] ||
-          body.leads?.update?.[0] ||
-          body.leads?.add?.[0];
-        lead = {
-          id: leadId,
-          ...(partial || {}),
-        } as KommoLead;
-      }
-
-      const fila = mapDealToFilaVentas(lead);
-      const values = filaToOrderedValues(fila);
-
-      let sheetWrite: {
-        attempted: boolean;
-        ok: boolean;
-        action?: string;
-        row?: number;
-        version?: string;
-        error?: string;
-      } = { attempted: false, ok: false };
-
-      if (appsScriptUrl()) {
-        sheetWrite.attempted = true;
-        try {
-          // Solo escribe Eventos YYYY. Metricas / P&L = fórmulas en Sheet.
-          const sheetName = `Eventos ${
-            fila.fechaDeCierre
-              ? fila.fechaDeCierre.slice(0, 4)
-              : String(new Date().getUTCFullYear())
-          }`;
-          const result = await writeFilaToAppsScript(
-            fila.kommoDealId,
-            values,
-            sheetName
-          );
-          sheetWrite = {
-            attempted: true,
-            ok: true,
-            action: result.action,
-            row: result.row,
-            version: result.version,
-          };
-          console.log("[ventas][fase2] Sheet write OK", sheetWrite);
-        } catch (writeErr) {
-          sheetWrite = {
-            attempted: true,
-            ok: false,
-            error:
-              writeErr instanceof Error ? writeErr.message : String(writeErr),
-          };
-          console.error("[ventas][fase2] Sheet write FAIL", sheetWrite.error);
-        }
-      } else {
-        console.log(
-          "[ventas][fase1] FILA QUE SE APPENDARÍA (sin URL Apps Script /exec)"
-        );
-      }
-
-      console.log(
-        JSON.stringify(
-          {
-            startedAt,
-            phase: PHASE,
-            dataSource,
-            kommoApiError,
-            dealId: fila.kommoDealId,
-            headers: SHEET_HEADERS,
-            values,
-            fila,
-            sheetWrite,
-          },
-          null,
-          2
-        )
-      );
-
-      res.status(200).json({
-        ok: true,
-        phase: PHASE,
-        message: sheetWrite.attempted
-          ? sheetWrite.ok
-            ? `Fila ${sheetWrite.action} en Sheet (fila ${sheetWrite.row}).`
-            : `Mapeo OK pero falló escritura a Sheet: ${sheetWrite.error}`
-          : "Fila mapeada. Falta URL_BODASESOR_DIRECCION_SHEETS (/exec) para escribir al Sheet.",
-        dataSource,
-        kommoApiError,
-        dealId: fila.kommoDealId,
-        fila,
-        values,
-        sheetWrite,
+    if (!leadId) {
+      console.warn("[ventas] Webhook sin lead id", {
+        keys: Object.keys(body || {}),
+        contentType: req.headers["content-type"],
       });
-    } catch (err) {
-      console.error("[ventas] Error", err);
-      res.status(500).json({
+      res.status(400).json({
         ok: false,
-        phase: PHASE,
-        error: err instanceof Error ? err.message : "Error desconocido",
+        phase: PHASE(),
+        error: "No se encontró lead id en el webhook",
       });
+      return;
     }
+
+    rememberWebhookAccepted(String(leadId), "webhook");
+
+    // ACK inmediato (<2s) — Kommo no espera la escritura al Sheet
+    res.status(200).json({
+      ok: true,
+      accepted: true,
+      phase: PHASE(),
+      dealId: String(leadId),
+      message:
+        "Webhook aceptado. Escribiendo al Sheet en segundo plano. Revisa GET /api/ventas/last",
+    });
+
+    void syncDealToSheet(leadId, body).catch((err) => {
+      console.error("[ventas] Error en sync background", err);
+    });
   }
 );
 
+/** Re-sincroniza un deal por ID (si el webhook no disparó). */
+ventasRouter.post("/api/ventas/sync/:dealId", async (req, res) => {
+  const dealId = Number(req.params.dealId);
+  if (!Number.isFinite(dealId) || dealId <= 0) {
+    res.status(400).json({ ok: false, error: "dealId inválido" });
+    return;
+  }
+  try {
+    rememberWebhookAccepted(String(dealId), "manual_sync");
+    const result = await syncDealToSheet(dealId);
+    res.status(200).json({
+      ok: true,
+      phase: PHASE(),
+      message: result.sheetWrite.attempted
+        ? result.sheetWrite.ok
+          ? `Fila ${result.sheetWrite.action} en Sheet (fila ${result.sheetWrite.row}).`
+          : `Falló escritura a Sheet: ${result.sheetWrite.error}`
+        : "Mapeado sin URL Apps Script",
+      ...result,
+    });
+  } catch (err) {
+    console.error("[ventas] sync manual error", err);
+    res.status(500).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+/** Último webhook aceptado + último sync completado. */
+ventasRouter.get("/api/ventas/last", (_req, res) => {
+  res.status(200).json({
+    ok: true,
+    accepted: getLastWebhookAccepted(),
+    lastSync: getLastVentasSync(),
+  });
+});
+
+/** Últimos deals tocados en Kommo (para elegir cuál sincronizar). */
+ventasRouter.get("/api/ventas/recent", async (req, res) => {
+  const limit = Number(req.query.limit) || 15;
+  try {
+    const leads = await fetchRecentLeads(limit);
+    const items = leads.map((l) => {
+      const fila = mapDealToFilaVentas(l);
+      return {
+        dealId: String(l.id),
+        name: l.name || "",
+        cliente: fila.cliente,
+        status_id: l.status_id ?? null,
+        closed_at: l.closed_at ?? null,
+        updated_at: l.updated_at ?? null,
+        venta: fila.venta,
+        fechaDeCierre: fila.fechaDeCierre,
+      };
+    });
+    res.status(200).json({ ok: true, count: items.length, items });
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
 ventasRouter.get("/health", (_req, res) => {
   const scriptUrl = appsScriptUrl();
-  // Últimos chars del path para verificar que Hostinger apunta al /exec correcto
   let appsScriptUrlTail = "";
   try {
     const u = new URL(scriptUrl);
     const parts = u.pathname.split("/").filter(Boolean);
-    appsScriptUrlTail = parts.slice(-2).join("/"); // ej. AKfycb.../exec
+    appsScriptUrlTail = parts.slice(-2).join("/");
   } catch {
     appsScriptUrlTail = "";
   }
@@ -187,6 +156,8 @@ ventasRouter.get("/health", (_req, res) => {
         scriptUrl.includes("script.google.com") && scriptUrl.includes("/exec"),
       appsScriptUrlTail,
     },
+    lastAccepted: getLastWebhookAccepted(),
+    lastSyncDealId: getLastVentasSync()?.dealId ?? null,
   });
 });
 
@@ -206,7 +177,7 @@ ventasRouter.get("/health/kommo", async (_req, res) => {
 
   try {
     const r = await fetch(`${base}/api/v4/account`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
     });
     const text = await r.text();
     res.status(r.ok ? 200 : 502).json({
