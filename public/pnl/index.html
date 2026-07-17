@@ -3,17 +3,25 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <title>Bodasesor — P&L Banco</title>
-  <link rel="stylesheet" href="/pnl/styles.css?v=20260717c" />
+  <link rel="stylesheet" href="/pnl/styles.css?v=20260717d" />
 </head>
 <body>
+  <div class="version-banner" id="versionBanner">
+    UI v2026-07-17d — Categorías · ingresos en verde · montos editables
+  </div>
+
   <header class="top">
     <div>
       <p class="brand">Bodasesor / Capybara</p>
       <h1>P&L desde estados de cuenta</h1>
-      <p class="sub">Sube un PDF → se guarda por mes (AAAA-MM) → reglas categorizan. Pagos a personas quedan en revisar.</p>
+      <p class="sub">Sube un PDF → se guarda por mes → categoriza. Ingresos en verde. Montos editables si algo se ve raro.</p>
     </div>
-    <a class="link" href="/health">API health</a>
+    <div class="top-links">
+      <span class="version-pill">v2026-07-17d</span>
+      <a class="link" href="/health">API health</a>
+    </div>
   </header>
 
   <main class="grid">
@@ -32,8 +40,19 @@
       <p id="uploadStatus" class="muted"></p>
     </section>
 
-    <section class="panel">
-      <h2>2. Estados guardados por mes</h2>
+    <section class="panel highlight-panel">
+      <h2>2. Categorías</h2>
+      <p class="muted">Los ingresos van en <span class="income-sample">verde</span>. Usa los botones para crear las tuyas.</p>
+      <div id="categoriesList" class="cat-list"></div>
+      <div class="cat-actions">
+        <button type="button" id="addCategory" class="btn-big secondary">+ Agregar categoría</button>
+        <button type="button" id="addIncomeCategory" class="btn-big btn-income">+ Agregar categoría de ingreso</button>
+      </div>
+      <p id="categoriesStatus" class="muted"></p>
+    </section>
+
+    <section class="panel wide">
+      <h2>3. Estados guardados por mes</h2>
       <p class="muted">Archivo: <code>AAAA-MM_estado-cuenta.pdf</code> (mes del estado, no de la subida).</p>
       <div id="library" class="library"></div>
       <div id="pdfViewer" class="pdf-viewer" hidden>
@@ -43,17 +62,6 @@
         </div>
         <iframe id="pdfFrame" title="Vista del estado de cuenta"></iframe>
       </div>
-    </section>
-
-    <section class="panel wide">
-      <h2>3. Categorías</h2>
-      <p class="muted">Agrega las que uses en tu P&amp;L. Los ingresos se marcan en verde.</p>
-      <div id="categoriesList" class="cat-list"></div>
-      <div class="cat-actions">
-        <button type="button" id="addCategory" class="secondary">+ Agregar categoría</button>
-        <button type="button" id="addIncomeCategory">+ Agregar categoría de ingreso</button>
-      </div>
-      <p id="categoriesStatus" class="muted"></p>
     </section>
 
     <section class="panel wide">
@@ -81,7 +89,7 @@
     <section class="panel wide">
       <h2>5. Resultado del PDF seleccionado</h2>
       <p id="currentRunMeta" class="muted"></p>
-      <p class="muted">Si un monto se ve raro, edítalo aquí (positivo = ingreso en verde, negativo = gasto). Enter o Tab guarda.</p>
+      <p class="muted">Si un monto se ve raro, edítalo (positivo = ingreso verde, negativo = gasto). Enter o Tab guarda.</p>
       <div id="summary" class="summary"></div>
       <div class="table-wrap">
         <table id="linesTable">
@@ -102,6 +110,6 @@
     </section>
   </main>
 
-  <script src="/pnl/app.js?v=20260717c"></script>
+  <script src="/pnl/app.js?v=20260717d"></script>
 </body>
 </html>

@@ -452,20 +452,13 @@ function renderRun(run) {
 }
 
 async function init() {
-  const [catData, rulesData] = await Promise.all([
-    api("/api/pnl/categories"),
-    api("/api/pnl/rules"),
-  ]);
-  categories = catData.categories || [];
-  rules = rulesData.rules || [];
-  renderCategories();
-  renderRules();
-
-  const runs = await api("/api/pnl/runs");
-  runsCache = runs.runs || [];
-  if (runsCache[0]) renderRun(runsCache[0]);
-  await refreshLibrary();
-
+  // Botones deben funcionar aunque falle alguna API
+  document.getElementById("addCategory")?.addEventListener("click", () => {
+    addCategory("gasto");
+  });
+  document.getElementById("addIncomeCategory")?.addEventListener("click", () => {
+    addCategory("ingreso");
+  });
   document.getElementById("btnClosePdf")?.addEventListener("click", () => {
     const box = document.getElementById("pdfViewer");
     const frame = document.getElementById("pdfFrame");
@@ -473,12 +466,37 @@ async function init() {
     if (box) box.hidden = true;
   });
 
-  document.getElementById("addCategory")?.addEventListener("click", () => {
-    addCategory("gasto");
-  });
-  document.getElementById("addIncomeCategory")?.addEventListener("click", () => {
-    addCategory("ingreso");
-  });
+  try {
+    const catData = await api("/api/pnl/categories");
+    categories = catData.categories || [];
+  } catch (e) {
+    console.error(e);
+    setCatStatus("No pude cargar categorías: " + e.message, true);
+    categories = [
+      { id: "ingreso", label: "Ingreso", kind: "ingreso" },
+      { id: "otro", label: "Otro", kind: "neutro" },
+      { id: "revisar", label: "Revisar", kind: "neutro" },
+    ];
+  }
+  renderCategories();
+
+  try {
+    const rulesData = await api("/api/pnl/rules");
+    rules = rulesData.rules || [];
+  } catch (e) {
+    console.error(e);
+    rules = [];
+  }
+  renderRules();
+
+  try {
+    const runs = await api("/api/pnl/runs");
+    runsCache = runs.runs || [];
+    if (runsCache[0]) renderRun(runsCache[0]);
+  } catch (e) {
+    console.error(e);
+  }
+  await refreshLibrary();
 
   document.getElementById("addRule").onclick = () => {
     rules.push({
