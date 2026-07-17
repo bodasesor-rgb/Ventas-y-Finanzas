@@ -1,17 +1,14 @@
 /**
- * Fila del Sheet real:
- * Cliente | Fecha del evento | Fecha de cierre | Genero | Telefono | Correo |
+ * Fila del Sheet Eventos YYYY (sin Genero):
+ * Cliente | Fecha del evento | Fecha de cierre | Telefono | Correo |
  * Tipo de evento | Invitados | Dirección de evento | Horario | Venta | Costo |
  * Pagado | Por pagar | Ganancia | Margen | Link cotización | Mes cierre |
  * Forma de Pago | IVA | Kommo Deal ID
- *
- * El script NO calcula Por pagar / Ganancia / Margen ni edita Costo / Pagado / IVA.
  */
 export interface FilaVentas {
   cliente: string;
   fechaDelEvento: string;
   fechaDeCierre: string;
-  genero: string;
   telefono: string;
   correo: string;
   tipoDeEvento: string;
@@ -28,7 +25,7 @@ export interface FilaVentas {
   mesCierre: string;
   formaDePago: string;
   iva: string;
-  /** Llave de idempotencia — columna U */
+  /** Columna T — idempotencia */
   kommoDealId: string;
 }
 

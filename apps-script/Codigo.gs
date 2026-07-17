@@ -1,30 +1,32 @@
 /**
  * UN solo deploy (/exec) para el Sheet de ventas/finanzas.
  *
- * Pestañas del archivo:
- * - Eventos 2026  → el bot SÍ escribe (append/update por Kommo Deal ID)
- * - Metricas 2026 → NO escribe el bot (fórmulas / manual)
- * - P&L 2026      → NO escribe el bot (fórmulas / manual)
+ * Pestañas:
+ * - Eventos 2026  → el bot SÍ escribe
+ * - Metricas 2026 → NO (fórmulas)
+ * - P&L 2026      → NO (fórmulas)
  *
- * El Node manda: { dealId, values, sheetName }
- * sheetName por defecto: "Eventos 2026"
+ * Columnas Eventos (A–T, sin Genero):
+ * Cliente | Fecha evento | Fecha cierre | Telefono | Correo | Tipo evento |
+ * Invitados | Dirección | Horario | Venta | Costo | Pagado | Por pagar |
+ * Ganancia | Margen | Link | Mes cierre | Forma de Pago | IVA | Kommo Deal ID
  */
 const DEFAULT_SHEET_NAME = 'Eventos 2026';
-const DEAL_ID_COL = 21; // U = Kommo Deal ID
+const DEAL_ID_COL = 20; // T = Kommo Deal ID
 
-/** Solo pestañas "Eventos YYYY". Metricas/P&L nunca. */
 function isWritableSheet_(name) {
   return /^Eventos \d{4}$/.test(name);
 }
 
-// Columnas que escribe el bot (1-based). NO toca L,M,N,O,P,T
-const WRITE_COLS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 17, 18, 19, 21];
+// Escribe Kommo. NO toca K,L,M,N,O,S (Costo, Pagado, fórmulas, IVA)
+// 1-based: A..J + P..R + T  = 1-10, 16-18, 20
+const WRITE_COLS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 16, 17, 18, 20];
 
 function doPost(e) {
   try {
     const data = JSON.parse(e.postData.contents);
     const values = data.values;
-    const dealId = String(data.dealId || (values && values[20]) || '').trim();
+    const dealId = String(data.dealId || (values && values[19]) || '').trim();
     const sheetName = String(data.sheetName || DEFAULT_SHEET_NAME).trim();
 
     if (!dealId || !values || values.length < DEAL_ID_COL) {
@@ -35,9 +37,9 @@ function doPost(e) {
       return json_({
         ok: false,
         error:
-          'Pestaña no escribible por el bot: ' +
+          'Pestaña no escribible: ' +
           sheetName +
-          '. Solo Eventos YYYY. Metricas/P&L son fórmulas.',
+          '. Solo Eventos YYYY.',
       });
     }
 
@@ -63,6 +65,10 @@ function doPost(e) {
     if (rowIndex === -1) {
       rowIndex = sheet.getLastRow() + 1;
       sheet.getRange(rowIndex, 1, 1, values.length).setValues([values]);
+      // Fórmulas calculadas en la fila nueva
+      sheet.getRange(rowIndex, 13).setFormula('=IF(J' + rowIndex + '="","",J' + rowIndex + '-IF(L' + rowIndex + '="",0,L' + rowIndex + '))'); // Por pagar
+      sheet.getRange(rowIndex, 14).setFormula('=IF(J' + rowIndex + '="","",J' + rowIndex + '-IF(K' + rowIndex + '="",0,K' + rowIndex + '))'); // Ganancia
+      sheet.getRange(rowIndex, 15).setFormula('=IF(OR(J' + rowIndex + '="",J' + rowIndex + '=0),"",N' + rowIndex + '/J' + rowIndex + ')'); // Margen
       return json_({
         ok: true,
         action: 'appended',

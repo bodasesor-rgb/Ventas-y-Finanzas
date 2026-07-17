@@ -71,10 +71,6 @@ function mesFromFechaCierre(fechaIso: string): string {
   return String(month);
 }
 
-/**
- * Mapea un deal de Kommo a la fila del Sheet de ventas.
- * No calcula ganancia/margen/por pagar.
- */
 export function mapDealToFilaVentas(lead: KommoLead): FilaVentas {
   const fields = lead.custom_fields_values;
   const contact = lead._embedded?.contacts?.[0];
@@ -88,7 +84,6 @@ export function mapDealToFilaVentas(lead: KommoLead): FilaVentas {
     cliente: (contact?.name || lead.name || "").trim(),
     fechaDelEvento: "",
     fechaDeCierre,
-    genero: "",
     telefono: contactPhone(contact),
     correo: contactEmail(contact),
     tipoDeEvento: customFieldValue(fields, KOMMO_FIELD_IDS.TIPO_DE_EVENTO),
@@ -112,13 +107,12 @@ export function mapDealToFilaVentas(lead: KommoLead): FilaVentas {
   };
 }
 
-/** Orden exacto del Sheet (A..U). */
+/** Orden exacto A..T (20 columnas). */
 export function filaToOrderedValues(fila: FilaVentas): string[] {
   return [
     fila.cliente,
     fila.fechaDelEvento,
     fila.fechaDeCierre,
-    fila.genero,
     fila.telefono,
     fila.correo,
     fila.tipoDeEvento,
@@ -143,7 +137,6 @@ export const SHEET_HEADERS = [
   "Cliente",
   "Fecha del evento",
   "Fecha de cierre",
-  "Genero",
   "Telefono",
   "Correo",
   "Tipo de evento",
