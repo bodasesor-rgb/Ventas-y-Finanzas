@@ -1,7 +1,9 @@
 import type { FilaVentas, KommoLead } from "./types";
+/** "14 ago", "14-agosto", "14 de agosto 2026" → YYYY-MM-DD */
+export declare function extractFechaFromText(text: string, defaultYear?: number): string;
 /**
  * Campo Kommo "Fecha y horario" → columnas Fecha del evento + Horario.
- * Acepta unix, ISO, o texto tipo "14/08/2026 18:00".
+ * Acepta unix, ISO, o texto tipo "14/08/2026 18:00" / "7pm a 12am".
  */
 export declare function parseFechaYHorario(raw: unknown): {
     fecha: string;

@@ -17,7 +17,7 @@ export declare const KOMMO_FIELD_IDS: {
     readonly FECHA_Y_HORARIO: 1048778;
     /** Número de invitados → columna "Invitados" */
     readonly NUMERO_INVITADOS: 1048780;
-    /** Requerimientos — no mapea al Sheet de ventas */
+    /** Requerimientos — fallback para fecha (ej. "Cumpleaños 14 ago. 50 pax") */
     readonly REQUERIMIENTOS: 1048776;
     /** Presupuesto — NO usar como Venta; Venta = Monto de cierre */
     readonly PRESUPUESTO: 1048784;

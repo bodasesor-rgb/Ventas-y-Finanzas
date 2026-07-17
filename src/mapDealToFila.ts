@@ -116,9 +116,96 @@ function mexicoParts(unixSeconds: number): { fecha: string; horario: string } {
   return { fecha, horario };
 }
 
+const MES_ES: Record<string, string> = {
+  ene: "01",
+  enero: "01",
+  feb: "02",
+  febrero: "02",
+  mar: "03",
+  marzo: "03",
+  abr: "04",
+  abril: "04",
+  may: "05",
+  mayo: "05",
+  jun: "06",
+  junio: "06",
+  jul: "07",
+  julio: "07",
+  ago: "08",
+  agosto: "08",
+  sep: "09",
+  sept: "09",
+  septiembre: "09",
+  oct: "10",
+  octubre: "10",
+  nov: "11",
+  noviembre: "11",
+  dic: "12",
+  diciembre: "12",
+};
+
+/** "14 ago", "14-agosto", "14 de agosto 2026" → YYYY-MM-DD */
+export function extractFechaFromText(
+  text: string,
+  defaultYear?: number
+): string {
+  if (!text) return "";
+  const yearFallback =
+    defaultYear || new Date().getFullYear();
+
+  // 14/08/2026 or 14-08-2026
+  const dmy = text.match(
+    /\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/
+  );
+  if (dmy) {
+    const day = dmy[1].padStart(2, "0");
+    const month = dmy[2].padStart(2, "0");
+    let year = dmy[3];
+    if (year.length === 2) year = `20${year}`;
+    return `${year}-${month}-${day}`;
+  }
+
+  // 2026-08-14
+  const iso = text.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+
+  // 14 ago / 14 de agosto / 14-agosto
+  const named = text.match(
+    /\b(\d{1,2})\s*(?:de\s+)?[-\s]?([A-Za-zÁÉÍÓÚáéíóú]+)(?:\s+(20\d{2}))?\b/i
+  );
+  if (named) {
+    const day = named[1].padStart(2, "0");
+    const monKey = named[2]
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/\p{M}/gu, "");
+    const month = MES_ES[monKey];
+    if (month) {
+      const year = named[3] || String(yearFallback);
+      return `${year}-${month}-${day}`;
+    }
+  }
+  return "";
+}
+
+function looksLikeTimeOnly(s: string): boolean {
+  const t = s.trim().toLowerCase();
+  if (!t) return false;
+  // "7pm a 12am", "19:00-00:00", "7 pm - 12 am"
+  if (
+    /\b\d{1,2}\s*(:\d{2})?\s*(am|pm)\b/.test(t) &&
+    !/\b\d{1,2}[\/\-.]\d{1,2}/.test(t) &&
+    !/\b(?:ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic)/i.test(t)
+  ) {
+    return true;
+  }
+  if (/^\d{1,2}:\d{2}\s*[-aá]\s*\d{1,2}:\d{2}/i.test(t)) return true;
+  return false;
+}
+
 /**
  * Campo Kommo "Fecha y horario" → columnas Fecha del evento + Horario.
- * Acepta unix, ISO, o texto tipo "14/08/2026 18:00".
+ * Acepta unix, ISO, o texto tipo "14/08/2026 18:00" / "7pm a 12am".
  */
 export function parseFechaYHorario(raw: unknown): {
   fecha: string;
@@ -138,10 +225,15 @@ export function parseFechaYHorario(raw: unknown): {
     return mexicoParts(n > 1e12 ? Math.floor(n / 1000) : n);
   }
 
+  // Solo horario (muy común en este CRM): "7pm a 12am"
+  if (looksLikeTimeOnly(s)) {
+    return { fecha: "", horario: s };
+  }
+
   // ISO / "2026-08-14T18:00:00"
-  const iso = Date.parse(s);
-  if (!Number.isNaN(iso)) {
-    return mexicoParts(Math.floor(iso / 1000));
+  const isoMs = Date.parse(s);
+  if (!Number.isNaN(isoMs) && /\d{4}-\d{2}-\d{2}/.test(s)) {
+    return mexicoParts(Math.floor(isoMs / 1000));
   }
 
   // "14/08/2026 18:00" o "14-08-2026 18:00"
@@ -159,10 +251,18 @@ export function parseFechaYHorario(raw: unknown): {
     return { fecha, horario };
   }
 
-  // Solo fecha ISO ya recortada
+  const fechaNamed = extractFechaFromText(s);
+  if (fechaNamed) {
+    // Si además hay tramo horario en el mismo texto
+    const timeBit = s.match(
+      /(\d{1,2}\s*(?::\d{2})?\s*(?:am|pm)(?:\s*a\s*\d{1,2}\s*(?::\d{2})?\s*(?:am|pm))?)/i
+    );
+    return { fecha: fechaNamed, horario: timeBit ? timeBit[1].trim() : "" };
+  }
+
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return { fecha: s, horario: "" };
 
-  return { fecha: s, horario: "" };
+  return { fecha: "", horario: s };
 }
 
 function mesFromFechaCierre(fechaIso: string): string {
@@ -181,9 +281,26 @@ export function mapDealToFilaVentas(lead: KommoLead): FilaVentas {
     unixToIsoDate(lead.updated_at) ||
     unixToIsoDate(lead.created_at);
 
-  const { fecha: fechaDelEvento, horario } = parseFechaYHorario(
+  let { fecha: fechaDelEvento, horario } = parseFechaYHorario(
     customFieldRaw(fields, KOMMO_FIELD_IDS.FECHA_Y_HORARIO)
   );
+
+  // Fallback fecha: Requerimientos ("14 ago") o link cotización ("14-agosto")
+  if (!fechaDelEvento) {
+    const yearHint = fechaDeCierre
+      ? Number(fechaDeCierre.slice(0, 4))
+      : undefined;
+    fechaDelEvento =
+      extractFechaFromText(
+        customFieldValue(fields, KOMMO_FIELD_IDS.REQUERIMIENTOS),
+        yearHint
+      ) ||
+      extractFechaFromText(
+        customFieldValue(fields, KOMMO_FIELD_IDS.LINK_COTIZACION_FINAL),
+        yearHint
+      ) ||
+      extractFechaFromText(lead.name || "", yearHint);
+  }
 
   return {
     cliente: (contact?.name || lead.name || "").trim(),
