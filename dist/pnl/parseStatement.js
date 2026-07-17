@@ -9,108 +9,147 @@ exports.summarizeByCategory = summarizeByCategory;
 const pdf_parse_1 = __importDefault(require("pdf-parse"));
 const categorize_1 = require("./categorize");
 const crypto_1 = require("crypto");
-/**
- * Extrae texto del PDF y arma líneas con fecha/monto.
- * Incluye heurísticas para estados Citibanamex / Banamex.
- */
+const MONTH_RE = "ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC";
+const MONTH_NUM = {
+    ene: "01",
+    feb: "02",
+    mar: "03",
+    abr: "04",
+    may: "05",
+    jun: "06",
+    jul: "07",
+    ago: "08",
+    sep: "09",
+    oct: "10",
+    nov: "11",
+    dic: "12",
+};
 async function parsePdfToLines(buffer, rules) {
     const result = await (0, pdf_parse_1.default)(buffer);
     const text = result.text || "";
     const lines = extractLinesFromText(text, rules);
     return { text, lines };
 }
-const MONTHS = {
-    ene: "01",
-    jan: "01",
-    feb: "02",
-    mar: "03",
-    abr: "04",
-    apr: "04",
-    may: "05",
-    jun: "06",
-    jul: "07",
-    ago: "08",
-    aug: "08",
-    sep: "09",
-    oct: "10",
-    nov: "11",
-    dic: "12",
-    dec: "12",
-};
-function normalizeAmount(raw) {
-    let s = raw.replace(/[$\s]/g, "").replace(/^\(/, "-").replace(/\)$/, "");
-    // 1.234,56 → 1234.56 | 1,234.56 → 1234.56
-    if (/\d,\d{2}$/.test(s) && s.includes(".")) {
-        s = s.replace(/\./g, "").replace(",", ".");
-    }
-    else if (/\d,\d{2}$/.test(s)) {
-        s = s.replace(",", ".");
-    }
-    else {
-        s = s.replace(/,/g, "");
-    }
-    const n = Number(s);
-    return Number.isFinite(n) && n !== 0 ? n : null;
+function cleanBlock(body) {
+    return body
+        // Tipo de cambio Banamex: T.C. 17.321300 pegado al monto MXN
+        .replace(/U\.S\.\s*Dollar\s*T\.C\.\s*\d+\.\d{6}/gi, " ")
+        .replace(/\bT\.C\.\s*\d+\.\d{6}/gi, " ")
+        .replace(/\b\d{12,}\b/g, " ")
+        .replace(/\b20\d{6}\b/g, " ")
+        .replace(/\b900[01]\/\d+/gi, " ")
+        .replace(/\s+/g, " ")
+        .trim();
 }
-function looksLikeHeaderNoise(line) {
-    return /saldo anterior|saldo al corte|saldo promedio|p[aá]gina \d|clabe|n[uú]mero de cuenta|gat nominal|comisiones efectivamente|fecha de corte|per[ií]odo|contrato|sucursal|rfc|cliente/i.test(line);
+/** Encuentra montos MXN; soporta concatenados 2,500.009,990.05 */
+function findMoneyAmounts(s) {
+    const re = /(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}/g;
+    const out = [];
+    let m;
+    while ((m = re.exec(s)) !== null) {
+        const n = Number(m[0].replace(/,/g, ""));
+        if (Number.isFinite(n) && n > 0)
+            out.push(n);
+    }
+    return out;
 }
-function extractLinesFromText(text, rules) {
-    // Unir saltos raros del PDF Banamex
-    const normalized = text
-        .replace(/\r/g, "\n")
-        .replace(/([^\n])\n(?!\d{1,2}[\/\-\s])/g, "$1 ")
-        .replace(/[ \t]+/g, " ");
-    const rawLines = normalized
-        .split(/\n/)
-        .map((l) => l.trim())
-        .filter((l) => l.length > 6);
+function extractBanamex(text, rules) {
     const out = [];
     const seen = new Set();
-    // 01/06/2026 DESC 1,234.56
-    const reFull = /^(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\s+(.+?)\s+(-?\$?[\d,]+\.\d{2})$/i;
-    // 01/06 DESC 1234.56
-    const reShort = /^(\d{1,2}[\/\-]\d{1,2})\s+(.+?)\s+(-?\$?[\d,]+\.\d{2})$/i;
-    // 01 JUN DESC 1,234.56
-    const reMon = /^(\d{1,2})\s+([A-Za-zÁÉÍÓÚáéíóú]{3})\s+(.+?)\s+(-?\$?[\d,]+\.\d{2})$/i;
-    // DESC...$1,234.56 con fecha embebida al inicio o en medio
-    const reLoose = /(\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?|\d{1,2}\s+[A-Za-z]{3}).{3,120}?(-?\$?\s*[\d,]+\.\d{2})/;
-    function pushLine(date, description, amountRaw, raw) {
-        if (looksLikeHeaderNoise(raw) || looksLikeHeaderNoise(description))
-            return;
-        const amountAbs = normalizeAmount(amountRaw);
-        if (amountAbs == null)
-            return;
-        const desc = description.replace(/\s+/g, " ").trim();
+    const blockRe = new RegExp(`(\\d{1,2})(${MONTH_RE})([\\s\\S]*?)(?=\\d{1,2}(?:${MONTH_RE})|$)`, "gi");
+    let m;
+    while ((m = blockRe.exec(text)) !== null) {
+        const day = m[1].padStart(2, "0");
+        const mon = MONTH_NUM[m[2].toLowerCase()] || m[2];
+        const date = `${day}/${mon}`;
+        const rawBody = (m[3] || "").replace(/\s+/g, " ").trim();
+        if (!rawBody)
+            continue;
+        if (/^SALDO ANTERIOR/i.test(rawBody))
+            continue;
+        const body = cleanBlock(rawBody);
+        const amounts = findMoneyAmounts(body);
+        if (amounts.length === 0)
+            continue;
+        // Último = saldo; penúltimo = movimiento (si solo hay 1, es el movimiento)
+        let move = amounts.length >= 2 ? amounts[amounts.length - 2] : amounts[0];
+        // Descartar movimientos absurdos (ruido de parseo)
+        if (move > 2_000_000)
+            continue;
+        let desc = body;
+        const moneyBits = body.match(/(?:(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}\s*)+$/);
+        if (moneyBits && moneyBits.index != null) {
+            desc = body.slice(0, moneyBits.index).trim();
+        }
+        desc = desc
+            .replace(/(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
         if (desc.length < 3)
-            return;
-        const key = `${date}|${desc}|${amountAbs}`;
+            continue;
+        if (/^SALDO ANTERIOR/i.test(desc))
+            continue;
+        if (/^P[aá]gina\b/i.test(desc))
+            continue;
+        const isAbono = /PAGO RECIBIDO|DEP[OÓ]SITO|ABONO|SPEI RECIBIDO|TRANSFER[A-ZÁÉÍÓÚ ]*RECIB/i.test(desc);
+        const signed = isAbono ? Math.abs(move) : -Math.abs(move);
+        const direction = isAbono ? "abono" : "cargo";
+        const key = `${date}|${desc.slice(0, 50)}|${signed.toFixed(2)}`;
         if (seen.has(key))
-            return;
+            continue;
         seen.add(key);
-        const isCargoHint = /\b(cargo|retiro|compra|pago|comisi[oó]n|spei enviado|pos)\b/i.test(raw) ||
-            amountRaw.trim().startsWith("-") ||
-            amountRaw.includes("(");
-        const isAbonoHint = /\b(abono|dep[oó]sito|spei recibido|transferencia recibida)\b/i.test(raw);
-        let direction = "unknown";
-        let signed = Math.abs(amountAbs);
-        if (isCargoHint && !isAbonoHint) {
-            direction = "cargo";
-            signed = -signed;
-        }
-        else if (isAbonoHint) {
-            direction = "abono";
-        }
-        else {
-            // Banamex: cargos suelen ir en columna "cargos"; sin pista → cargo si hay palabras comunes de gasto
-            direction = "cargo";
-            signed = -signed;
-        }
+        const cat = (0, categorize_1.categorizeLine)(desc, signed, direction, rules);
+        out.push({
+            id: (0, crypto_1.randomUUID)(),
+            raw: `${day}${m[2].toUpperCase()} ${rawBody.slice(0, 140)}`,
+            date,
+            description: desc.slice(0, 220),
+            amount: Math.round(signed * 100) / 100,
+            direction,
+            category: cat.category,
+            matchedRuleId: cat.matchedRuleId,
+            needsReview: cat.needsReview,
+        });
+    }
+    return out;
+}
+function extractLinesFromText(text, rules) {
+    const banamexHits = (text.match(new RegExp(`\\d{1,2}(?:${MONTH_RE})`, "gi")) || []).length;
+    if (banamexHits >= 5) {
+        const lines = extractBanamex(text, rules);
+        if (lines.length > 0)
+            return lines;
+    }
+    return extractGeneric(text, rules);
+}
+function extractGeneric(text, rules) {
+    const out = [];
+    const seen = new Set();
+    const lines = text
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l.length > 5);
+    const re = /^(\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?)\s+(.+?)\s+(-?\$?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})$/;
+    for (const raw of lines) {
+        const m = raw.match(re);
+        if (!m)
+            continue;
+        const amount = Number(m[3].replace(/[$,]/g, ""));
+        if (!Number.isFinite(amount) || amount === 0)
+            continue;
+        const desc = m[2].trim();
+        const key = `${m[1]}|${desc}|${amount}`;
+        if (seen.has(key))
+            continue;
+        seen.add(key);
+        const isAbono = /PAGO RECIBIDO|DEP[OÓ]SITO|ABONO/i.test(desc);
+        const signed = isAbono ? Math.abs(amount) : -Math.abs(amount);
+        const direction = isAbono ? "abono" : "cargo";
         const cat = (0, categorize_1.categorizeLine)(desc, signed, direction, rules);
         out.push({
             id: (0, crypto_1.randomUUID)(),
             raw,
-            date,
+            date: m[1],
             description: desc,
             amount: signed,
             direction,
@@ -118,44 +157,6 @@ function extractLinesFromText(text, rules) {
             matchedRuleId: cat.matchedRuleId,
             needsReview: cat.needsReview,
         });
-    }
-    for (const raw of rawLines) {
-        let m = raw.match(reFull);
-        if (m) {
-            pushLine(m[1], m[2], m[3], raw);
-            continue;
-        }
-        m = raw.match(reShort);
-        if (m) {
-            pushLine(m[1], m[2], m[3], raw);
-            continue;
-        }
-        m = raw.match(reMon);
-        if (m) {
-            const mon = MONTHS[m[2].slice(0, 3).toLowerCase()] || m[2];
-            pushLine(`${m[1]}/${mon}`, m[3], m[4], raw);
-            continue;
-        }
-        m = raw.match(reLoose);
-        if (m) {
-            const date = m[1].replace(/\s+/g, " ");
-            const amountRaw = m[2];
-            const desc = raw
-                .replace(m[1], " ")
-                .replace(m[2], " ")
-                .replace(/\$/g, " ")
-                .replace(/\s+/g, " ")
-                .trim();
-            pushLine(date, desc || raw, amountRaw, raw);
-        }
-    }
-    // Fallback: escanear todo el texto por bloques fecha…monto
-    if (out.length === 0) {
-        const global = /(\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?|\d{1,2}\s+(?:ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC|JAN|APR|AUG|DEC)[A-Z]*)\s+([A-ZÁÉÍÓÚ0-9][^\n$]{5,100}?)(-?\$?\s*[\d,]+\.\d{2})/gi;
-        let gm;
-        while ((gm = global.exec(text)) !== null) {
-            pushLine(gm[1], gm[2], gm[3], gm[0]);
-        }
     }
     return out;
 }

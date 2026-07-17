@@ -1,8 +1,4 @@
 import type { BankLine, RecurringRule } from "./types";
-/**
- * Extrae texto del PDF y arma líneas con fecha/monto.
- * Incluye heurísticas para estados Citibanamex / Banamex.
- */
 export declare function parsePdfToLines(buffer: Buffer, rules: RecurringRule[]): Promise<{
     text: string;
     lines: BankLine[];

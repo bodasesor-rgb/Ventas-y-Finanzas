@@ -33,10 +33,17 @@ const DEFAULT_RULES = [
         frecuente: true,
     },
     {
-        id: "r-ads-google",
-        match: "google ads",
+        id: "r-ads-facebk",
+        match: "facebk",
         category: "ads",
-        label: "Google Ads",
+        label: "Facebook Ads",
+        frecuente: true,
+    },
+    {
+        id: "r-ads-google",
+        match: "google",
+        category: "ads",
+        label: "Google / Ads",
         frecuente: true,
     },
     {
@@ -51,6 +58,34 @@ const DEFAULT_RULES = [
         match: "pase",
         category: "pass",
         label: "Pase",
+        frecuente: true,
+    },
+    {
+        id: "r-replit",
+        match: "replit",
+        category: "servicios",
+        label: "Replit",
+        frecuente: true,
+    },
+    {
+        id: "r-shopify",
+        match: "shopify",
+        category: "servicios",
+        label: "Shopify",
+        frecuente: true,
+    },
+    {
+        id: "r-anthropic",
+        match: "anthropic",
+        category: "servicios",
+        label: "Anthropic / Claude",
+        frecuente: true,
+    },
+    {
+        id: "r-sendinblue",
+        match: "sendinblue",
+        category: "servicios",
+        label: "Brevo / Sendinblue",
         frecuente: true,
     },
     {
@@ -80,6 +115,17 @@ function loadRules() {
             saveRules(DEFAULT_RULES);
             return DEFAULT_RULES;
         }
+        // Fusiona defaults nuevos (facebk, replit…) sin borrar reglas del usuario
+        const byId = new Map(raw.map((r) => [r.id, r]));
+        let changed = false;
+        for (const d of DEFAULT_RULES) {
+            if (!byId.has(d.id)) {
+                raw.push(d);
+                changed = true;
+            }
+        }
+        if (changed)
+            saveRules(raw);
         return raw;
     }
     catch {
