@@ -116,16 +116,27 @@ function doPost(e) {
       });
     }
 
-    var rowIndex = findRowByDealId_(sheet, dealId);
+    var existingRow = findRowByDealId_(sheet, dealId);
+    var firstEmpty = findFirstEmptyClientRow_(sheet);
+    var rowIndex;
     var action;
 
-    if (rowIndex === -1) {
-      rowIndex = findFirstEmptyClientRow_(sheet);
-      // Fila nueva completa A–T (luego fórmulas M/N/O)
+    if (existingRow === -1) {
+      // Cliente nuevo → primera fila vacía del bloque (no al final del Sheet)
+      rowIndex = firstEmpty;
       sheet.getRange(rowIndex, 1, 1, DEAL_ID_COL).setValues([values]);
       applyCalcFormulas_(sheet, rowIndex);
       action = 'appended';
+    } else if (existingRow > firstEmpty) {
+      // Quedó huérfano abajo (basura / getLastRow viejo) → subir al hueco
+      sheet.getRange(existingRow, 1, 1, DEAL_ID_COL).clearContent();
+      sheet.getRange(existingRow, 13, 1, 3).clearContent(); // M N O
+      rowIndex = firstEmpty;
+      sheet.getRange(rowIndex, 1, 1, DEAL_ID_COL).setValues([values]);
+      applyCalcFormulas_(sheet, rowIndex);
+      action = 'moved';
     } else {
+      rowIndex = existingRow;
       writeRowValues_(sheet, rowIndex, values);
       action = 'updated';
     }
@@ -135,6 +146,7 @@ function doPost(e) {
       version: SCRIPT_VERSION,
       action: action,
       row: rowIndex,
+      previousRow: existingRow === -1 ? null : existingRow,
       dealId: dealId,
       sheetName: sheetName,
     });
