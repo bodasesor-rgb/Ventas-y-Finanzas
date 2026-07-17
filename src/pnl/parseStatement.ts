@@ -29,142 +29,273 @@ export async function parsePdfToLines(
   return { text, lines };
 }
 
-function cleanBlock(body: string): string {
+function stripPageNoise(text: string): string {
+  return text
+    .replace(/\r/g, "\n")
+    .replace(/LUIS ALEJANDRO SANCHEZ CAMPBELL/gi, "\n")
+    .replace(/P[aá]gina\s+\d+\s+de\s+\d+/gi, "\n")
+    .replace(/Estado de Cuenta/gi, "\n")
+    .replace(/Cuenta Priority/gi, "\n")
+    .replace(/000181\.B13INDL010\.AR\.\d+\.\d+/gi, "\n")
+    .replace(/Detalle de Operaciones[^\n]*/gi, "\n")
+    .replace(/FECHACONCEPTORETIROSDEP[ÓO]SITOSSALDO/gi, "\n")
+    .replace(/Centro de Atenci[oó]n VIP[\s\S]{0,300}?(?=\d{1,2}(?:ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)|$)/gi, "\n")
+    .replace(/Suc\.\s*\d+[^\n]*(?:\n[^\n]{0,80}){0,5}/gi, "\n")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
+/**
+ * Une continuaciones Banamex tras salto de página:
+ * el monto MXN de USD a veces queda en líneas "20260603 U.S. Dollar T.C. ..."
+ * sin nuevo DDMMM.
+ */
+function mergeUsdContinuations(text: string): string {
+  return text.replace(
+    /\n(?=20\d{6}\s+U\.S\.\s*Dollar\s*T\.C\.)/gi,
+    " "
+  );
+}
+
+function parseMoneyToken(tok: string): number | null {
+  const n = Number(String(tok).replace(/,/g, ""));
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.round(n * 100) / 100;
+}
+
+function collectMoney(s: string): number[] {
+  const normalized = s.replace(
+    /(\d{1,3}(?:,\d{3})*\.\d{2})(?=\d)/g,
+    "$1 "
+  );
+  const out: number[] = [];
+  const re = /(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(normalized)) !== null) {
+    const n = parseMoneyToken(m[0]);
+    if (n != null && n <= 2_000_000) out.push(n);
+  }
+  return out;
+}
+
+/** Limpieza suave: NO romper el tipo de cambio ni montos */
+function softClean(body: string): string {
   return body
-    // Tipo de cambio Banamex: T.C. 17.321300 pegado al monto MXN
-    .replace(/U\.S\.\s*Dollar\s*T\.C\.\s*\d+\.\d{6}/gi, " ")
-    .replace(/\bT\.C\.\s*\d+\.\d{6}/gi, " ")
-    // Folios / autorizaciones largos
-    .replace(/\b\d{10,}\b/g, " ")
     .replace(/\b20\d{6}\b/g, " ")
-    .replace(/\b900[01]\/\d+/gi, " ")
-    // Códigos de autorización de 6–8 dígitos sin decimales
-    .replace(/\b\d{6,8}\b/g, " ")
+    .replace(/\b\d{12,}\b/g, " ")
+    .replace(/\b\d{16}\b/g, " ")
+    .replace(/900[01]\/001/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 /**
- * Extrae montos MXN con 2 decimales.
- * También corta concatenados tipo 2,500.009,990.05 → [2500.00, 9990.05]
+ * Extrae movimiento + saldo.
+ * Prioridad: cola USD/T.C. → par final de montos MXN.
  */
-function findMoneyAmounts(s: string): number[] {
-  // Primero normaliza concatenaciones X.XXY → X.XX Y
-  const normalized = s.replace(
-    /(\d{1,3}(?:,\d{3})*\.\d{2})(?=\d)/g,
-    "$1 "
+export function extractMoveAndSaldo(body: string): {
+  move: number;
+  saldo: number | null;
+  suspicious: boolean;
+} | null {
+  const original = body.replace(/\s+/g, " ").trim();
+
+  // 0) Comisión Banamex: "PERIODO MAY01 AL MAY29500.003,169.72"
+  //    → día 29 + monto 500.00 + saldo 3,169.72
+  const periodo = original.match(
+    /PERIODO\s+[A-ZÁÉÍÓÚ]{3}\d{0,2}\s+AL\s+[A-ZÁÉÍÓÚ]{3}(\d{2})(\d[\d,]*\.\d{2})\s*((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})/i
   );
-  const re = /(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}/g;
-  const out: number[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(normalized)) !== null) {
-    const n = Number(m[0].replace(/,/g, ""));
-    if (!Number.isFinite(n) || n <= 0) continue;
-    // Descartar "montos" que parecen tipos de cambio residuales
-    if (n > 0 && n < 50 && /\d\.\d{4,}/.test(m[0])) continue;
-    out.push(n);
+  if (periodo) {
+    const move = parseMoneyToken(periodo[2]);
+    const saldo = parseMoneyToken(periodo[3]);
+    if (move != null) {
+      return { move, saldo, suspicious: false };
+    }
   }
-  return out;
+
+  // 1) USD con T.C. (montos MXN pegados al tipo de cambio)
+  const tc = original.match(
+    /U\.S\.\s*Dollar\s*T\.C\.\s*(\d+\.\d{4,6})(.*)$/i
+  );
+  if (tc) {
+    const afterTc = softClean(tc[2] || "");
+    const nums = collectMoney(afterTc);
+    if (nums.length >= 2) {
+      return {
+        move: nums[nums.length - 2],
+        saldo: nums[nums.length - 1],
+        suspicious: nums[nums.length - 2] > 150_000,
+      };
+    }
+    if (nums.length === 1) {
+      return { move: nums[0], saldo: null, suspicious: true };
+    }
+  }
+
+  // 2) MXN normal
+  let s = softClean(original);
+  s = s
+    .replace(/U\.S\.\s*Dollar\s*T\.C\.\s*\d+\.\d{4,6}/gi, " ")
+    .replace(/\bT\.C\.\s*\d+\.\d{4,6}/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // Quitar códigos de auth de 6 dígitos sueltos (no parte de montos)
+  s = s.replace(/(?<![\d,.])\b\d{6,8}\b(?![\d,.])/g, " ").replace(/\s+/g, " ");
+
+  const nums = collectMoney(s);
+  if (!nums.length) return null;
+
+  // Solo los últimos 2–3 montos importan (retiro/depósito + saldo)
+  const pool = nums.slice(-3);
+  if (pool.length === 1) {
+    return {
+      move: pool[0],
+      saldo: null,
+      suspicious: pool[0] > 100_000,
+    };
+  }
+
+  const saldo = pool[pool.length - 1];
+  let move = pool[pool.length - 2];
+
+  // Promo extranjero tipo "05263.52 32.74" → el chico es el cargo real
+  if (saldo < 200 && move > 500) {
+    const tail = s.match(
+      /(0\d{1,3}(?:,\d{3})*\.\d{2})\s+(\d+\.\d{2})\s*$/
+    );
+    if (tail) {
+      return {
+        move: parseMoneyToken(tail[2]) || saldo,
+        saldo: null,
+        suspicious: true,
+      };
+    }
+  }
+
+  if (pool.length >= 3 && Math.abs(move - saldo) < 0.009) {
+    move = pool[pool.length - 3];
+  }
+
+  return {
+    move,
+    saldo,
+    suspicious: move > 150_000 || (saldo > 0 && move > saldo * 10),
+  };
 }
 
-/** Elige monto del movimiento vs saldo (último suele ser saldo). */
-function pickMovementAmount(amounts: number[]): {
-  move: number;
-  suspicious: boolean;
-} {
-  if (amounts.length === 0) return { move: 0, suspicious: true };
-  if (amounts.length === 1) {
-    return { move: amounts[0], suspicious: amounts[0] > 500_000 };
-  }
+export function detectDirection(desc: string): BankLine["direction"] {
+  const d = desc.replace(/\s+/g, " ").trim();
 
-  const saldo = amounts[amounts.length - 1];
-  let move = amounts[amounts.length - 2];
-
-  // Si hay 3+ y el penúltimo es casi igual al saldo, probar antepenúltimo
   if (
-    amounts.length >= 3 &&
-    Math.abs(move - saldo) < 0.01
+    /\bPAGO RECIBIDO\b/i.test(d) ||
+    /\bSPEI RECIBIDO\b/i.test(d) ||
+    /\bABONO X DEV\b/i.test(d) ||
+    /^ABONO\b/i.test(d) ||
+    /^DEP[OÓ]SITO\b/i.test(d) ||
+    /\bDEPOSITO CANALES\b/i.test(d)
   ) {
-    move = amounts[amounts.length - 3];
+    return "abono";
   }
 
-  // Si el "movimiento" es mayor que el saldo y hay candidato más chico antes
-  if (amounts.length >= 3 && move > saldo * 1.5) {
-    const prev = amounts[amounts.length - 3];
-    if (prev < move && prev > 0) move = prev;
+  if (
+    /\bPAGO INTERBANCARIO A\b/i.test(d) ||
+    /\bPAGO A TERCEROS\b/i.test(d) ||
+    /\bRETIRO\b/i.test(d) ||
+    /\bCOMISI[OÓ]N\b/i.test(d) ||
+    /\bIVA COMISI/i.test(d) ||
+    /\bCARGO\b/i.test(d) ||
+    /\bCOMPRA\b/i.test(d) ||
+    /\bTRASPASO\b/i.test(d) ||
+    /\bPROMOCION\b/i.test(d) ||
+    /^(PAYU|FACEBK|META|SHOPIFY|EBANX|CURSOR|REPLIT|SENDINBLUE|GOOGLE|NETLIFY|OPENAI|GAMMA)/i.test(
+      d
+    )
+  ) {
+    return "cargo";
   }
 
-  const suspicious =
-    move > 500_000 ||
-    (amounts.length >= 3 && amounts.slice(0, -1).filter((a) => a === move).length > 1);
+  return "cargo";
+}
 
-  return { move, suspicious };
+function cleanDescription(body: string): string {
+  let desc = softClean(body);
+  desc = desc
+    .replace(/U\.S\.\s*Dollar\s*T\.C\.\s*\d+\.\d{4,6}/gi, " ")
+    .replace(/(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}/g, " ")
+    .replace(/(?<![\d,.])\b\d{6,8}\b(?![\d,.])/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return desc.slice(0, 220);
+}
+
+function monthToken(mon: string): string {
+  const ent = Object.entries(MONTH_NUM).find(([, v]) => v === mon);
+  return (ent?.[0] || mon).toUpperCase();
 }
 
 function extractBanamex(text: string, rules: RecurringRule[]): BankLine[] {
+  const cleaned = mergeUsdContinuations(stripPageNoise(text));
   const out: BankLine[] = [];
   const seen = new Set<string>();
-  const blockRe = new RegExp(
-    `(\\d{1,2})(${MONTH_RE})([\\s\\S]*?)(?=\\d{1,2}(?:${MONTH_RE})|$)`,
-    "gi"
-  );
 
-  let m: RegExpExecArray | null;
-  while ((m = blockRe.exec(text)) !== null) {
-    const day = m[1].padStart(2, "0");
-    const mon = MONTH_NUM[m[2].toLowerCase()] || m[2];
-    const date = `${day}/${mon}`;
-    const rawBody = (m[3] || "").replace(/\s+/g, " ").trim();
+  const tokens: { day: string; mon: string; bodyStart: number; start: number }[] =
+    [];
+  const re = new RegExp(`(\\d{1,2})(${MONTH_RE})`, "gi");
+  let tm: RegExpExecArray | null;
+  while ((tm = re.exec(cleaned)) !== null) {
+    tokens.push({
+      day: tm[1].padStart(2, "0"),
+      mon: MONTH_NUM[tm[2].toLowerCase()] || tm[2],
+      start: tm.index,
+      bodyStart: tm.index + tm[0].length,
+    });
+  }
+
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i];
+    const end = i + 1 < tokens.length ? tokens[i + 1].start : cleaned.length;
+    const rawBody = cleaned.slice(tok.bodyStart, end).replace(/\s+/g, " ").trim();
     if (!rawBody) continue;
-
     if (/^SALDO ANTERIOR/i.test(rawBody)) continue;
 
-    const body = cleanBlock(rawBody);
-    const amounts = findMoneyAmounts(body);
-    if (amounts.length === 0) continue;
+    const money = extractMoveAndSaldo(rawBody);
+    if (!money) continue;
 
-    const { move, suspicious } = pickMovementAmount(amounts);
-    if (!move || move > 2_000_000) continue;
-
-    let desc = body;
-    const moneyBits = body.match(
-      /(?:(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}\s*)+$/
-    );
-    if (moneyBits && moneyBits.index != null) {
-      desc = body.slice(0, moneyBits.index).trim();
-    }
-    desc = desc
-      .replace(/(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
+    const desc = cleanDescription(rawBody);
     if (desc.length < 3) continue;
     if (/^SALDO ANTERIOR/i.test(desc)) continue;
-    if (/^P[aá]gina\b/i.test(desc)) continue;
-
-    const isAbono =
-      /PAGO RECIBIDO|DEP[OÓ]SITO|ABONO|SPEI RECIBIDO|TRANSFER[A-ZÁÉÍÓÚ ]*RECIB|DEPOSITO EN EFECTIVO|DEVOLUC/i.test(
+    if (
+      /^(Resumen|Saldo promedio|Dep[oó]sitos|Otros cargos|Inter[eé]s Aplicable|PERIODO )/i.test(
         desc
-      );
-    const signed = isAbono ? Math.abs(move) : -Math.abs(move);
-    const direction: BankLine["direction"] = isAbono ? "abono" : "cargo";
+      )
+    ) {
+      continue;
+    }
 
-    const key = `${date}|${desc.slice(0, 50)}|${signed.toFixed(2)}`;
+    const move = money.move;
+    const direction = detectDirection(desc);
+    const signed = direction === "abono" ? Math.abs(move) : -Math.abs(move);
+    const suspicious =
+      money.suspicious ||
+      Math.abs(signed) > 150_000 ||
+      (direction === "abono" && !/\bPAGO RECIBIDO\b|\bABONO\b|\bDEP[OÓ]SITO\b/i.test(desc));
+
+    const date = `${tok.day}/${tok.mon}`;
+    const key = `${date}|${desc.slice(0, 40)}|${signed.toFixed(2)}`;
     if (seen.has(key)) continue;
     seen.add(key);
 
     const cat = categorizeLine(desc, signed, direction, rules);
-    const needsReview = cat.needsReview || suspicious;
     out.push({
       id: randomUUID(),
-      raw: `${day}${m[2].toUpperCase()} ${rawBody.slice(0, 140)}`,
+      raw: `${tok.day}${monthToken(tok.mon)} ${rawBody.slice(0, 160)}`,
       date,
-      description: desc.slice(0, 220),
+      description: desc,
       amount: Math.round(signed * 100) / 100,
       direction,
-      category: needsReview && !isAbono ? cat.category || "revisar" : cat.category,
+      category: cat.category,
       matchedRuleId: cat.matchedRuleId,
-      needsReview,
+      needsReview: Boolean(cat.needsReview || suspicious),
     });
   }
 
@@ -204,9 +335,9 @@ function extractGeneric(text: string, rules: RecurringRule[]): BankLine[] {
     const key = `${m[1]}|${desc}|${amount}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const isAbono = /PAGO RECIBIDO|DEP[OÓ]SITO|ABONO/i.test(desc);
-    const signed = isAbono ? Math.abs(amount) : -Math.abs(amount);
-    const direction: BankLine["direction"] = isAbono ? "abono" : "cargo";
+    const direction = detectDirection(desc);
+    const signed =
+      direction === "abono" ? Math.abs(amount) : -Math.abs(amount);
     const cat = categorizeLine(desc, signed, direction, rules);
     out.push({
       id: randomUUID(),
@@ -229,4 +360,22 @@ export function summarizeByCategory(lines: BankLine[]): Record<string, number> {
     summary[line.category] = (summary[line.category] || 0) + line.amount;
   }
   return summary;
+}
+
+export function summarizeTotals(lines: BankLine[]): {
+  ingresos: number;
+  gastos: number;
+  neto: number;
+} {
+  let ingresos = 0;
+  let gastos = 0;
+  for (const line of lines) {
+    if (line.amount >= 0) ingresos += line.amount;
+    else gastos += line.amount;
+  }
+  return {
+    ingresos: Math.round(ingresos * 100) / 100,
+    gastos: Math.round(gastos * 100) / 100,
+    neto: Math.round((ingresos + gastos) * 100) / 100,
+  };
 }

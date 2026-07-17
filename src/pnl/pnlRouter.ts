@@ -8,6 +8,7 @@ import {
   extractLinesFromText,
   parsePdfToLines,
   summarizeByCategory,
+  summarizeTotals,
 } from "./parseStatement";
 import { detectPeriodFromText } from "./period";
 import {
@@ -244,6 +245,7 @@ pnlRouter.post(
       const { text, lines: parsed } = await parsePdfToLines(buffer, rules);
       const { lines, created } = autoCreateCategoriesFromLines(parsed);
       const summaryByCategory = summarizeByCategory(lines);
+      const totals = summarizeTotals(lines);
       const period = detectPeriodFromText(text);
       const saved = saveStatementPdf(req.file.path, period);
       const mid = Math.max(0, Math.floor(text.length / 2) - 400);
@@ -265,6 +267,7 @@ pnlRouter.post(
         },
         lines,
         summaryByCategory,
+        totals,
       };
       addRun(run);
 
@@ -279,6 +282,7 @@ pnlRouter.post(
           period: period.label,
           savedAs: saved.storedName,
           categoriesCreated: created,
+          totals,
         },
       });
     } catch (err) {
@@ -313,6 +317,7 @@ pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
   const period = detectPeriodFromText(text);
   run.lines = lines;
   run.summaryByCategory = summarizeByCategory(lines);
+  run.totals = summarizeTotals(lines);
   run.periodKey = period.key;
   run.periodLabel = period.label;
   runs[idx] = run;
@@ -328,6 +333,7 @@ pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
       textLength: text.length,
       period: period.label,
       categoriesCreated: created,
+      totals: run.totals,
     },
   });
 });
@@ -387,8 +393,14 @@ pnlRouter.patch("/api/pnl/runs/:runId/lines/:lineId", (req, res) => {
   }
 
   run.summaryByCategory = summarizeByCategory(run.lines);
+  run.totals = summarizeTotals(run.lines);
   saveRuns(runs);
-  res.json({ ok: true, line, summaryByCategory: run.summaryByCategory });
+  res.json({
+    ok: true,
+    line,
+    summaryByCategory: run.summaryByCategory,
+    totals: run.totals,
+  });
 });
 
 pnlRouter.post("/api/pnl/test-rule", (req, res) => {

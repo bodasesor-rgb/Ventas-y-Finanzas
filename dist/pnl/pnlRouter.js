@@ -211,6 +211,7 @@ exports.pnlRouter.post("/api/pnl/upload", upload.single("statement"), async (req
         const { text, lines: parsed } = await (0, parseStatement_1.parsePdfToLines)(buffer, rules);
         const { lines, created } = (0, autoCategories_1.autoCreateCategoriesFromLines)(parsed);
         const summaryByCategory = (0, parseStatement_1.summarizeByCategory)(lines);
+        const totals = (0, parseStatement_1.summarizeTotals)(lines);
         const period = (0, period_1.detectPeriodFromText)(text);
         const saved = (0, statementFiles_1.saveStatementPdf)(req.file.path, period);
         const mid = Math.max(0, Math.floor(text.length / 2) - 400);
@@ -231,6 +232,7 @@ exports.pnlRouter.post("/api/pnl/upload", upload.single("statement"), async (req
             },
             lines,
             summaryByCategory,
+            totals,
         };
         (0, store_1.addRun)(run);
         res.json({
@@ -244,6 +246,7 @@ exports.pnlRouter.post("/api/pnl/upload", upload.single("statement"), async (req
                 period: period.label,
                 savedAs: saved.storedName,
                 categoriesCreated: created,
+                totals,
             },
         });
     }
@@ -277,6 +280,7 @@ exports.pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
     const period = (0, period_1.detectPeriodFromText)(text);
     run.lines = lines;
     run.summaryByCategory = (0, parseStatement_1.summarizeByCategory)(lines);
+    run.totals = (0, parseStatement_1.summarizeTotals)(lines);
     run.periodKey = period.key;
     run.periodLabel = period.label;
     runs[idx] = run;
@@ -292,6 +296,7 @@ exports.pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
             textLength: text.length,
             period: period.label,
             categoriesCreated: created,
+            totals: run.totals,
         },
     });
 });
@@ -348,8 +353,14 @@ exports.pnlRouter.patch("/api/pnl/runs/:runId/lines/:lineId", (req, res) => {
             line.needsReview = false;
     }
     run.summaryByCategory = (0, parseStatement_1.summarizeByCategory)(run.lines);
+    run.totals = (0, parseStatement_1.summarizeTotals)(run.lines);
     (0, store_1.saveRuns)(runs);
-    res.json({ ok: true, line, summaryByCategory: run.summaryByCategory });
+    res.json({
+        ok: true,
+        line,
+        summaryByCategory: run.summaryByCategory,
+        totals: run.totals,
+    });
 });
 exports.pnlRouter.post("/api/pnl/test-rule", (req, res) => {
     const { description, amount = -100, match, category } = req.body || {};

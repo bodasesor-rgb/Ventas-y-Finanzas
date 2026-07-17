@@ -154,51 +154,58 @@ function autoCreateCategoriesFromLines(lines) {
         (0, store_1.saveCategories)(cats);
     const created = [];
     const out = lines.map((line) => {
-        // Ingresos ya tipados
-        if (line.amount > 0 || line.direction === "abono") {
+        // Abonos reales → ingreso (nunca inventar abono desde un cargo)
+        if (line.direction === "abono" && line.amount > 0) {
             if (line.category === "revisar" || !line.category) {
                 return { ...line, category: "ingreso", needsReview: false };
             }
             return line;
         }
-        // Ya tiene categoría real
+        // Si el parser dijo cargo pero el monto quedó positivo, forzar gasto
+        if (line.direction === "cargo" && line.amount > 0) {
+            line = { ...line, amount: -Math.abs(line.amount) };
+        }
+        // Ya tiene categoría real de gasto
         if (line.category &&
             line.category !== "revisar" &&
             line.category !== "otro") {
-            // Si la categoría no existe en catálogo, créala
             const exists = (0, store_1.loadCategories)().some((c) => c.id === line.category);
             if (!exists) {
                 const label = titleCase(line.category.replace(/_/g, " "));
-                const cat = ensureCategory(label, line.amount > 0 ? "ingreso" : "gasto");
+                const cat = ensureCategory(label, "gasto");
                 if (!created.includes(cat.label))
                     created.push(cat.label);
-                return { ...line, category: cat.id, needsReview: false };
+                return { ...line, category: cat.id };
             }
             return line;
+        }
+        // Solo auto-crear si hay comercio claro y el monto no es sospechoso
+        if (Math.abs(line.amount) > 150_000) {
+            return { ...line, category: "revisar", needsReview: true };
         }
         const merchant = extractMerchantLabel(line.description);
         if (!merchant) {
-            // Sin comercio claro → categoría Pago genérica si parece pago
-            if (/\bpago\b/i.test(line.description)) {
-                return {
-                    ...line,
-                    category: "pago",
-                    needsReview: true,
-                };
+            if (/\bpago\b/i.test(line.description) && line.direction === "cargo") {
+                return { ...line, category: "pago", needsReview: true };
             }
-            return line;
+            return { ...line, needsReview: true };
         }
-        const kind = line.amount > 0 ? "ingreso" : "gasto";
-        const cat = ensureCategory(merchant, kind);
-        // match estable: primera palabra del comercio
+        // Evitar categorías basura de 1 token genérico
+        const bad = /^(pago|cargo|compra|mexico|dublin|paris|suc)$/i;
+        if (bad.test(merchant)) {
+            return { ...line, category: "pago", needsReview: true };
+        }
+        const cat = ensureCategory(merchant, "gasto");
         const matchToken = merchant.split(/\s+/)[0].toLowerCase();
-        ensureRule(matchToken, cat.id, merchant);
+        if (matchToken.length >= 4)
+            ensureRule(matchToken, cat.id, merchant);
         if (!created.includes(cat.label))
             created.push(cat.label);
         return {
             ...line,
             category: cat.id,
-            needsReview: false,
+            // Deja en revisar montos altos para doble check humano
+            needsReview: Math.abs(line.amount) >= 20_000,
             matchedRuleId: line.matchedRuleId,
         };
     });

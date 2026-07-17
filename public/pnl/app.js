@@ -20,6 +20,54 @@ function money(n) {
   }).format(n || 0);
 }
 
+/** Para el input editable: siempre con signo y aspecto de dinero */
+function moneyInputValue(n) {
+  const num = Number(n) || 0;
+  const abs = Math.abs(num).toFixed(2);
+  return num < 0 ? `-${abs}` : abs;
+}
+
+function parseMoneyInput(raw) {
+  let s = String(raw || "").trim();
+  s = s.replace(/[$\s]/g, "").replace(/,/g, "");
+  if (!s) return NaN;
+  // permitir "(1500)" como negativo
+  const paren = s.match(/^\((.+)\)$/);
+  if (paren) s = "-" + paren[1];
+  return Number(s);
+}
+
+function computeTotals(lines) {
+  let ingresos = 0;
+  let gastos = 0;
+  for (const line of lines || []) {
+    const a = Number(line.amount) || 0;
+    if (a >= 0) ingresos += a;
+    else gastos += a;
+  }
+  return {
+    ingresos: Math.round(ingresos * 100) / 100,
+    gastos: Math.round(gastos * 100) / 100,
+    neto: Math.round((ingresos + gastos) * 100) / 100,
+  };
+}
+
+function renderTotals(run) {
+  const bar = document.getElementById("totalsBar");
+  if (!bar) return;
+  const t = run.totals || computeTotals(run.lines);
+  bar.hidden = false;
+  const ing = document.getElementById("totalIngresos");
+  const gas = document.getElementById("totalGastos");
+  const net = document.getElementById("totalNeto");
+  if (ing) ing.textContent = money(t.ingresos);
+  if (gas) gas.textContent = money(t.gastos);
+  if (net) {
+    net.textContent = money(t.neto);
+    net.style.color = t.neto >= 0 ? "#0b6b3a" : "#9a3412";
+  }
+}
+
 function escapeAttr(s) {
   return String(s || "")
     .replace(/&/g, "&amp;")
@@ -354,6 +402,8 @@ function renderRun(run) {
     meta.textContent = parts.join(" · ");
   }
 
+  renderTotals(run);
+
   const summary = document.getElementById("summary");
   summary.innerHTML = "";
 
@@ -408,11 +458,14 @@ function renderRun(run) {
         )}" value="${escapeAttr(line.description)}" />
       </td>
       <td class="amount ${income ? "income" : ""}">
-        <input class="amount-edit" type="number" step="0.01" data-field="amount" data-line="${escapeAttr(
-          line.id
-        )}" value="${escapeAttr(String(line.amount))}" style="${
-      income ? "color:#0b6b3a;font-weight:700" : ""
-    }" />
+        <span class="money-edit-wrap">
+          <span class="money-prefix">$</span>
+          <input class="amount-edit" inputmode="decimal" data-field="amount" data-line="${escapeAttr(
+            line.id
+          )}" value="${escapeAttr(moneyInputValue(line.amount))}" style="${
+      income ? "color:#0b6b3a;font-weight:700" : "color:#9a3412;font-weight:700"
+    }" title="Negativo = gasto, positivo = ingreso" />
+        </span>
       </td>
       <td>
         <select class="cat-select" data-field="category" data-line="${escapeAttr(
@@ -424,9 +477,12 @@ function renderRun(run) {
         </select>
       </td>
       <td>
-        <input type="checkbox" data-field="needsReview" data-line="${escapeAttr(
-          line.id
-        )}" ${line.needsReview ? "checked" : ""} title="Marcar para revisar" />
+        <label class="review-lab" title="Actívala si el monto o la categoría están mal y quieres corregirlos">
+          <input type="checkbox" data-field="needsReview" data-line="${escapeAttr(
+            line.id
+          )}" ${line.needsReview ? "checked" : ""} />
+          <span>${line.needsReview ? "checar" : ""}</span>
+        </label>
       </td>
     `;
     tbody.appendChild(tr);
@@ -465,9 +521,9 @@ function renderRun(run) {
 
   tbody.querySelectorAll("input[data-field='amount']").forEach((el) => {
     const save = async () => {
-      const n = Number(el.value);
+      const n = parseMoneyInput(el.value);
       if (!Number.isFinite(n)) {
-        alert("Monto inválido");
+        alert("Monto inválido. Usa formato como -1500.00 o $1,500.00");
         return;
       }
       try {

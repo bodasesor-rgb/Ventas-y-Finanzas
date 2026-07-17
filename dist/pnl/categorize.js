@@ -2,12 +2,12 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.categorizeLine = categorizeLine;
 const store_1 = require("./store");
-/** Heurística: SPEI a nombre propio / “a favor de” → revisar (persona) */
-const PERSON_HINTS = /\b(spei|transferencia|traspaso)\b.*\b(a favor|beneficiario|nombre)\b|\b(nomina|nómina|sueldo|honorarios)\b/i;
+/** SPEI/transferencia a persona → revisar */
+const PERSON_HINTS = /\b(spei|transferencia|traspaso|pago interbancario)\b.*\b(a favor|beneficiario|al benef)/i;
 function categorizeLine(description, amount, direction, rules) {
     const desc = description.toLowerCase();
-    // Ingresos claros (categoría kind=ingreso)
-    if (direction === "abono" || amount > 0) {
+    // Solo buscar reglas de ingreso si el movimiento ES abono
+    if (direction === "abono") {
         for (const rule of rules) {
             if ((0, store_1.isIncomeCategory)(rule.category) &&
                 desc.includes(rule.match.toLowerCase())) {
@@ -18,12 +18,18 @@ function categorizeLine(description, amount, direction, rules) {
                 };
             }
         }
+        return {
+            category: "ingreso",
+            needsReview: false,
+        };
     }
-    // Reglas frecuentes (ads, pass, etc.) — match simple contains
+    // Cargos: reglas de gasto (nunca forzar ingreso por monto)
     const sorted = [...rules].sort((a, b) => b.match.length - a.match.length);
     for (const rule of sorted) {
+        if ((0, store_1.isIncomeCategory)(rule.category))
+            continue;
         const m = rule.match.toLowerCase().replace(/\*/g, "");
-        if (m && desc.includes(m)) {
+        if (m && m.length >= 3 && desc.includes(m)) {
             return {
                 category: rule.category,
                 matchedRuleId: rule.id,
@@ -32,18 +38,14 @@ function categorizeLine(description, amount, direction, rules) {
             };
         }
     }
-    if (PERSON_HINTS.test(description)) {
+    if (PERSON_HINTS.test(description) || /\bpago interbancario a\b/i.test(desc)) {
         return {
             category: "transferencia_persona",
             needsReview: true,
         };
     }
-    // Abono sin regla → ingreso genérico (verde), no “revisar”
-    if (direction === "abono" || amount > 0) {
-        return {
-            category: "ingreso",
-            needsReview: false,
-        };
+    if (/\bcomisi[oó]n\b|\biva comisi/i.test(desc)) {
+        return { category: "comisiones", needsReview: false };
     }
     return {
         category: "revisar",

@@ -279,12 +279,60 @@ input.desc-edit:focus {
   background: #fff;
 }
 .line-save-ok { outline: 2px solid #1a8f55; }
+.totals-bar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.65rem;
+  margin: 0.75rem 0 1rem;
+}
+.total-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.7rem 0.85rem;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.total-card span {
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.total-card strong {
+  font-size: 1.25rem;
+  font-variant-numeric: tabular-nums;
+}
+.total-card.income-total {
+  background: #e8f6ef;
+  border-color: #1a8f55;
+}
+.total-card.income-total strong { color: #0b6b3a; }
+.total-card.expense-total {
+  background: #fff1f0;
+  border-color: #c2410c;
+}
+.total-card.expense-total strong { color: #9a3412; }
+.total-card.net-total { background: #f7f2e8; }
+@media (max-width: 700px) {
+  .totals-bar { grid-template-columns: 1fr; }
+}
+
 .summary {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
   margin-bottom: 0.75rem;
 }
+.money-edit-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  font-weight: 700;
+}
+.money-prefix { color: var(--muted); }
+input.amount-edit { width: 8.2rem; }
 .chip {
   border: 1px solid var(--line);
   border-radius: 999px;

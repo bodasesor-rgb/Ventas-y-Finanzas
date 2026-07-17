@@ -62,4 +62,9 @@ export interface StatementRun {
   };
   lines: BankLine[];
   summaryByCategory: Record<string, number>;
+  totals?: {
+    ingresos: number;
+    gastos: number;
+    neto: number;
+  };
 }
