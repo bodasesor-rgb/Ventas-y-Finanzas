@@ -19,12 +19,20 @@
 - Start: `npm start`
 - Env: `KOMMO_BASE_URL`, `KOMMO_ACCESS_TOKEN`, `URL_BODASESOR_DIRECCION_SHEETS`
 
-## Sheet (Apps Script)
+## Sheet (Apps Script) — OBLIGATORIO v6
 
-1. Pegar `apps-script/Codigo.gs` (**v5**: inserta en la 1ª fila vacía de Cliente, no al final)
-2. Ejecutar **`setupAll_`** solo la primera vez
-3. **Implementar → Administrar implementaciones → Editar (lápiz) → Nueva versión → Implementar**  
-   (misma URL `/exec`; si creas otra implementación, hay que actualizar Hostinger)
+Hoy Hostinger puede estar bien y el Sheet seguir en **v4** (pega clientes hasta abajo).
+Hay que republicar el script:
+
+1. Sheet → Extensiones → Apps Script
+2. Borra todo y pega `apps-script/Codigo.gs` (debe decir `2026-07-17-v6`)
+3. Guardar
+4. **Implementar → Administrar implementaciones → lápiz de la implementación actual → Versión: Nueva versión → Implementar**
+5. Verifica abriendo la URL `/exec` en el navegador: debe mostrar `"version":"2026-07-17-v6"`
+
+Regla de filas v6:
+- Deal ID ya en col T → **actualiza esa fila** (no duplica, no mueve)
+- Deal nuevo → **última fila con Cliente + 1** (ej. 66 → 67)
 
 ### Cierres automáticos
 - Webhook: `POST /webhooks/kommo/deal-won`

@@ -1,19 +1,28 @@
 /**
  * ============================================================
  * Apps Script — Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-07-17-v5
+ * VERSION: 2026-07-17-v6
  * ============================================================
  * doPost  → append/update Eventos YYYY (Kommo)
+ * doGet   → { version } para verificar que la App web está en v6
  * setupAll_ → EJECUTAR UNA VEZ desde el editor para enlazar
  *             fórmulas Eventos + tabla mensual + Metricas + P&L
+ *
+ * REGLA DE FILA:
+ *  - Si el Kommo Deal ID (col T) ya existe → UPDATE esa fila (no duplica)
+ *  - Si es nuevo → va en (última fila con Cliente en col A) + 1
+ *    Ejemplo: último cliente en fila 66 → nuevo en 67
+ *  - NUNCA uses getLastRow() para insertar (pega hasta abajo)
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-07-17-v5';
+var SCRIPT_VERSION = '2026-07-17-v6';
 var DEFAULT_SHEET_NAME = 'Eventos 2026';
 var DEAL_ID_COL = 20; // T
 var CLIENTE_COL = 1; // A
 var METRICAS_SHEET = 'Metricas 2026';
 var PL_SHEET = 'P&L 2026';
+/** No mirar más abajo de esta fila al buscar el último cliente (evita basura) */
+var MAX_CLIENT_SCAN = 500;
 
 function isWritableSheet_(name) {
   return /^Eventos \d{4}$/.test(name);
@@ -23,31 +32,51 @@ function isWritableSheet_(name) {
 var WRITE_COLS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 16, 17, 18, 20];
 
 /**
- * Primera fila vacía en columna Cliente (A), desde la fila 2.
- * Así el nuevo cierre va junto al bloque de clientes, no al final
- * del Sheet (getLastRow pega abajo si hay basura en la fila 1000).
+ * Última fila con nombre en Cliente (A), luego +1.
+ * Si el último está en 66 → regresa 67.
+ * Ignora basura lejana: si hay un hueco de ≥15 filas vacías, corta el bloque.
  */
-function findFirstEmptyClientRow_(sheet) {
+function findNextClientRow_(sheet) {
   var lastRow = Math.max(sheet.getLastRow(), 1);
-  var scanTo = Math.max(lastRow, 2);
-  // Mirar un poco más abajo por si hay huecos
-  scanTo = Math.max(scanTo, 2);
+  var scanTo = Math.min(Math.max(lastRow, 2), MAX_CLIENT_SCAN);
   var values = sheet.getRange(2, CLIENTE_COL, scanTo, CLIENTE_COL).getValues();
+  var lastFilled = 1; // encabezado
+  var emptyStreak = 0;
+
   for (var i = 0; i < values.length; i++) {
-    if (String(values[i][0]).trim() === '') {
-      return i + 2;
+    var cell = String(values[i][0]).trim();
+    if (cell !== '') {
+      lastFilled = i + 2;
+      emptyStreak = 0;
+    } else if (lastFilled >= 2) {
+      emptyStreak++;
+      // Tras el bloque real de clientes, no seguir buscando basura abajo
+      if (emptyStreak >= 15) break;
     }
   }
-  return scanTo + 1;
+
+  return lastFilled + 1;
 }
 
 function findRowByDealId_(sheet, dealId) {
   var lastRow = Math.max(sheet.getLastRow(), 1);
   if (lastRow < 2) return -1;
-  var ids = sheet.getRange(2, DEAL_ID_COL, lastRow, DEAL_ID_COL).getValues();
+  var scanTo = Math.min(lastRow, MAX_CLIENT_SCAN);
+  var ids = sheet.getRange(2, DEAL_ID_COL, scanTo, DEAL_ID_COL).getValues();
   for (var i = 0; i < ids.length; i++) {
     if (String(ids[i][0]).trim() === dealId) {
       return i + 2;
+    }
+  }
+  // Si getLastRow es enorme, también buscar más abajo por si quedó un ID viejo
+  if (lastRow > MAX_CLIENT_SCAN) {
+    var ids2 = sheet
+      .getRange(MAX_CLIENT_SCAN + 1, DEAL_ID_COL, lastRow, DEAL_ID_COL)
+      .getValues();
+    for (var j = 0; j < ids2.length; j++) {
+      if (String(ids2[j][0]).trim() === dealId) {
+        return MAX_CLIENT_SCAN + 1 + j;
+      }
     }
   }
   return -1;
@@ -59,6 +88,16 @@ function writeRowValues_(sheet, rowIndex, values) {
     sheet.getRange(rowIndex, col).setValue(values[col - 1]);
   }
   applyCalcFormulas_(sheet, rowIndex);
+}
+
+/** Abre la URL /exec en el navegador → debe decir version v6 */
+function doGet() {
+  return json_({
+    ok: true,
+    version: SCRIPT_VERSION,
+    ping: true,
+    rule: 'nuevo cliente = ultima fila con Cliente + 1',
+  });
 }
 
 function doPost(e) {
@@ -117,28 +156,21 @@ function doPost(e) {
     }
 
     var existingRow = findRowByDealId_(sheet, dealId);
-    var firstEmpty = findFirstEmptyClientRow_(sheet);
     var rowIndex;
     var action;
+    var nextRow = findNextClientRow_(sheet);
 
-    if (existingRow === -1) {
-      // Cliente nuevo → primera fila vacía del bloque (no al final del Sheet)
-      rowIndex = firstEmpty;
-      sheet.getRange(rowIndex, 1, 1, DEAL_ID_COL).setValues([values]);
-      applyCalcFormulas_(sheet, rowIndex);
-      action = 'appended';
-    } else if (existingRow > firstEmpty) {
-      // Quedó huérfano abajo (basura / getLastRow viejo) → subir al hueco
-      sheet.getRange(existingRow, 1, 1, DEAL_ID_COL).clearContent();
-      sheet.getRange(existingRow, 13, 1, 3).clearContent(); // M N O
-      rowIndex = firstEmpty;
-      sheet.getRange(rowIndex, 1, 1, DEAL_ID_COL).setValues([values]);
-      applyCalcFormulas_(sheet, rowIndex);
-      action = 'moved';
-    } else {
+    if (existingRow !== -1) {
+      // Ya existe → solo actualizar esa fila (NO mover, NO duplicar)
       rowIndex = existingRow;
       writeRowValues_(sheet, rowIndex, values);
       action = 'updated';
+    } else {
+      // Nuevo → siguiente casilla después del último cliente
+      rowIndex = nextRow;
+      sheet.getRange(rowIndex, 1, 1, DEAL_ID_COL).setValues([values]);
+      applyCalcFormulas_(sheet, rowIndex);
+      action = 'appended';
     }
 
     return json_({
@@ -146,7 +178,7 @@ function doPost(e) {
       version: SCRIPT_VERSION,
       action: action,
       row: rowIndex,
-      previousRow: existingRow === -1 ? null : existingRow,
+      nextRowWouldBe: nextRow,
       dealId: dealId,
       sheetName: sheetName,
     });
