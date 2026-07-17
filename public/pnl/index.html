@@ -20,8 +20,13 @@
     <section class="panel">
       <h2>1. Subir estado de cuenta (PDF)</h2>
       <form id="uploadForm">
-        <input type="file" id="file" accept="application/pdf,.pdf" required />
-        <button type="submit">Procesar PDF</button>
+        <label id="dropZone" class="drop-zone" for="file">
+          <input type="file" id="file" accept="application/pdf,.pdf" hidden />
+          <span class="drop-title">Arrastra el PDF aquí</span>
+          <span class="drop-hint">o haz clic para elegir archivo</span>
+          <span id="fileName" class="drop-file"></span>
+        </label>
+        <button type="submit" id="processBtn" disabled>Procesar PDF</button>
       </form>
       <p id="uploadStatus" class="muted"></p>
     </section>

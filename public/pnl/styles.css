@@ -68,13 +68,58 @@ button, .secondary {
 .secondary { background: #3d4a46; }
 button:hover { filter: brightness(1.05); }
 
-input[type="file"], input[type="text"], select {
+input[type="text"], select {
   width: 100%;
   margin: 0.35rem 0;
   padding: 0.45rem;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: #fff;
+}
+
+.drop-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-height: 9.5rem;
+  margin: 0.5rem 0 0.75rem;
+  padding: 1.25rem 1rem;
+  border: 2px dashed #b9ad96;
+  border-radius: 12px;
+  background: #faf6ee;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+}
+.drop-zone:hover {
+  border-color: var(--accent);
+  background: #f0f7f5;
+}
+.drop-zone.dragover {
+  border-color: var(--accent);
+  background: #e5f3ef;
+  transform: scale(1.01);
+}
+.drop-zone.has-file {
+  border-style: solid;
+  border-color: var(--accent);
+}
+.drop-title {
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+.drop-hint { color: var(--muted); font-size: 0.9rem; }
+.drop-file {
+  margin-top: 0.4rem;
+  font-size: 0.88rem;
+  color: var(--accent);
+  word-break: break-all;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .table-wrap { overflow: auto; max-height: 28rem; margin-top: 0.5rem; }

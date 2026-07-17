@@ -167,12 +167,39 @@ async function init() {
     }
   };
 
-  document.getElementById("uploadForm").onsubmit = async (ev) => {
-    ev.preventDefault();
-    const file = document.getElementById("file").files[0];
-    if (!file) return;
-    const status = document.getElementById("uploadStatus");
+  const dropZone = document.getElementById("dropZone");
+  const fileInput = document.getElementById("file");
+  const fileName = document.getElementById("fileName");
+  const processBtn = document.getElementById("processBtn");
+  const status = document.getElementById("uploadStatus");
+
+  function isPdf(file) {
+    if (!file) return false;
+    const name = (file.name || "").toLowerCase();
+    return file.type === "application/pdf" || name.endsWith(".pdf");
+  }
+
+  function setFile(file) {
+    if (!isPdf(file)) {
+      status.textContent = "Solo se aceptan archivos PDF.";
+      processBtn.disabled = true;
+      dropZone.classList.remove("has-file");
+      fileName.textContent = "";
+      return;
+    }
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    fileInput.files = dt.files;
+    fileName.textContent = file.name;
+    dropZone.classList.add("has-file");
+    processBtn.disabled = false;
+    status.textContent = "PDF listo. Se procesará ahora…";
+    uploadFile(file);
+  }
+
+  async function uploadFile(file) {
     status.textContent = "Procesando…";
+    processBtn.disabled = true;
     const fd = new FormData();
     fd.append("statement", file);
     try {
@@ -183,7 +210,39 @@ async function init() {
       renderRun(data.run);
     } catch (e) {
       status.textContent = e.message;
+    } finally {
+      processBtn.disabled = !fileInput.files[0];
     }
+  }
+
+  ["dragenter", "dragover"].forEach((evt) => {
+    dropZone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropZone.classList.add("dragover");
+    });
+  });
+  ["dragleave", "drop"].forEach((evt) => {
+    dropZone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropZone.classList.remove("dragover");
+    });
+  });
+  dropZone.addEventListener("drop", (e) => {
+    const file = e.dataTransfer?.files?.[0];
+    if (file) setFile(file);
+  });
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files?.[0];
+    if (file) setFile(file);
+  });
+
+  document.getElementById("uploadForm").onsubmit = async (ev) => {
+    ev.preventDefault();
+    const file = fileInput.files[0];
+    if (!file) return;
+    await uploadFile(file);
   };
 }
 
