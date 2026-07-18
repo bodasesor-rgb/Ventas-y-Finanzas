@@ -15,6 +15,7 @@ exports.loadRuns = loadRuns;
 exports.saveRuns = saveRuns;
 exports.addRun = addRun;
 exports.upsertRunByPeriod = upsertRunByPeriod;
+exports.deleteRunById = deleteRunById;
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const categoryColors_1 = require("./categoryColors");
@@ -315,5 +316,14 @@ function upsertRunByPeriod(run) {
         ? [run, ...runs.filter((r) => r.periodKey !== key)]
         : [run, ...runs];
     saveRuns(next.slice(0, 30));
+}
+function deleteRunById(runId) {
+    const runs = loadRuns();
+    const idx = runs.findIndex((r) => r.id === runId);
+    if (idx < 0)
+        return null;
+    const [removed] = runs.splice(idx, 1);
+    saveRuns(runs);
+    return removed;
 }
 //# sourceMappingURL=store.js.map

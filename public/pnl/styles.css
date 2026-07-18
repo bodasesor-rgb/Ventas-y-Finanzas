@@ -427,6 +427,31 @@ select.cat-select {
 .cat-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
 .cat-actions button { margin-top: 0; }
 
+.analysis-year-bar {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+.year-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.year-label select {
+  min-width: 6rem;
+  font-weight: 700;
+  font-size: 1rem;
+}
+.btn-danger {
+  background: #9a3412 !important;
+  border-color: #9a3412 !important;
+  color: #fff !important;
+}
+.btn-danger:hover {
+  filter: brightness(1.05);
+}
 .analysis-panel {
   display: grid;
   gap: 1rem;

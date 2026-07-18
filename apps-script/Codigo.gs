@@ -1,7 +1,7 @@
 /**
  * ============================================================
  * Apps Script — Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-07-18-v12
+ * VERSION: 2026-07-18-v13
  * ============================================================
  * PEGAR TODO ESTE ARCHIVO (borrar lo anterior → pegar → Guardar)
  *
@@ -16,13 +16,13 @@
  * doPost:
  *   - Eventos YYYY (Kommo cierres)
  *   - action=upsertBanco
- *   - action=upsertAnalisis  (pestaña Analisis YYYY)
- *   - action=saveStatementArchive | listStatementArchive | getStatementArchive
+ *   - action=upsertAnalisis  (pestaña Analisis YYYY — un año)
+ *   - action=saveStatementArchive | list | get | deleteStatementArchive
  * doGet: { version }
  * setupAll_: Eventos + Metricas + P&L + Banco + Analisis + Estados Archive
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-07-18-v12';
+var SCRIPT_VERSION = '2026-07-18-v13';
 var YEAR = 2026;
 var EVENTOS_SHEET = 'Eventos ' + YEAR;
 var METRICAS_SHEET = 'Metricas ' + YEAR;
@@ -499,6 +499,51 @@ function getStatementArchive_(data) {
   });
 }
 
+function deleteStatementArchive_(data) {
+  var periodKey = String(data.periodKey || '').trim();
+  if (!/^\d{4}-\d{2}$/.test(periodKey)) {
+    return json_({
+      ok: false,
+      version: SCRIPT_VERSION,
+      error: 'deleteStatementArchive: periodKey inválido',
+    });
+  }
+  var sh = ensureArchiveSheet_();
+  var rowIndex = findArchiveRow_(sh, periodKey);
+  var pdfFileId = '';
+  var runFileId = '';
+  if (rowIndex !== -1) {
+    var row = sh.getRange(rowIndex, 1, 1, 8).getValues()[0];
+    pdfFileId = String(row[2] || '');
+    runFileId = String(row[3] || '');
+    sh.deleteRow(rowIndex);
+  }
+  var trashed = [];
+  function trashId(id) {
+    if (!id) return;
+    try {
+      DriveApp.getFileById(id).setTrashed(true);
+      trashed.push(id);
+    } catch (err) {}
+  }
+  trashId(pdfFileId);
+  trashId(runFileId);
+  // Por si quedaron archivos con nombre fijo
+  try {
+    var folder = getArchiveFolder_();
+    removeFilesNamedInFolder_(folder, periodKey + '_estado-cuenta.pdf');
+    removeFilesNamedInFolder_(folder, periodKey + '_run.json');
+  } catch (err2) {}
+
+  return json_({
+    ok: true,
+    version: SCRIPT_VERSION,
+    action: 'deleted',
+    periodKey: periodKey,
+    trashed: trashed.length,
+  });
+}
+
 /* ===================== doPost ===================== */
 
 function doPost(e) {
@@ -525,6 +570,9 @@ function doPost(e) {
     if (data && data.action === 'getStatementArchive') {
       return getStatementArchive_(data);
     }
+    if (data && data.action === 'deleteStatementArchive') {
+      return deleteStatementArchive_(data);
+    }
     if (data && data.action === 'setupAll') {
       setupAllSilent_();
       return json_({ ok: true, version: SCRIPT_VERSION, action: 'setupAll' });
@@ -535,7 +583,7 @@ function doPost(e) {
       return json_({
         ok: false,
         version: SCRIPT_VERSION,
-        error: 'values no es array (¿Apps Script v12 publicado?)',
+        error: 'values no es array (¿Apps Script v13 publicado?)',
         typeofValues: typeof values,
         rawPreview: String(raw).slice(0, 200),
       });

@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.archiveStatementToDrive = archiveStatementToDrive;
 exports.listDriveArchives = listDriveArchives;
+exports.deleteDriveArchive = deleteDriveArchive;
 exports.fetchDriveArchive = fetchDriveArchive;
 exports.restorePeriodFromDrive = restorePeriodFromDrive;
 exports.shouldAutoRestoreOnce = shouldAutoRestoreOnce;
@@ -49,6 +50,20 @@ async function listDriveArchives() {
     });
     const items = result.items;
     return Array.isArray(items) ? items : [];
+}
+/** Borra entrada del índice Drive + archivos (si Apps Script v12+ lo soporta). */
+async function deleteDriveArchive(periodKey) {
+    if (!/^\d{4}-\d{2}$/.test(periodKey))
+        return;
+    try {
+        await (0, appsScriptClient_1.postToAppsScript)({
+            action: "deleteStatementArchive",
+            periodKey,
+        });
+    }
+    catch (err) {
+        console.warn("[pnl] delete Drive archive", err instanceof Error ? err.message : err);
+    }
 }
 async function fetchDriveArchive(periodKey) {
     const result = await (0, appsScriptClient_1.postToAppsScript)({

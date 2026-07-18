@@ -7,6 +7,7 @@ exports.STATEMENTS_ROOT = void 0;
 exports.ensureStatementsRoot = ensureStatementsRoot;
 exports.saveStatementPdf = saveStatementPdf;
 exports.resolveStatementFile = resolveStatementFile;
+exports.deleteStatementPdf = deleteStatementPdf;
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 exports.STATEMENTS_ROOT = path_1.default.join(process.cwd(), "data", "statements");
@@ -62,5 +63,38 @@ function resolveStatementFile(relativePath) {
     if (!fs_1.default.existsSync(full))
         return null;
     return full;
+}
+/** Borra PDF local del mes (archivo y carpeta si queda vacía). */
+function deleteStatementPdf(periodKey, relativePath) {
+    if (relativePath && !relativePath.includes("..")) {
+        const full = path_1.default.join(exports.STATEMENTS_ROOT, relativePath);
+        if (full.startsWith(exports.STATEMENTS_ROOT) && fs_1.default.existsSync(full)) {
+            try {
+                fs_1.default.unlinkSync(full);
+            }
+            catch {
+                /* ignore */
+            }
+        }
+    }
+    if (periodKey && /^\d{4}-\d{2}$/.test(periodKey)) {
+        const dir = path_1.default.join(exports.STATEMENTS_ROOT, periodKey);
+        if (!dir.startsWith(exports.STATEMENTS_ROOT) || !fs_1.default.existsSync(dir))
+            return;
+        try {
+            for (const f of fs_1.default.readdirSync(dir)) {
+                try {
+                    fs_1.default.unlinkSync(path_1.default.join(dir, f));
+                }
+                catch {
+                    /* ignore */
+                }
+            }
+            fs_1.default.rmdirSync(dir);
+        }
+        catch {
+            /* ignore */
+        }
+    }
 }
 //# sourceMappingURL=statementFiles.js.map

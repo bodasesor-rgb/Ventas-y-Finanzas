@@ -3,6 +3,9 @@ let rules = [];
 let currentRun = null;
 let selectedFile = null;
 let runsCache = [];
+/** Año seleccionado para el análisis (nunca mezcla años). */
+let selectedAnalysisYear = null;
+let analysisYears = [];
 
 function isRunMissingError(msg) {
   return /run no encontrado/i.test(String(msg || ""));
@@ -431,6 +434,7 @@ function renderLibrary(months) {
               </div>
               <button type="button" data-act="open">Abrir movimientos</button>
               <button type="button" data-act="send">Enviar al P&amp;L</button>
+              <button type="button" class="btn-danger" data-act="delete">Eliminar PDF</button>
               ${
                 hasPdf
                   ? `<button type="button" class="secondary" data-act="pdf">Ver PDF</button>
@@ -481,6 +485,43 @@ function renderLibrary(months) {
         alert(data.message || "Enviado al Sheet");
         if (data.run && currentRun?.id === runId) renderRun(data.run);
         await refreshLibrary();
+        await refreshAnalysis();
+      } catch (e) {
+        alert(e.message);
+      } finally {
+        if (btn) btn.removeAttribute("disabled");
+      }
+    });
+    el.querySelector('[data-act="delete"]')?.addEventListener("click", async () => {
+      const label =
+        el.querySelector("strong")?.textContent ||
+        runId.slice(0, 8);
+      if (
+        !confirm(
+          `¿Eliminar este PDF/estado?\n\n${label}\n\nSe borra del panel y del disco. Si Drive está autorizado, también del archivo.`
+        )
+      ) {
+        return;
+      }
+      const btn = el.querySelector('[data-act="delete"]');
+      if (btn) btn.setAttribute("disabled", "true");
+      try {
+        const data = await api(
+          `/api/pnl/runs/${encodeURIComponent(runId)}`,
+          { method: "DELETE" }
+        );
+        if (currentRun?.id === runId) {
+          currentRun = null;
+          const meta = document.getElementById("currentRunMeta");
+          if (meta) meta.textContent = "PDF eliminado. Sube o abre otro.";
+          const tbody = document.querySelector("#linesTable tbody");
+          if (tbody) tbody.innerHTML = "";
+          const bar = document.getElementById("totalsBar");
+          if (bar) bar.hidden = true;
+        }
+        runsCache = data.runs || [];
+        await refreshLibrary();
+        await refreshAnalysis();
       } catch (e) {
         alert(e.message);
       } finally {
@@ -528,10 +569,27 @@ function renderRun(run) {
   if (meta) {
     const parts = [
       run.periodLabel ? `Mes: ${run.periodLabel}` : null,
+      run.periodKey ? `Periodo: ${run.periodKey}` : null,
       run.storedName ? `Archivo: ${run.storedName}` : null,
       run.filename ? `Original: ${run.filename}` : null,
     ].filter(Boolean);
     meta.textContent = parts.join(" · ");
+  }
+  // Al abrir un PDF, el análisis salta al año de ese estado
+  const y = Number(String(run.periodKey || "").slice(0, 4));
+  if (Number.isFinite(y) && y >= 2000) {
+    selectedAnalysisYear = y;
+    const sel = document.getElementById("analysisYearSelect");
+    if (sel) {
+      sel.dataset.userPicked = "";
+      if (![...sel.options].some((o) => Number(o.value) === y)) {
+        sel.insertAdjacentHTML(
+          "beforeend",
+          `<option value="${y}">${y}</option>`
+        );
+      }
+      sel.value = String(y);
+    }
   }
 
   renderTotals(run);
@@ -721,24 +779,58 @@ function pct(n) {
   }).format(Number(n) || 0);
 }
 
+function syncYearSelect(years, preferredYear) {
+  const sel = document.getElementById("analysisYearSelect");
+  if (!sel) return;
+  analysisYears = Array.isArray(years) ? years.slice() : [];
+  if (!analysisYears.length) {
+    const y = preferredYear || new Date().getFullYear();
+    analysisYears = [y];
+  }
+  const want =
+    preferredYear && analysisYears.includes(preferredYear)
+      ? preferredYear
+      : selectedAnalysisYear && analysisYears.includes(selectedAnalysisYear)
+        ? selectedAnalysisYear
+        : analysisYears[analysisYears.length - 1];
+  selectedAnalysisYear = want;
+  sel.innerHTML = analysisYears
+    .map(
+      (y) =>
+        `<option value="${y}" ${y === want ? "selected" : ""}>${y}</option>`
+    )
+    .join("");
+}
+
 function renderAnalysis(analysis) {
   const root = document.getElementById("analysisPanel");
   if (!root || !analysis) return;
+  const year = analysis.year || selectedAnalysisYear || "?";
   const top = analysis.top5Proveedores || analysis.topProveedores?.slice(0, 5) || [];
   const socios = analysis.socios || [];
   const months = analysis.byMonth || [];
   const c = analysis.concentracion || {};
+  if (!months.length) {
+    root.innerHTML = `
+      <p class="muted">No hay estados de cuenta del año <strong>${escapeHtml(
+        String(year)
+      )}</strong>. Elige otro año o sube PDFs de ${escapeHtml(String(year))}.</p>`;
+    return;
+  }
   root.innerHTML = `
+    <p class="muted" style="margin:0">Mostrando solo <strong>${escapeHtml(
+      String(year)
+    )}</strong> · meses: ${(analysis.monthsPresent || []).join(", ")}</p>
     <div class="analysis-grid">
-      <div class="analysis-card"><span>Ingresos año</span><strong>${money(analysis.ingresos)}</strong></div>
-      <div class="analysis-card"><span>Gastos año</span><strong>${money(analysis.gastos)}</strong></div>
+      <div class="analysis-card"><span>Ingresos ${escapeHtml(String(year))}</span><strong>${money(analysis.ingresos)}</strong></div>
+      <div class="analysis-card"><span>Gastos ${escapeHtml(String(year))}</span><strong>${money(analysis.gastos)}</strong></div>
       <div class="analysis-card"><span>Neto</span><strong>${money(analysis.neto)}</strong></div>
       <div class="analysis-card"><span>Socios</span><strong>${money(analysis.sociosTotal)}</strong></div>
       <div class="analysis-card"><span>Proveedores</span><strong>${money(analysis.proveedoresTotal)}</strong></div>
       <div class="analysis-card"><span>Concentración top1/3/5</span><strong>${pct(c.top1Share)} / ${pct(c.top3Share)} / ${pct(c.top5Share)}</strong></div>
     </div>
     <div>
-      <h3 style="font-size:0.95rem;margin:0 0 0.4rem">Top 5 proveedores (año)</h3>
+      <h3 style="font-size:0.95rem;margin:0 0 0.4rem">Top 5 proveedores (${escapeHtml(String(year))})</h3>
       <table class="analysis-table">
         <thead><tr><th>#</th><th>Proveedor</th><th>Gasto</th><th>%</th><th>Pagos</th></tr></thead>
         <tbody>
@@ -815,17 +907,37 @@ function renderAnalysis(analysis) {
 
 async function refreshAnalysis() {
   const el = document.getElementById("analysisStatus");
+  const sel = document.getElementById("analysisYearSelect");
   try {
-    const data = await api("/api/pnl/analysis");
+    // Primero pedimos lista de años (sin forzar) si aún no hay selección
+    let year = selectedAnalysisYear;
+    if (sel?.value) year = Number(sel.value);
+    if (currentRun?.periodKey) {
+      const fromRun = Number(String(currentRun.periodKey).slice(0, 4));
+      if (
+        Number.isFinite(fromRun) &&
+        (!year || (sel && !sel.dataset.userPicked))
+      ) {
+        // Si el usuario no eligió manualmente, alinear al PDF abierto
+        if (!sel?.dataset.userPicked) year = fromRun;
+      }
+    }
+    const q = year ? `?year=${encodeURIComponent(year)}` : "";
+    const data = await api(`/api/pnl/analysis${q}`);
+    syncYearSelect(data.years || [], data.year || year);
+    if (sel && selectedAnalysisYear) sel.value = String(selectedAnalysisYear);
     renderAnalysis(data.analysis);
     if (el) {
-      el.textContent = `OK · año ${data.analysis?.year || "?"} · ${
-        data.analysis?.runsCount || 0
-      } run(s) · ${
-        (data.analysis?.monthsPresent || []).join(", ") || "sin meses"
-      }${
-        data.years?.length ? ` · años en server: ${data.years.join(", ")}` : ""
-      }`;
+      const empty = data.emptyYear || !data.analysis?.monthsPresent?.length;
+      el.textContent = empty
+        ? `Año ${data.year}: sin PDFs. Años con datos: ${(
+            data.years || []
+          ).join(", ") || "ninguno"}`
+        : `OK · solo año ${data.analysis?.year} · ${
+            data.analysis?.runsCount || 0
+          } run(s) · ${
+            (data.analysis?.monthsPresent || []).join(", ") || "sin meses"
+          } → Sheet Analisis ${data.analysis?.year}`;
     }
     return data;
   } catch (e) {
@@ -882,25 +994,38 @@ async function init() {
   await refreshLibrary();
   await refreshAnalysis();
 
+  document.getElementById("analysisYearSelect")?.addEventListener("change", (ev) => {
+    const sel = ev.target;
+    sel.dataset.userPicked = "1";
+    selectedAnalysisYear = Number(sel.value);
+    refreshAnalysis();
+  });
   document.getElementById("refreshAnalysisBtn")?.addEventListener("click", () => {
     refreshAnalysis();
   });
   document.getElementById("sendAnalysisBtn")?.addEventListener("click", async () => {
     const el = document.getElementById("analysisStatus");
     const btn = document.getElementById("sendAnalysisBtn");
+    const year =
+      selectedAnalysisYear ||
+      Number(document.getElementById("analysisYearSelect")?.value);
+    if (!year) {
+      if (el) el.textContent = "Elige un año antes de enviar.";
+      return;
+    }
     if (btn) btn.disabled = true;
-    if (el) el.textContent = "Enviando Análisis al Sheet…";
+    if (el) el.textContent = `Enviando Análisis ${year} al Sheet…`;
     try {
       const data = await api("/api/pnl/analysis/send-to-sheet", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ year }),
       });
       if (data.analysis) renderAnalysis(data.analysis);
       if (el) {
-        el.textContent = `OK → ${(data.sheets || [data.sheetName])
-          .filter(Boolean)
-          .join(", ")} (v ${data.version || "?"})`;
+        el.textContent = `OK → Analisis ${year} (${data.sheetName || "?"}) v${
+          data.version || "?"
+        }`;
       }
     } catch (e) {
       if (el) el.textContent = "Error: " + e.message;

@@ -16,6 +16,8 @@ export declare function archiveStatementToDrive(run: StatementRun, pdfAbsolutePa
     version?: string;
 }>;
 export declare function listDriveArchives(): Promise<ArchiveListItem[]>;
+/** Borra entrada del índice Drive + archivos (si Apps Script v12+ lo soporta). */
+export declare function deleteDriveArchive(periodKey: string): Promise<void>;
 export declare function fetchDriveArchive(periodKey: string): Promise<{
     periodKey: string;
     periodLabel?: string;

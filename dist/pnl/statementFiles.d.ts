@@ -11,3 +11,5 @@ export declare function saveStatementPdf(tempPath: string, period: StatementPeri
     relativePath: string;
 };
 export declare function resolveStatementFile(relativePath: string): string | null;
+/** Borra PDF local del mes (archivo y carpeta si queda vacía). */
+export declare function deleteStatementPdf(periodKey?: string, relativePath?: string): void;

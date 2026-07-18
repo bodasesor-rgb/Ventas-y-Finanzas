@@ -61,3 +61,33 @@ export function resolveStatementFile(relativePath: string): string | null {
   if (!fs.existsSync(full)) return null;
   return full;
 }
+
+/** Borra PDF local del mes (archivo y carpeta si queda vacía). */
+export function deleteStatementPdf(periodKey?: string, relativePath?: string): void {
+  if (relativePath && !relativePath.includes("..")) {
+    const full = path.join(STATEMENTS_ROOT, relativePath);
+    if (full.startsWith(STATEMENTS_ROOT) && fs.existsSync(full)) {
+      try {
+        fs.unlinkSync(full);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  if (periodKey && /^\d{4}-\d{2}$/.test(periodKey)) {
+    const dir = path.join(STATEMENTS_ROOT, periodKey);
+    if (!dir.startsWith(STATEMENTS_ROOT) || !fs.existsSync(dir)) return;
+    try {
+      for (const f of fs.readdirSync(dir)) {
+        try {
+          fs.unlinkSync(path.join(dir, f));
+        } catch {
+          /* ignore */
+        }
+      }
+      fs.rmdirSync(dir);
+    } catch {
+      /* ignore */
+    }
+  }
+}

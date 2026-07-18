@@ -11,7 +11,7 @@ import {
   summarizeTotals,
 } from "./parseStatement";
 import { detectPeriodFromText } from "./period";
-import { saveStatementPdf } from "./statementFiles";
+import { deleteStatementPdf, saveStatementPdf } from "./statementFiles";
 import {
   autoCreateCategoriesFromLines,
   pruneMerchantCategories,
@@ -23,6 +23,7 @@ import {
 } from "./statementSummary";
 import {
   archiveStatementToDrive,
+  deleteDriveArchive,
   resolvePdfBytes,
   restoreArchivesFromDrive,
   shouldAutoRestoreOnce,
@@ -31,6 +32,7 @@ import { applyCounterpartyCategories } from "./counterparties";
 import { buildYearAnalysis } from "./providerAnalysis";
 import { sendRunToBancoSheet, sendYearAnalysisToSheet } from "./sendToSheet";
 import {
+  deleteRunById,
   isIncomeCategory,
   loadCategories,
   loadRules,
@@ -258,6 +260,32 @@ pnlRouter.get("/api/pnl/runs/:id", (req, res) => {
     return;
   }
   res.json({ ok: true, run: runPublic(run) });
+});
+
+/** Elimina run + PDF local (+ Drive si está autorizado) */
+pnlRouter.delete("/api/pnl/runs/:id", async (req, res) => {
+  const removed = deleteRunById(req.params.id);
+  if (!removed) {
+    res.status(404).json({
+      ok: false,
+      error: "Run no encontrado",
+      hint: "Ya no está en el servidor.",
+    });
+    return;
+  }
+  deleteStatementPdf(removed.periodKey, removed.storedRelativePath);
+  if (removed.periodKey) {
+    await deleteDriveArchive(removed.periodKey);
+  }
+  res.json({
+    ok: true,
+    deleted: {
+      id: removed.id,
+      periodKey: removed.periodKey,
+      periodLabel: removed.periodLabel,
+    },
+    runs: loadRuns().map(runPublic),
+  });
 });
 
 /** Ver / descargar el PDF (disco o Drive si se borró en el deploy) */
@@ -520,53 +548,78 @@ function yearsFromRuns(): number[] {
   return Array.from(ys).sort((a, b) => a - b);
 }
 
-/** Análisis anual: top proveedores, socios, mensual */
+/** Análisis anual: top proveedores, socios, mensual (un solo año) */
 pnlRouter.get("/api/pnl/analysis", (req, res) => {
   const runs = loadRuns();
   const years = yearsFromRuns();
-  const year = Number(req.query.year) || years[years.length - 1] || 2026;
+  const requested = Number(req.query.year);
+  const year = Number.isFinite(requested)
+    ? requested
+    : years[years.length - 1] || new Date().getFullYear();
   const analysis = buildYearAnalysis(runs, year);
   res.json({
     ok: true,
     years,
+    year,
     analysis,
-    runs: runs.map((r) => ({
-      id: r.id,
-      periodKey: r.periodKey,
-      periodLabel: r.periodLabel,
-      lines: r.lines?.length || 0,
-      sentToSheetAt: r.sentToSheetAt,
-      archivedAt: r.archivedAt,
-    })),
+    emptyYear: analysis.monthsPresent.length === 0,
+    runs: runs
+      .filter((r) => String(r.periodKey || "").startsWith(`${year}-`))
+      .map((r) => ({
+        id: r.id,
+        periodKey: r.periodKey,
+        periodLabel: r.periodLabel,
+        lines: r.lines?.length || 0,
+        sentToSheetAt: r.sentToSheetAt,
+        archivedAt: r.archivedAt,
+      })),
   });
 });
 
 pnlRouter.post("/api/pnl/analysis/send-to-sheet", async (req, res) => {
   try {
-    const years =
-      req.body?.year != null
-        ? [Number(req.body.year)]
-        : yearsFromRuns().length
-          ? yearsFromRuns()
-          : [2026];
-    const results = [];
-    for (const year of years) {
-      results.push(await sendYearAnalysisToSheet(year));
+    const yearsAvail = yearsFromRuns();
+    const year = Number(req.body?.year);
+    if (!Number.isFinite(year) || year < 2000) {
+      res.status(400).json({
+        ok: false,
+        error: "Indica el año del análisis (ej. 2025 o 2026)",
+        years: yearsAvail,
+      });
+      return;
     }
-    const last = results[results.length - 1];
+    if (yearsAvail.length && !yearsAvail.includes(year)) {
+      res.status(400).json({
+        ok: false,
+        error: `No hay estados de cuenta del año ${year}. Años disponibles: ${yearsAvail.join(", ") || "ninguno"}`,
+        years: yearsAvail,
+      });
+      return;
+    }
+    const result = await sendYearAnalysisToSheet(year);
+    if (!result.analysis.monthsPresent.length) {
+      res.status(400).json({
+        ok: false,
+        error: `No hay meses cargados para ${year}. Sube PDFs de ese año.`,
+        years: yearsAvail,
+        analysis: result.analysis,
+      });
+      return;
+    }
     res.json({
       ok: true,
-      message: `Análisis enviado: ${results.map((r) => r.sheetName).join(", ")}`,
-      sheetName: last?.sheetName,
-      version: last?.version,
-      analysis: last?.analysis,
-      sheets: results.map((r) => r.sheetName),
+      message: `Análisis ${year} enviado a ${result.sheetName}`,
+      year,
+      sheetName: result.sheetName,
+      version: result.version,
+      analysis: result.analysis,
+      sheets: [result.sheetName],
     });
   } catch (err) {
     res.status(502).json({
       ok: false,
       error: err instanceof Error ? err.message : String(err),
-      hint: "Pega Codigo.gs v12 (upsertAnalisis) y publica Nueva versión.",
+      hint: "Pega Codigo.gs v13 (upsertAnalisis) y publica Nueva versión.",
     });
   }
 });

@@ -66,6 +66,22 @@ export async function listDriveArchives(): Promise<ArchiveListItem[]> {
   return Array.isArray(items) ? items : [];
 }
 
+/** Borra entrada del índice Drive + archivos (si Apps Script v12+ lo soporta). */
+export async function deleteDriveArchive(periodKey: string): Promise<void> {
+  if (!/^\d{4}-\d{2}$/.test(periodKey)) return;
+  try {
+    await postToAppsScript({
+      action: "deleteStatementArchive",
+      periodKey,
+    });
+  } catch (err) {
+    console.warn(
+      "[pnl] delete Drive archive",
+      err instanceof Error ? err.message : err
+    );
+  }
+}
+
 export async function fetchDriveArchive(periodKey: string): Promise<{
   periodKey: string;
   periodLabel?: string;

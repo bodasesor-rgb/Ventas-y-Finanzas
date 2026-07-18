@@ -9,7 +9,7 @@
 </head>
 <body>
   <div class="version-banner" id="versionBanner">
-    UI v2026-07-18e — Socios vs proveedores · Top gasto · Analisis Sheet
+    UI v2026-07-18f — Eliminar PDF · Análisis por año (2025 ≠ 2026)
   </div>
 
   <header class="top">
@@ -19,7 +19,7 @@
       <p class="sub">Traspasos: Luis Alejandro Sanchez Campbell y Alejandro Zorrilla Elorza = socios; el resto = proveedores. Top de gasto para negociar.</p>
     </div>
     <div class="top-links">
-      <span class="version-pill">v2026-07-18e</span>
+      <span class="version-pill">v2026-07-18f</span>
       <a class="link" href="/health">API health</a>
     </div>
   </header>
@@ -68,8 +68,12 @@
 
     <section class="panel wide">
       <h2>4. Análisis anual / proveedores</h2>
-      <p class="muted">Ranking de a quién le pagas más (concentración de gasto). Socios separados. Al enviar al Sheet también llena la pestaña <code>Analisis 2026</code>.</p>
-      <div class="send-sheet-bar">
+      <p class="muted">Un año a la vez: elige el año y solo se suman los meses de ese año (2025 no entra en 2026). Envía a la pestaña <code>Analisis YYYY</code> correspondiente.</p>
+      <div class="send-sheet-bar analysis-year-bar">
+        <label class="year-label">
+          Año
+          <select id="analysisYearSelect"></select>
+        </label>
         <button type="button" id="refreshAnalysisBtn" class="secondary">Actualizar análisis</button>
         <button type="button" id="sendAnalysisBtn" class="btn-big">Enviar Análisis al Sheet</button>
       </div>
@@ -145,6 +149,6 @@
     </section>
   </main>
 
-  <script src="/pnl/app.js?v=20260718e"></script>
+  <script src="/pnl/app.js?v=20260718f"></script>
 </body>
 </html>
