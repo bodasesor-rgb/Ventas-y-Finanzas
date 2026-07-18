@@ -1,17 +1,18 @@
 /**
  * ============================================================
  * Apps Script — Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-07-18-v13
+ * VERSION: 2026-07-18-v14
  * ============================================================
  * PEGAR TODO ESTE ARCHIVO (borrar lo anterior → pegar → Guardar)
  *
  * Luego (IMPORTANTE — Drive):
  *   1) Función authorizeDrive_ → ▶ Ejecutar → aceptar permiso Google Drive
  *   2) Función setupAll_ → ▶ Ejecutar → autorizar Sheets si pide
+ *      (setupAll_ RECONSTRUYE Metricas + P&L con el ciclo anual completo)
  *   3) Implementar → Administrar implementaciones → lápiz
  *      → Nueva versión → Implementar (misma URL /exec)
  *
- * Si el panel dice "no permission DriveApp": falta el paso 1.
+ * v14: Enviar banco YA NO borra Metricas/P&L (antes clear() los vaciaba).
  *
  * doPost:
  *   - Eventos YYYY (Kommo cierres)
@@ -22,7 +23,9 @@
  * setupAll_: Eventos + Metricas + P&L + Banco + Analisis + Estados Archive
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-07-18-v13';
+var SCRIPT_VERSION = '2026-07-18-v14';
+var METRICAS_MARKER = 'BOT_METRICAS_V14';
+var PNL_MARKER = 'BOT_PNL_V14';
 var YEAR = 2026;
 var EVENTOS_SHEET = 'Eventos ' + YEAR;
 var METRICAS_SHEET = 'Metricas ' + YEAR;
@@ -259,8 +262,9 @@ function upsertBanco_(data) {
     new Date(),
     String(data.runId || ''),
     String(data.filename || ''),
-    by.socio || 0,
-    by.proveedor || 0,
+    // Montos salidos (positivos) para leer fácil en Metricas
+    Math.abs(by.socio || 0),
+    Math.abs(by.proveedor || 0),
   ];
 
   var lastRow = Math.max(sh.getLastRow(), 1);
@@ -285,10 +289,11 @@ function upsertBanco_(data) {
 
   sh.getRange(rowIndex, 1, 1, rowVals.length).setValues([rowVals]);
   sh.getRange(rowIndex, 4, 1, 18).setNumberFormat('$#,##0.00');
+  // Formato Socios / Proveedores (cols 26-27)
+  sh.getRange(rowIndex, 26, 1, 2).setNumberFormat('$#,##0.00');
 
-  // Re-enlaza P&L / Metricas con banco
-  setupPnL_(ss);
-  setupMetricas_(ss);
+  // NO llamar setupMetricas_/setupPnL_ aquí: antes hacían clear() y
+  // borraban el ciclo anual del usuario. Las fórmulas SUMIF se actualizan solas.
 
   return json_({
     ok: true,
@@ -583,7 +588,7 @@ function doPost(e) {
       return json_({
         ok: false,
         version: SCRIPT_VERSION,
-        error: 'values no es array (¿Apps Script v13 publicado?)',
+        error: 'values no es array (¿Apps Script v14 publicado?)',
         typeofValues: typeof values,
         rawPreview: String(raw).slice(0, 200),
       });
@@ -787,55 +792,179 @@ function setupMonthlyTable_(sheet) {
 }
 
 /**
- * Metricas YYYY — panel de control
- * Bloque A: ventas/eventos (desde tabla W:AB de Eventos)
- * Bloque B: banco (desde Banco YYYY)
+ * Metricas YYYY — CICLO ANUAL completo (ventas + banco + socios/proveedores).
+ * Solo se reconstruye con setupAll_ / restoreMetricasPnL_ (no al enviar banco).
  */
 function setupMetricas_(ss) {
   var sh = ss.getSheetByName(METRICAS_SHEET);
   if (!sh) sh = ss.insertSheet(METRICAS_SHEET);
-  sh.clear();
+  // Zona gestionada A1:L50 — se limpia SOLO aquí, a propósito, al restaurar
+  sh.getRange('A1:L50').clear();
 
-  sh.getRange('A1').setValue('Metricas ' + YEAR + ' — Bodasesor');
-  sh.getRange('A1').setFontWeight('bold').setFontSize(14);
+  sh.getRange('A1').setValue('Metricas ' + YEAR + ' — Ciclo anual Bodasesor');
+  sh.getRange('A1').setFontWeight('bold').setFontSize(16);
+  sh.getRange('A2').setValue(METRICAS_MARKER + ' · ' + SCRIPT_VERSION);
+  sh.getRange('A2').setFontColor('#666666');
+  sh.getRange('B2').setValue(
+    'Ventas ← Eventos · Banco ← pestaña Banco · Socios/Proveedores ← cols Z/AA Banco'
+  );
 
-  // --- Ventas / Eventos ---
-  sh.getRange('A3').setValue('VENTAS / EVENTOS');
-  sh.getRange('A3').setFontWeight('bold');
-  sh.getRange('A4:F4').setValues([
-    ['Mes', 'Pagado', 'Por pagar', 'Valor total', 'Ganancia', '# Eventos'],
+  // ===== KPIs ANUALES (ciclo) =====
+  sh.getRange('A4').setValue('CICLO ANUAL ' + YEAR);
+  sh.getRange('A4').setFontWeight('bold').setFontSize(12);
+
+  sh.getRange('A5:L5').setValues([
+    [
+      'Ventas (valor)',
+      'Pagado',
+      'Por pagar',
+      'Ganancia eventos',
+      '# Eventos',
+      'Ingresos banco',
+      'Gastos banco',
+      'Neto banco',
+      'Socios',
+      'Proveedores',
+      'Resultado (gan+neto)',
+      'Margen eventos',
+    ],
   ]);
-  sh.getRange('A4:F4').setFontWeight('bold');
+  sh.getRange('A5:L5').setFontWeight('bold');
+  sh.getRange('A5:L5').setBackground('#e8f0ee');
+
+  // Totales desde bloques de abajo
+  sh.getRange('A6').setFormula('=D35'); // valor ventas anual
+  sh.getRange('B6').setFormula('=B35');
+  sh.getRange('C6').setFormula('=C35');
+  sh.getRange('D6').setFormula('=E35');
+  sh.getRange('E6').setFormula('=F35');
+  sh.getRange('F6').setFormula('=B48');
+  sh.getRange('G6').setFormula('=C48');
+  sh.getRange('H6').setFormula('=D48');
+  sh.getRange('I6').setFormula('=E48');
+  sh.getRange('J6').setFormula('=F48');
+  sh.getRange('K6').setFormula('=D6+H6');
+  sh.getRange('L6').setFormula('=IF(A6=0,"",D6/A6)');
+  sh.getRange('A6:K6').setNumberFormat('$#,##0.00');
+  sh.getRange('L6').setNumberFormat('0.0%');
+  sh.getRange('A6:L6').setFontWeight('bold').setFontSize(12);
+
+  // ===== CICLO MENSUAL (todo junto) =====
+  sh.getRange('A8').setValue('CICLO MENSUAL (ventas + banco)');
+  sh.getRange('A8').setFontWeight('bold').setFontSize(12);
+  sh.getRange('A9:L9').setValues([
+    [
+      'Mes',
+      'Pagado',
+      'Por pagar',
+      'Valor ventas',
+      'Ganancia',
+      '# Eventos',
+      'Ing. banco',
+      'Gast. banco',
+      'Neto banco',
+      'Socios',
+      'Proveedores',
+      'Resultado mes',
+    ],
+  ]);
+  sh.getRange('A9:L9').setFontWeight('bold').setBackground('#f3ebe0');
 
   for (var m = 1; m <= 12; m++) {
-    var r = 4 + m; // fila 5 = mes 1 … fila 16 = mes 12
-    var src = 3 + m; // Eventos fila 4 = mes 1
+    var r = 9 + m; // 10..21
+    var src = 3 + m; // Eventos W tabla fila 4 = mes 1
     sh.getRange(r, 1).setValue(m);
     sh.getRange(r, 2).setFormula("='" + EVENTOS_SHEET + "'!X" + src);
     sh.getRange(r, 3).setFormula("='" + EVENTOS_SHEET + "'!Y" + src);
     sh.getRange(r, 4).setFormula("='" + EVENTOS_SHEET + "'!Z" + src);
     sh.getRange(r, 5).setFormula("='" + EVENTOS_SHEET + "'!AA" + src);
     sh.getRange(r, 6).setFormula("='" + EVENTOS_SHEET + "'!AB" + src);
+    sh.getRange(r, 7).setFormula(
+      "=IFERROR(SUMIF('" + BANCO_SHEET + "'!$A:$A,A" + r + ",'" + BANCO_SHEET + "'!$D:$D),0)"
+    );
+    sh.getRange(r, 8).setFormula(
+      "=IFERROR(SUMIF('" + BANCO_SHEET + "'!$A:$A,A" + r + ",'" + BANCO_SHEET + "'!$E:$E),0)"
+    );
+    sh.getRange(r, 9).setFormula(
+      "=IFERROR(SUMIF('" + BANCO_SHEET + "'!$A:$A,A" + r + ",'" + BANCO_SHEET + "'!$F:$F),0)"
+    );
+    // Socios = col Z (26), Proveedores = col AA (27) de Banco
+    sh.getRange(r, 10).setFormula(
+      "=IFERROR(SUMIF('" + BANCO_SHEET + "'!$A:$A,A" + r + ",'" + BANCO_SHEET + "'!$Z:$Z),0)"
+    );
+    sh.getRange(r, 11).setFormula(
+      "=IFERROR(SUMIF('" + BANCO_SHEET + "'!$A:$A,A" + r + ",'" + BANCO_SHEET + "'!$AA:$AA),0)"
+    );
+    sh.getRange(r, 12).setFormula('=E' + r + '+I' + r);
   }
-  sh.getRange(17, 1).setValue('Total anual');
-  sh.getRange(17, 1).setFontWeight('bold');
-  sh.getRange(17, 2).setFormula('=SUM(B5:B16)');
-  sh.getRange(17, 3).setFormula('=SUM(C5:C16)');
-  sh.getRange(17, 4).setFormula('=SUM(D5:D16)');
-  sh.getRange(17, 5).setFormula('=SUM(E5:E16)');
-  sh.getRange(17, 6).setFormula('=SUM(F5:F16)');
-  sh.getRange('B5:E17').setNumberFormat('$#,##0.00');
+  sh.getRange(22, 1).setValue('TOTAL AÑO');
+  sh.getRange(22, 1).setFontWeight('bold');
+  sh.getRange(22, 2).setFormula('=SUM(B10:B21)');
+  sh.getRange(22, 3).setFormula('=SUM(C10:C21)');
+  sh.getRange(22, 4).setFormula('=SUM(D10:D21)');
+  sh.getRange(22, 5).setFormula('=SUM(E10:E21)');
+  sh.getRange(22, 6).setFormula('=SUM(F10:F21)');
+  sh.getRange(22, 7).setFormula('=SUM(G10:G21)');
+  sh.getRange(22, 8).setFormula('=SUM(H10:H21)');
+  sh.getRange(22, 9).setFormula('=SUM(I10:I21)');
+  sh.getRange(22, 10).setFormula('=SUM(J10:J21)');
+  sh.getRange(22, 11).setFormula('=SUM(K10:K21)');
+  sh.getRange(22, 12).setFormula('=SUM(L10:L21)');
+  sh.getRange('B10:E22').setNumberFormat('$#,##0.00');
+  sh.getRange('G10:L22').setNumberFormat('$#,##0.00');
+  sh.getRange('A22:L22').setBackground('#e8f0ee');
 
-  // --- Banco ---
-  sh.getRange('A19').setValue('BANCO (estados de cuenta)');
-  sh.getRange('A19').setFontWeight('bold');
-  sh.getRange('A20:E20').setValues([
-    ['Mes', 'Ingresos banco', 'Gastos banco', 'Neto banco', 'Cuadra'],
+  // ===== Detalle VENTAS =====
+  sh.getRange('A24').setValue('DETALLE VENTAS / EVENTOS');
+  sh.getRange('A24').setFontWeight('bold');
+  sh.getRange('A25:F25').setValues([
+    ['Mes', 'Pagado', 'Por pagar', 'Valor total', 'Ganancia', '# Eventos'],
   ]);
-  sh.getRange('A20:E20').setFontWeight('bold');
+  sh.getRange('A25:F25').setFontWeight('bold');
+  for (var vm = 1; vm <= 12; vm++) {
+    var vr = 25 + vm; // 26..37
+    var vs = 3 + vm;
+    sh.getRange(vr, 1).setValue(vm);
+    sh.getRange(vr, 2).setFormula("='" + EVENTOS_SHEET + "'!X" + vs);
+    sh.getRange(vr, 3).setFormula("='" + EVENTOS_SHEET + "'!Y" + vs);
+    sh.getRange(vr, 4).setFormula("='" + EVENTOS_SHEET + "'!Z" + vs);
+    sh.getRange(vr, 5).setFormula("='" + EVENTOS_SHEET + "'!AA" + vs);
+    sh.getRange(vr, 6).setFormula("='" + EVENTOS_SHEET + "'!AB" + vs);
+  }
+  sh.getRange(38, 1).setValue('Total anual');
+  sh.getRange(38, 1).setFontWeight('bold');
+  // Alias fila 35 usada por KPIs = fila 38 real — ajusto KPIs a fila 38
+  sh.getRange(38, 2).setFormula('=SUM(B26:B37)');
+  sh.getRange(38, 3).setFormula('=SUM(C26:C37)');
+  sh.getRange(38, 4).setFormula('=SUM(D26:D37)');
+  sh.getRange(38, 5).setFormula('=SUM(E26:E37)');
+  sh.getRange(38, 6).setFormula('=SUM(F26:F37)');
+  sh.getRange('B26:E38').setNumberFormat('$#,##0.00');
 
+  // Fix KPI refs to row 38 (not 35)
+  sh.getRange('A6').setFormula('=D38');
+  sh.getRange('B6').setFormula('=B38');
+  sh.getRange('C6').setFormula('=C38');
+  sh.getRange('D6').setFormula('=E38');
+  sh.getRange('E6').setFormula('=F38');
+
+  // ===== Detalle BANCO =====
+  sh.getRange('A40').setValue('DETALLE BANCO');
+  sh.getRange('A40').setFontWeight('bold');
+  sh.getRange('A41:G41').setValues([
+    [
+      'Mes',
+      'Ingresos banco',
+      'Gastos banco',
+      'Neto banco',
+      'Socios',
+      'Proveedores',
+      'Cuadra',
+    ],
+  ]);
+  sh.getRange('A41:G41').setFontWeight('bold');
   for (var bm = 1; bm <= 12; bm++) {
-    var br = 20 + bm; // 21..32
+    var br = 41 + bm; // 42..53
     sh.getRange(br, 1).setValue(bm);
     sh.getRange(br, 2).setFormula(
       "=IFERROR(SUMIF('" + BANCO_SHEET + "'!$A:$A,A" + br + ",'" + BANCO_SHEET + "'!$D:$D),0)"
@@ -847,6 +976,12 @@ function setupMetricas_(ss) {
       "=IFERROR(SUMIF('" + BANCO_SHEET + "'!$A:$A,A" + br + ",'" + BANCO_SHEET + "'!$F:$F),0)"
     );
     sh.getRange(br, 5).setFormula(
+      "=IFERROR(SUMIF('" + BANCO_SHEET + "'!$A:$A,A" + br + ",'" + BANCO_SHEET + "'!$Z:$Z),0)"
+    );
+    sh.getRange(br, 6).setFormula(
+      "=IFERROR(SUMIF('" + BANCO_SHEET + "'!$A:$A,A" + br + ",'" + BANCO_SHEET + "'!$AA:$AA),0)"
+    );
+    sh.getRange(br, 7).setFormula(
       "=IFERROR(INDEX('" +
         BANCO_SHEET +
         "'!$V:$V,MATCH(A" +
@@ -856,33 +991,80 @@ function setupMetricas_(ss) {
         "'!$A:$A,0)),\"\")"
     );
   }
-  sh.getRange(33, 1).setValue('Total anual');
-  sh.getRange(33, 1).setFontWeight('bold');
-  sh.getRange(33, 2).setFormula('=SUM(B21:B32)');
-  sh.getRange(33, 3).setFormula('=SUM(C21:C32)');
-  sh.getRange(33, 4).setFormula('=SUM(D21:D32)');
-  sh.getRange('B21:D33').setNumberFormat('$#,##0.00');
+  sh.getRange(54, 1).setValue('Total anual');
+  sh.getRange(54, 1).setFontWeight('bold');
+  sh.getRange(54, 2).setFormula('=SUM(B42:B53)');
+  sh.getRange(54, 3).setFormula('=SUM(C42:C53)');
+  sh.getRange(54, 4).setFormula('=SUM(D42:D53)');
+  sh.getRange(54, 5).setFormula('=SUM(E42:E53)');
+  sh.getRange(54, 6).setFormula('=SUM(F42:F53)');
+  sh.getRange('B42:F54').setNumberFormat('$#,##0.00');
 
-  sh.setColumnWidth(1, 90);
-  for (var c = 2; c <= 6; c++) sh.setColumnWidth(c, 120);
+  // KPI banco refs → fila 54
+  sh.getRange('F6').setFormula('=B54');
+  sh.getRange('G6').setFormula('=C54');
+  sh.getRange('H6').setFormula('=D54');
+  sh.getRange('I6').setFormula('=E54');
+  sh.getRange('J6').setFormula('=F54');
+
+  sh.getRange('A56').setValue(
+    'Nota: este bloque se reconstruye solo con setupAll_ / restoreMetricasPnL_. Enviar estado de cuenta NO lo borra.'
+  );
+  sh.getRange('A56').setFontColor('#666666');
+
+  sh.setFrozenRows(5);
+  sh.setColumnWidth(1, 110);
+  for (var c = 2; c <= 12; c++) sh.setColumnWidth(c, 115);
 }
 
 /**
- * P&L YYYY — resultado del negocio por mes
- * Ventas (Eventos) + Banco (estados) → resultado
+ * P&L YYYY — ciclo P&L mensual + total anual (ventas + banco).
  */
 function setupPnL_(ss) {
   var sh = ss.getSheetByName(PL_SHEET);
   if (!sh) sh = ss.insertSheet(PL_SHEET);
-  sh.clear();
+  sh.getRange('A1:L40').clear();
 
-  sh.getRange('A1').setValue('P&L ' + YEAR + ' — Bodasesor');
-  sh.getRange('A1').setFontWeight('bold').setFontSize(14);
-  sh.getRange('A2').setValue(
-    'Ventas desde Eventos · Banco desde pestaña Banco (botón Enviar al P&L)'
+  sh.getRange('A1').setValue('P&L ' + YEAR + ' — Ciclo Bodasesor');
+  sh.getRange('A1').setFontWeight('bold').setFontSize(16);
+  sh.getRange('A2').setValue(PNL_MARKER + ' · ' + SCRIPT_VERSION);
+  sh.getRange('A2').setFontColor('#666666');
+  sh.getRange('A3').setValue(
+    'Ventas (Eventos) + Banco. Resultado mes = Ganancia eventos + Neto banco. Costo en Eventos col K.'
   );
 
-  sh.getRange('A4:I4').setValues([
+  // KPIs anuales arriba
+  sh.getRange('A5').setValue('RESUMEN ANUAL');
+  sh.getRange('A5').setFontWeight('bold');
+  sh.getRange('A6:H6').setValues([
+    [
+      'Ingresos ventas',
+      'Costo eventos',
+      'Ganancia eventos',
+      'Margen',
+      'Ingresos banco',
+      'Gastos banco',
+      'Neto banco',
+      'Resultado año',
+    ],
+  ]);
+  sh.getRange('A6:H6').setFontWeight('bold').setBackground('#e8f0ee');
+  sh.getRange('A7').setFormula('=B20');
+  sh.getRange('B7').setFormula('=C20');
+  sh.getRange('C7').setFormula('=D20');
+  sh.getRange('D7').setFormula('=E20');
+  sh.getRange('E7').setFormula('=F20');
+  sh.getRange('F7').setFormula('=G20');
+  sh.getRange('G7').setFormula('=H20');
+  sh.getRange('H7').setFormula('=I20');
+  sh.getRange('A7:C7').setNumberFormat('$#,##0.00');
+  sh.getRange('D7').setNumberFormat('0.0%');
+  sh.getRange('E7:H7').setNumberFormat('$#,##0.00');
+  sh.getRange('A7:H7').setFontWeight('bold').setFontSize(12);
+
+  sh.getRange('A9').setValue('P&L MENSUAL');
+  sh.getRange('A9').setFontWeight('bold').setFontSize(12);
+  sh.getRange('A10:I10').setValues([
     [
       'Mes',
       'Ingresos ventas',
@@ -895,25 +1077,18 @@ function setupPnL_(ss) {
       'Resultado mes',
     ],
   ]);
-  sh.getRange('A4:I4').setFontWeight('bold');
+  sh.getRange('A10:I10').setFontWeight('bold').setBackground('#f3ebe0');
 
   for (var m = 1; m <= 12; m++) {
-    var r = 4 + m; // 5..16
-    var ev = 3 + m; // Eventos tabla W fila 4 = mes 1
+    var r = 10 + m; // 11..22
+    var ev = 3 + m; // Eventos tabla
     sh.getRange(r, 1).setValue(m);
-
-    // B Ingresos ventas = Eventos Z (valor total)
     sh.getRange(r, 2).setFormula("='" + EVENTOS_SHEET + "'!Z" + ev);
-    // C Costo eventos = SUMIF costo K por mes cierre Q
     sh.getRange(r, 3).setFormula(
       "=SUMIF('" + EVENTOS_SHEET + "'!$Q:$Q,A" + r + ",'" + EVENTOS_SHEET + "'!$K:$K)"
     );
-    // D Ganancia eventos = Eventos AA
     sh.getRange(r, 4).setFormula("='" + EVENTOS_SHEET + "'!AA" + ev);
-    // E Margen
     sh.getRange(r, 5).setFormula('=IF(B' + r + '=0,"",D' + r + '/B' + r + ')');
-
-    // F/G/H Banco
     sh.getRange(r, 6).setFormula(
       "=IFERROR(SUMIF('" + BANCO_SHEET + "'!$A:$A,A" + r + ",'" + BANCO_SHEET + "'!$D:$D),0)"
     );
@@ -923,32 +1098,62 @@ function setupPnL_(ss) {
     sh.getRange(r, 8).setFormula(
       "=IFERROR(SUMIF('" + BANCO_SHEET + "'!$A:$A,A" + r + ",'" + BANCO_SHEET + "'!$F:$F),0)"
     );
-
-    // I Resultado = Ganancia eventos + Neto banco
     sh.getRange(r, 9).setFormula('=D' + r + '+H' + r);
   }
 
-  sh.getRange(17, 1).setValue('Total anual');
-  sh.getRange(17, 1).setFontWeight('bold');
-  sh.getRange(17, 2).setFormula('=SUM(B5:B16)');
-  sh.getRange(17, 3).setFormula('=SUM(C5:C16)');
-  sh.getRange(17, 4).setFormula('=SUM(D5:D16)');
-  sh.getRange(17, 5).setFormula('=IF(B17=0,"",D17/B17)');
-  sh.getRange(17, 6).setFormula('=SUM(F5:F16)');
-  sh.getRange(17, 7).setFormula('=SUM(G5:G16)');
-  sh.getRange(17, 8).setFormula('=SUM(H5:H16)');
-  sh.getRange(17, 9).setFormula('=SUM(I5:I16)');
+  sh.getRange(23, 1).setValue('TOTAL AÑO');
+  sh.getRange(23, 1).setFontWeight('bold');
+  sh.getRange(23, 2).setFormula('=SUM(B11:B22)');
+  sh.getRange(23, 3).setFormula('=SUM(C11:C22)');
+  sh.getRange(23, 4).setFormula('=SUM(D11:D22)');
+  sh.getRange(23, 5).setFormula('=IF(B23=0,"",D23/B23)');
+  sh.getRange(23, 6).setFormula('=SUM(F11:F22)');
+  sh.getRange(23, 7).setFormula('=SUM(G11:G22)');
+  sh.getRange(23, 8).setFormula('=SUM(H11:H22)');
+  sh.getRange(23, 9).setFormula('=SUM(I11:I22)');
+  sh.getRange('A23:I23').setBackground('#e8f0ee');
 
-  sh.getRange('B5:D17').setNumberFormat('$#,##0.00');
-  sh.getRange('E5:E17').setNumberFormat('0.00%');
-  sh.getRange('F5:I17').setNumberFormat('$#,##0.00');
+  // Alias fila 20 para KPIs → usar 23
+  sh.getRange('A7').setFormula('=B23');
+  sh.getRange('B7').setFormula('=C23');
+  sh.getRange('C7').setFormula('=D23');
+  sh.getRange('D7').setFormula('=E23');
+  sh.getRange('E7').setFormula('=F23');
+  sh.getRange('F7').setFormula('=G23');
+  sh.getRange('G7').setFormula('=H23');
+  sh.getRange('H7').setFormula('=I23');
 
+  sh.getRange('B11:D23').setNumberFormat('$#,##0.00');
+  sh.getRange('E11:E23').setNumberFormat('0.0%');
+  sh.getRange('F11:I23').setNumberFormat('$#,##0.00');
+
+  sh.getRange('A25').setValue(
+    'Nota: Enviar al P&L desde /pnl/ NO borra esta hoja. Para reconstruir: setupAll_ o restoreMetricasPnL_.'
+  );
+  sh.getRange('A25').setFontColor('#666666');
+
+  sh.setFrozenRows(10);
   sh.setColumnWidth(1, 70);
   for (var col = 2; col <= 9; col++) sh.setColumnWidth(col, 130);
+}
 
-  sh.getRange('A19').setValue(
-    'Nota: Costo eventos se llena a mano en Eventos col K. Pagado en col L. Banco llega con el botón del panel /pnl/.'
-  );
+/** Solo Metricas + P&L (por si se vaciaron). Ejecutar desde el editor. */
+function restoreMetricasPnL_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  ensureEventosSheet_(ss);
+  setupMonthlyTable_(ensureEventosSheet_(ss));
+  ensureBancoSheet_(ss);
+  setupMetricas_(ss);
+  setupPnL_(ss);
+  var msg =
+    'Metricas + P&L restaurados — ' +
+    SCRIPT_VERSION +
+    '\n\nCiclo anual en Metricas (KPIs + mensuales + ventas + banco).\nP&L con resumen anual y mensual.';
+  try {
+    SpreadsheetApp.getUi().alert(msg);
+  } catch (err) {
+    Logger.log(msg);
+  }
 }
 
 /* ===================== Analisis (proveedores / socios / anual) ===================== */

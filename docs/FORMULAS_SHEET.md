@@ -2,12 +2,14 @@
 
 ## Cómo aplicar (recomendado)
 
-1. Pega el Apps Script actual (`apps-script/Codigo.gs`, VERSION `2026-07-18-v8`).
+1. Pega el Apps Script actual (`apps-script/Codigo.gs`, VERSION `2026-07-18-v14`).
 2. Guarda.
-3. En el editor: selecciona la función **`setupAll_`** → ▶ Ejecutar → autoriza (solo 1ª vez).
+3. En el editor: **`restoreMetricasPnL_`** (si se borró el ciclo) o **`setupAll_`** → ▶ Ejecutar.
 4. **Implementar → Administrar implementaciones → Editar → Nueva versión → Implementar** (misma URL `/exec`).
-5. La primera vez con v8 Google pedirá permiso de **Drive** (PDFs persistentes).
-6. Confirma en un sync / envío que `version` sea `2026-07-18-v8`.
+5. Autoriza **Drive** si pide (`authorizeDrive_`).
+6. Confirma en `/exec` que `version` sea `2026-07-18-v14`.
+
+**Importante (v14):** enviar un estado de cuenta al Sheet **ya no borra** Metricas/P&L.
 
 Eso hace:
 
