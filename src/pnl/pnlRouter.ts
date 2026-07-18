@@ -476,7 +476,7 @@ pnlRouter.post("/api/pnl/runs/:id/send-to-sheet", async (req, res) => {
       ok: false,
       error,
       hint:
-        "Si dice que falta action upsertBanco, pega Codigo.gs v7 en Apps Script y publica Nueva versión.",
+        "Si dice que falta action upsertBanco, pega Codigo.gs v10 en Apps Script y publica Nueva versión.",
     });
   }
 });

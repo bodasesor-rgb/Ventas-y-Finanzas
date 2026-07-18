@@ -1,45 +1,121 @@
 /**
  * ============================================================
  * Apps Script — Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-07-18-v8
+ * VERSION: 2026-07-18-v10
  * ============================================================
- * doPost  → Eventos | upsertBanco | saveStatementArchive |
- *           listStatementArchive | getStatementArchive
- * doGet   → { version }
- * setupAll_ → fórmulas Eventos + Metricas + P&L
+ * PEGAR TODO ESTE ARCHIVO (borrar lo anterior → pegar → Guardar)
  *
- * Memoria de PDFs: carpeta Drive "Bodasesor Estados de Cuenta"
- * + índice en pestaña "Estados Archive" (sobrevive a deploys).
+ * Luego:
+ *   1) Función setupAll_ → ▶ Ejecutar → autorizar (Drive + Sheets)
+ *   2) Implementar → Administrar implementaciones → lápiz
+ *      → Nueva versión → Implementar (misma URL /exec)
+ *
+ * doPost:
+ *   - Eventos YYYY (Kommo cierres)
+ *   - action=upsertBanco
+ *   - action=saveStatementArchive | listStatementArchive | getStatementArchive
+ * doGet: { version }
+ * setupAll_: Eventos + Metricas + P&L + Banco + Estados Archive
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-07-18-v8';
-var DEFAULT_SHEET_NAME = 'Eventos 2026';
+var SCRIPT_VERSION = '2026-07-18-v10';
+var YEAR = 2026;
+var EVENTOS_SHEET = 'Eventos ' + YEAR;
+var METRICAS_SHEET = 'Metricas ' + YEAR;
+var PL_SHEET = 'P&L ' + YEAR;
+var BANCO_SHEET = 'Banco ' + YEAR;
+var ARCHIVE_SHEET = 'Estados Archive';
+var ARCHIVE_FOLDER_NAME = 'Bodasesor Estados de Cuenta';
+
+var DEFAULT_SHEET_NAME = EVENTOS_SHEET;
 var DEAL_ID_COL = 20; // T
 var CLIENTE_COL = 1; // A
-var METRICAS_SHEET = 'Metricas 2026';
-var PL_SHEET = 'P&L 2026';
-var ARCHIVE_FOLDER_NAME = 'Bodasesor Estados de Cuenta';
-var ARCHIVE_SHEET = 'Estados Archive';
-/** No mirar más abajo de esta fila al buscar el último cliente (evita basura) */
 var MAX_CLIENT_SCAN = 500;
+
+// A–J + P–R + T (no toca K Costo, L Pagado, M/N/O fórmulas, S IVA)
+var WRITE_COLS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 16, 17, 18, 20];
+
+var EVENTOS_HEADERS = [
+  'Cliente',
+  'Fecha del evento',
+  'Fecha de cierre',
+  'Telefono',
+  'Correo',
+  'Tipo de evento',
+  'Invitados',
+  'Dirección de evento',
+  'Horario',
+  'Venta',
+  'Costo',
+  'Pagado',
+  'Por pagar',
+  'Ganancia',
+  'Margen',
+  'Link cotización',
+  'Mes cierre',
+  'Forma de Pago',
+  'IVA',
+  'Kommo Deal ID',
+];
+
+var BANCO_HEADERS = [
+  'Mes',
+  'Periodo',
+  'Label',
+  'Ingresos banco',
+  'Gastos banco',
+  'Neto',
+  'Ads',
+  'Apps',
+  'Pass',
+  'Comisiones',
+  'Servicios',
+  'Pagos',
+  'Transferencias',
+  'Evento',
+  'Revisar',
+  'Otro',
+  'Ingreso cat',
+  'Venta cat',
+  'Otros cats',
+  'Depósitos oficial',
+  'Retiros oficial',
+  'Cuadra',
+  'Actualizado',
+  'RunId',
+  'Archivo',
+];
 
 function isWritableSheet_(name) {
   return /^Eventos \d{4}$/.test(name);
 }
 
-// A–J + P–R + T. No toca K,L,M,N,O,S
-var WRITE_COLS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 16, 17, 18, 20];
+function json_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(
+    ContentService.MimeType.JSON
+  );
+}
 
-/**
- * Última fila con nombre en Cliente (A), luego +1.
- * Si el último está en 66 → regresa 67.
- * Ignora basura lejana: si hay un hueco de ≥15 filas vacías, corta el bloque.
- */
+function doGet() {
+  return json_({
+    ok: true,
+    version: SCRIPT_VERSION,
+    ping: true,
+    sheets: [EVENTOS_SHEET, METRICAS_SHEET, PL_SHEET, BANCO_SHEET, ARCHIVE_SHEET],
+  });
+}
+
+function testPing() {
+  Logger.log(SCRIPT_VERSION);
+}
+
+/* ===================== Eventos helpers ===================== */
+
 function findNextClientRow_(sheet) {
   var lastRow = Math.max(sheet.getLastRow(), 1);
   var scanTo = Math.min(Math.max(lastRow, 2), MAX_CLIENT_SCAN);
   var values = sheet.getRange(2, CLIENTE_COL, scanTo, CLIENTE_COL).getValues();
-  var lastFilled = 1; // encabezado
+  var lastFilled = 1;
   var emptyStreak = 0;
 
   for (var i = 0; i < values.length; i++) {
@@ -49,11 +125,9 @@ function findNextClientRow_(sheet) {
       emptyStreak = 0;
     } else if (lastFilled >= 2) {
       emptyStreak++;
-      // Tras el bloque real de clientes, no seguir buscando basura abajo
       if (emptyStreak >= 15) break;
     }
   }
-
   return lastFilled + 1;
 }
 
@@ -63,11 +137,8 @@ function findRowByDealId_(sheet, dealId) {
   var scanTo = Math.min(lastRow, MAX_CLIENT_SCAN);
   var ids = sheet.getRange(2, DEAL_ID_COL, scanTo, DEAL_ID_COL).getValues();
   for (var i = 0; i < ids.length; i++) {
-    if (String(ids[i][0]).trim() === dealId) {
-      return i + 2;
-    }
+    if (String(ids[i][0]).trim() === dealId) return i + 2;
   }
-  // Si getLastRow es enorme, también buscar más abajo por si quedó un ID viejo
   if (lastRow > MAX_CLIENT_SCAN) {
     var ids2 = sheet
       .getRange(MAX_CLIENT_SCAN + 1, DEAL_ID_COL, lastRow, DEAL_ID_COL)
@@ -81,6 +152,28 @@ function findRowByDealId_(sheet, dealId) {
   return -1;
 }
 
+function applyCalcFormulas_(sheet, row) {
+  // M Por pagar = Venta - Pagado
+  sheet
+    .getRange(row, 13)
+    .setFormula(
+      '=IF(J' + row + '="","",J' + row + '-IF(L' + row + '="",0,L' + row + '))'
+    );
+  // N Ganancia = Venta - Costo
+  sheet
+    .getRange(row, 14)
+    .setFormula(
+      '=IF(J' + row + '="","",J' + row + '-IF(K' + row + '="",0,K' + row + '))'
+    );
+  // O Margen = Ganancia / Venta
+  sheet
+    .getRange(row, 15)
+    .setFormula(
+      '=IF(OR(J' + row + '="",J' + row + '=0),"",N' + row + '/J' + row + ')'
+    );
+  sheet.getRange(row, 15).setNumberFormat('0.00%');
+}
+
 function writeRowValues_(sheet, rowIndex, values) {
   for (var c = 0; c < WRITE_COLS.length; c++) {
     var col = WRITE_COLS[c];
@@ -89,22 +182,20 @@ function writeRowValues_(sheet, rowIndex, values) {
   applyCalcFormulas_(sheet, rowIndex);
 }
 
-/** Abre la URL /exec en el navegador → debe decir version v6 */
-function doGet() {
-  return json_({
-    ok: true,
-    version: SCRIPT_VERSION,
-    ping: true,
-    rule: 'nuevo cliente = ultima fila con Cliente + 1',
-  });
+/* ===================== Banco ===================== */
+
+function ensureBancoSheet_(ss) {
+  var sh = ss.getSheetByName(BANCO_SHEET);
+  if (!sh) sh = ss.insertSheet(BANCO_SHEET);
+  if (String(sh.getRange(1, 1).getValue()).trim() !== 'Mes') {
+    sh.getRange(1, 1, 1, BANCO_HEADERS.length).setValues([BANCO_HEADERS]);
+    sh.setFrozenRows(1);
+  }
+  return sh;
 }
 
-/**
- * Upsert fila mensual del estado de cuenta banco → pestaña Banco YYYY
- * y refleja Gastos/Ingresos banco en P&L YYYY (cols F/G).
- */
 function upsertBanco_(data) {
-  var year = Number(data.year) || new Date().getFullYear();
+  var year = Number(data.year) || YEAR;
   var month = Number(data.month);
   var periodKey = String(data.periodKey || '').trim();
   if (!periodKey || !month || month < 1 || month > 12) {
@@ -115,44 +206,8 @@ function upsertBanco_(data) {
     });
   }
 
-  var sheetName = 'Banco ' + year;
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = ss.getSheetByName(sheetName);
-  var headers = [
-    'Mes',
-    'Periodo',
-    'Label',
-    'Ingresos banco',
-    'Gastos banco',
-    'Neto',
-    'Ads',
-    'Apps',
-    'Pass',
-    'Comisiones',
-    'Servicios',
-    'Pagos',
-    'Transferencias',
-    'Evento',
-    'Revisar',
-    'Otro',
-    'Ingreso cat',
-    'Venta cat',
-    'Otros cats',
-    'Depósitos oficial',
-    'Retiros oficial',
-    'Cuadra',
-    'Actualizado',
-    'RunId',
-    'Archivo',
-  ];
-
-  if (!sh) {
-    sh = ss.insertSheet(sheetName);
-    sh.getRange(1, 1, 1, headers.length).setValues([headers]);
-    sh.setFrozenRows(1);
-  } else if (String(sh.getRange(1, 1).getValue()).trim() !== 'Mes') {
-    sh.getRange(1, 1, 1, headers.length).setValues([headers]);
-  }
+  var sh = ensureBancoSheet_(ss);
 
   var by = {};
   var cats = data.byCategory || [];
@@ -191,7 +246,7 @@ function upsertBanco_(data) {
   var lastRow = Math.max(sh.getLastRow(), 1);
   var rowIndex = -1;
   if (lastRow >= 2) {
-    var keys = sh.getRange(2, 2, lastRow, 2).getValues(); // col B Periodo
+    var keys = sh.getRange(2, 2, lastRow, 2).getValues();
     for (var r = 0; r < keys.length; r++) {
       if (String(keys[r][0]).trim() === periodKey) {
         rowIndex = r + 2;
@@ -202,50 +257,30 @@ function upsertBanco_(data) {
 
   var action;
   if (rowIndex === -1) {
-    rowIndex = sh.getLastRow() + 1;
-    if (rowIndex < 2) rowIndex = 2;
+    rowIndex = Math.max(sh.getLastRow() + 1, 2);
     action = 'appended';
   } else {
     action = 'updated';
   }
 
   sh.getRange(rowIndex, 1, 1, rowVals.length).setValues([rowVals]);
-  sh.getRange(rowIndex, 4, 1, 16).setNumberFormat('$#,##0.00');
+  sh.getRange(rowIndex, 4, 1, 18).setNumberFormat('$#,##0.00');
 
-  linkPnLBanco_(ss, year);
+  // Re-enlaza P&L / Metricas con banco
+  setupPnL_(ss);
+  setupMetricas_(ss);
 
   return json_({
     ok: true,
     version: SCRIPT_VERSION,
     action: action,
     row: rowIndex,
-    sheetName: sheetName,
+    sheetName: BANCO_SHEET,
     periodKey: periodKey,
   });
 }
 
-/** P&L YYYY cols F/G = Ingresos/Gastos banco del mes */
-function linkPnLBanco_(ss, year) {
-  var plName = 'P&L ' + year;
-  var bancoName = 'Banco ' + year;
-  var sh = ss.getSheetByName(plName);
-  if (!sh) return;
-  sh.getRange('F3').setValue('Ingresos banco');
-  sh.getRange('G3').setValue('Gastos banco');
-  for (var m = 1; m <= 12; m++) {
-    var r = 3 + m;
-    sh.getRange(r, 6).setFormula(
-      "=IFERROR(SUMIF('" + bancoName + "'!$A:$A,A" + r + ",'" + bancoName + "'!$D:$D),0)"
-    );
-    sh.getRange(r, 7).setFormula(
-      "=IFERROR(SUMIF('" + bancoName + "'!$A:$A,A" + r + ",'" + bancoName + "'!$E:$E),0)"
-    );
-  }
-  sh.getRange('F4:G15').setNumberFormat('$#,##0.00');
-  sh.getRange(16, 6).setFormula('=SUM(F4:F15)');
-  sh.getRange(16, 7).setFormula('=SUM(G4:G15)');
-  sh.getRange('F16:G16').setNumberFormat('$#,##0.00');
-}
+/* ===================== Drive archive (PDFs) ===================== */
 
 function getArchiveFolder_() {
   var it = DriveApp.getFoldersByName(ARCHIVE_FOLDER_NAME);
@@ -281,9 +316,7 @@ function removeFilesNamedInFolder_(folder, name) {
   while (files.hasNext()) {
     try {
       files.next().setTrashed(true);
-    } catch (err) {
-      /* ignore */
-    }
+    } catch (err) {}
   }
 }
 
@@ -297,7 +330,6 @@ function findArchiveRow_(sh, periodKey) {
   return -1;
 }
 
-/** Guarda PDF + JSON del run en Drive (memoria entre deploys). */
 function saveStatementArchive_(data) {
   var periodKey = String(data.periodKey || '').trim();
   if (!/^\d{4}-\d{2}$/.test(periodKey)) {
@@ -315,8 +347,9 @@ function saveStatementArchive_(data) {
     });
   }
 
-  var storedName =
-    String(data.storedName || periodKey + '_estado-cuenta.pdf').trim();
+  var storedName = String(
+    data.storedName || periodKey + '_estado-cuenta.pdf'
+  ).trim();
   var pdfName = periodKey + '_estado-cuenta.pdf';
   var jsonName = periodKey + '_run.json';
   var folder = getArchiveFolder_();
@@ -324,11 +357,13 @@ function saveStatementArchive_(data) {
   removeFilesNamedInFolder_(folder, pdfName);
   removeFilesNamedInFolder_(folder, jsonName);
 
-  var pdfBytes = Utilities.base64Decode(data.pdfBase64);
   var pdfFile = folder.createFile(
-    Utilities.newBlob(pdfBytes, 'application/pdf', pdfName)
+    Utilities.newBlob(
+      Utilities.base64Decode(data.pdfBase64),
+      'application/pdf',
+      pdfName
+    )
   );
-
   var runPayload =
     typeof data.runJson === 'string'
       ? data.runJson
@@ -349,13 +384,8 @@ function saveStatementArchive_(data) {
     new Date(),
     String(data.runId || ''),
   ];
-  var action;
-  if (rowIndex === -1) {
-    rowIndex = Math.max(sh.getLastRow() + 1, 2);
-    action = 'appended';
-  } else {
-    action = 'updated';
-  }
+  var action = rowIndex === -1 ? 'appended' : 'updated';
+  if (rowIndex === -1) rowIndex = Math.max(sh.getLastRow() + 1, 2);
   sh.getRange(rowIndex, 1, 1, rowVals.length).setValues([rowVals]);
 
   return json_({
@@ -432,18 +462,7 @@ function getStatementArchive_(data) {
 
   var pdfFile = DriveApp.getFileById(pdfFileId);
   var runFile = DriveApp.getFileById(runFileId);
-  var pdfBase64 = Utilities.base64Encode(pdfFile.getBlob().getBytes());
-  var runText = runFile.getBlob().getDataAsString('UTF-8');
-  var runObj = null;
-  try {
-    runObj = JSON.parse(runText);
-  } catch (err) {
-    return json_({
-      ok: false,
-      version: SCRIPT_VERSION,
-      error: 'JSON del run corrupto: ' + String(err),
-    });
-  }
+  var runObj = JSON.parse(runFile.getBlob().getDataAsString('UTF-8'));
 
   return json_({
     ok: true,
@@ -455,10 +474,12 @@ function getStatementArchive_(data) {
     pdfFileId: pdfFileId,
     runFileId: runFileId,
     pdfUrl: String(row[4] || pdfFile.getUrl()),
-    pdfBase64: pdfBase64,
+    pdfBase64: Utilities.base64Encode(pdfFile.getBlob().getBytes()),
     run: runObj,
   });
 }
+
+/* ===================== doPost ===================== */
 
 function doPost(e) {
   try {
@@ -473,9 +494,7 @@ function doPost(e) {
 
     var data = JSON.parse(raw);
 
-    if (data && data.action === 'upsertBanco') {
-      return upsertBanco_(data);
-    }
+    if (data && data.action === 'upsertBanco') return upsertBanco_(data);
     if (data && data.action === 'saveStatementArchive') {
       return saveStatementArchive_(data);
     }
@@ -485,13 +504,17 @@ function doPost(e) {
     if (data && data.action === 'getStatementArchive') {
       return getStatementArchive_(data);
     }
+    if (data && data.action === 'setupAll') {
+      setupAllSilent_();
+      return json_({ ok: true, version: SCRIPT_VERSION, action: 'setupAll' });
+    }
 
     var values = data.values;
     if (!values || !Array.isArray(values)) {
       return json_({
         ok: false,
         version: SCRIPT_VERSION,
-        error: 'values no es array (¿falta republicar Apps Script v8?)',
+        error: 'values no es array (¿Apps Script v10 publicado?)',
         typeofValues: typeof values,
         rawPreview: String(raw).slice(0, 200),
       });
@@ -501,17 +524,15 @@ function doPost(e) {
     while (values.length < DEAL_ID_COL) values.push('');
 
     var dealId = String(data.dealId || values[19] || '').trim();
-    var sheetName = String(data.sheetName || DEFAULT_SHEET_NAME).trim();
+    var sheetName = String(data.sheetName || EVENTOS_SHEET).trim();
 
     if (!dealId) {
       return json_({
         ok: false,
         version: SCRIPT_VERSION,
         error: 'Falta dealId',
-        valuesLength: values.length,
       });
     }
-
     if (!isWritableSheet_(sheetName)) {
       return json_({
         ok: false,
@@ -530,17 +551,15 @@ function doPost(e) {
     }
 
     var existingRow = findRowByDealId_(sheet, dealId);
+    var nextRow = findNextClientRow_(sheet);
     var rowIndex;
     var action;
-    var nextRow = findNextClientRow_(sheet);
 
     if (existingRow !== -1) {
-      // Ya existe → solo actualizar esa fila (NO mover, NO duplicar)
       rowIndex = existingRow;
       writeRowValues_(sheet, rowIndex, values);
       action = 'updated';
     } else {
-      // Nuevo → siguiente casilla después del último cliente
       rowIndex = nextRow;
       sheet.getRange(rowIndex, 1, 1, DEAL_ID_COL).setValues([values]);
       applyCalcFormulas_(sheet, rowIndex);
@@ -565,173 +584,267 @@ function doPost(e) {
   }
 }
 
-function applyCalcFormulas_(sheet, row) {
-  sheet
-    .getRange(row, 13)
-    .setFormula(
-      '=IF(J' + row + '="","",J' + row + '-IF(L' + row + '="",0,L' + row + '))'
-    );
-  sheet
-    .getRange(row, 14)
-    .setFormula(
-      '=IF(J' + row + '="","",J' + row + '-IF(K' + row + '="",0,K' + row + '))'
-    );
-  sheet
-    .getRange(row, 15)
-    .setFormula(
-      '=IF(OR(J' + row + '="",J' + row + '=0),"",N' + row + '/J' + row + ')'
-    );
-  sheet.getRange(row, 15).setNumberFormat('0.00%');
-}
-
-function json_(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(
-    ContentService.MimeType.JSON
-  );
-}
+/* ===================== SETUP (Metricas + P&L bien) ===================== */
 
 /**
- * ============================================================
- * SETUP — ejecutar UNA VEZ desde el editor (▶ setupAll_)
- * Enlaza Eventos + tabla mensual + Metricas + P&L con fórmulas.
- * NO borra Costo/Pagado ni datos de clientes.
- * ============================================================
+ * EJECUTAR DESDE EL EDITOR: selecciona setupAll_ → ▶ Ejecutar
+ * Crea/arregla Eventos, Metricas, P&L, Banco, Estados Archive.
+ * NO borra clientes ni Costo/Pagado manuales.
  */
 function setupAll_() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var eventos = ss.getSheetByName(DEFAULT_SHEET_NAME);
-  if (!eventos) throw new Error('No existe pestaña: ' + DEFAULT_SHEET_NAME);
-
-  setupEventosRowFormulas_(eventos);
-  setupMonthlyTable_(eventos);
-  setupMetricas_(ss);
-  setupPnL_(ss);
-
-  SpreadsheetApp.getUi().alert(
-    'Setup OK (' +
-      SCRIPT_VERSION +
-      ')\n\n' +
-      '1) Fórmulas M/N/O en Eventos 2026\n' +
-      '2) Tabla mensual en W:AB (SUMIF vivos)\n' +
-      '3) Metricas 2026 enlazada\n' +
-      '4) P&L 2026 enlazada\n\n' +
-      'Luego: Nueva versión de la App web si cambiaste doPost.'
-  );
+  setupAllSilent_();
+  var msg =
+    'Setup OK — ' +
+    SCRIPT_VERSION +
+    '\n\n' +
+    '✓ ' +
+    EVENTOS_SHEET +
+    ' (fórmulas M/N/O + tabla W:AB)\n' +
+    '✓ ' +
+    METRICAS_SHEET +
+    ' (ventas + banco por mes)\n' +
+    '✓ ' +
+    PL_SHEET +
+    ' (P&L completo)\n' +
+    '✓ ' +
+    BANCO_SHEET +
+    ' (estados de cuenta)\n' +
+    '✓ ' +
+    ARCHIVE_SHEET +
+    ' + carpeta Drive PDFs\n\n' +
+    'Siguiente: Administrar implementaciones → Nueva versión → Implementar';
+  try {
+    SpreadsheetApp.getUi().alert(msg);
+  } catch (err) {
+    Logger.log(msg);
+  }
 }
 
-/** M/N/O en todas las filas con Cliente (evita #DIV/0! en vacías) */
+function setupAllSilent_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var eventos = ensureEventosSheet_(ss);
+  setupEventosRowFormulas_(eventos);
+  setupMonthlyTable_(eventos);
+  ensureBancoSheet_(ss);
+  ensureArchiveSheet_();
+  getArchiveFolder_();
+  setupMetricas_(ss);
+  setupPnL_(ss);
+}
+
+function ensureEventosSheet_(ss) {
+  var sh = ss.getSheetByName(EVENTOS_SHEET);
+  if (!sh) sh = ss.insertSheet(EVENTOS_SHEET);
+  // Encabezados si faltan
+  if (String(sh.getRange(1, 1).getValue()).trim() !== 'Cliente') {
+    sh.getRange(1, 1, 1, EVENTOS_HEADERS.length).setValues([EVENTOS_HEADERS]);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
 function setupEventosRowFormulas_(sheet) {
   var lastRow = Math.max(sheet.getLastRow(), 2);
   var clientes = sheet.getRange(2, 1, lastRow, 1).getValues();
   for (var i = 0; i < clientes.length; i++) {
     var row = i + 2;
     if (String(clientes[i][0]).trim() === '') {
-      sheet.getRange(row, 13, 1, 3).clearContent(); // M N O vacías
+      sheet.getRange(row, 13, 1, 3).clearContent();
       continue;
     }
     applyCalcFormulas_(sheet, row);
   }
+  // Formato dinero en Venta/Costo/Pagado
+  if (lastRow >= 2) {
+    sheet.getRange(2, 10, lastRow, 12).setNumberFormat('$#,##0.00');
+    sheet.getRange(2, 13, lastRow, 14).setNumberFormat('$#,##0.00');
+  }
 }
 
-/**
- * Tabla mensual en W3:AB16
- * Mes | Pagado | Por pagar | Valor total | Ganancia total | # Eventos
- */
+/** Tabla mensual Eventos en W3:AB16 */
 function setupMonthlyTable_(sheet) {
   sheet.getRange('W3:AB3').setValues([
     ['Mes', 'Pagado', 'Por pagar', 'Valor total', 'Ganancia total', '# Eventos'],
   ]);
-
   for (var m = 1; m <= 12; m++) {
-    var r = 3 + m; // fila 4 = mes 1 … fila 15 = mes 12
-    sheet.getRange(r, 23).setValue(m); // W
-    sheet.getRange(r, 24).setFormula('=SUMIF($Q:$Q,W' + r + ',$L:$L)'); // X Pagado
-    sheet.getRange(r, 25).setFormula('=SUMIF($Q:$Q,W' + r + ',$M:$M)'); // Y Por pagar
-    sheet.getRange(r, 26).setFormula('=SUMIF($Q:$Q,W' + r + ',$J:$J)'); // Z Valor
-    sheet.getRange(r, 27).setFormula('=SUMIF($Q:$Q,W' + r + ',$N:$N)'); // AA Ganancia
-    sheet.getRange(r, 28).setFormula('=COUNTIFS($Q:$Q,W' + r + ',$A:$A,"<>")'); // AB #
+    var r = 3 + m;
+    sheet.getRange(r, 23).setValue(m);
+    sheet.getRange(r, 24).setFormula('=SUMIF($Q:$Q,W' + r + ',$L:$L)');
+    sheet.getRange(r, 25).setFormula('=SUMIF($Q:$Q,W' + r + ',$M:$M)');
+    sheet.getRange(r, 26).setFormula('=SUMIF($Q:$Q,W' + r + ',$J:$J)');
+    sheet.getRange(r, 27).setFormula('=SUMIF($Q:$Q,W' + r + ',$N:$N)');
+    sheet.getRange(r, 28).setFormula('=COUNTIFS($Q:$Q,W' + r + ',$A:$A,"<>")');
   }
-
   sheet.getRange(16, 23).setValue('Total anual');
   sheet.getRange(16, 24).setFormula('=SUM(X4:X15)');
   sheet.getRange(16, 25).setFormula('=SUM(Y4:Y15)');
   sheet.getRange(16, 26).setFormula('=SUM(Z4:Z15)');
   sheet.getRange(16, 27).setFormula('=SUM(AA4:AA15)');
   sheet.getRange(16, 28).setFormula('=SUM(AB4:AB15)');
-
   sheet.getRange('X4:AA16').setNumberFormat('$#,##0.00');
 }
 
-/** Metricas 2026: mirror de la tabla mensual de Eventos */
+/**
+ * Metricas YYYY — panel de control
+ * Bloque A: ventas/eventos (desde tabla W:AB de Eventos)
+ * Bloque B: banco (desde Banco YYYY)
+ */
 function setupMetricas_(ss) {
   var sh = ss.getSheetByName(METRICAS_SHEET);
-  if (!sh) {
-    sh = ss.insertSheet(METRICAS_SHEET);
-  }
+  if (!sh) sh = ss.insertSheet(METRICAS_SHEET);
   sh.clear();
-  sh.getRange('A1').setValue('Metricas 2026 — enlazado a Eventos 2026 (solo lectura)');
-  sh.getRange('A3:F3').setValues([
-    ['Mes', 'Pagado', 'Por pagar', 'Valor total', 'Ganancia total', '# Eventos'],
+
+  sh.getRange('A1').setValue('Metricas ' + YEAR + ' — Bodasesor');
+  sh.getRange('A1').setFontWeight('bold').setFontSize(14);
+
+  // --- Ventas / Eventos ---
+  sh.getRange('A3').setValue('VENTAS / EVENTOS');
+  sh.getRange('A3').setFontWeight('bold');
+  sh.getRange('A4:F4').setValues([
+    ['Mes', 'Pagado', 'Por pagar', 'Valor total', 'Ganancia', '# Eventos'],
   ]);
+  sh.getRange('A4:F4').setFontWeight('bold');
 
   for (var m = 1; m <= 12; m++) {
-    var r = 3 + m;
-    var src = 3 + m; // misma fila en Eventos W
+    var r = 4 + m; // fila 5 = mes 1 … fila 16 = mes 12
+    var src = 3 + m; // Eventos fila 4 = mes 1
     sh.getRange(r, 1).setValue(m);
-    sh.getRange(r, 2).setFormula("='Eventos 2026'!X" + src);
-    sh.getRange(r, 3).setFormula("='Eventos 2026'!Y" + src);
-    sh.getRange(r, 4).setFormula("='Eventos 2026'!Z" + src);
-    sh.getRange(r, 5).setFormula("='Eventos 2026'!AA" + src);
-    sh.getRange(r, 6).setFormula("='Eventos 2026'!AB" + src);
+    sh.getRange(r, 2).setFormula("='" + EVENTOS_SHEET + "'!X" + src);
+    sh.getRange(r, 3).setFormula("='" + EVENTOS_SHEET + "'!Y" + src);
+    sh.getRange(r, 4).setFormula("='" + EVENTOS_SHEET + "'!Z" + src);
+    sh.getRange(r, 5).setFormula("='" + EVENTOS_SHEET + "'!AA" + src);
+    sh.getRange(r, 6).setFormula("='" + EVENTOS_SHEET + "'!AB" + src);
   }
+  sh.getRange(17, 1).setValue('Total anual');
+  sh.getRange(17, 1).setFontWeight('bold');
+  sh.getRange(17, 2).setFormula('=SUM(B5:B16)');
+  sh.getRange(17, 3).setFormula('=SUM(C5:C16)');
+  sh.getRange(17, 4).setFormula('=SUM(D5:D16)');
+  sh.getRange(17, 5).setFormula('=SUM(E5:E16)');
+  sh.getRange(17, 6).setFormula('=SUM(F5:F16)');
+  sh.getRange('B5:E17').setNumberFormat('$#,##0.00');
 
-  sh.getRange(16, 1).setValue('Total anual');
-  sh.getRange(16, 2).setFormula("='Eventos 2026'!X16");
-  sh.getRange(16, 3).setFormula("='Eventos 2026'!Y16");
-  sh.getRange(16, 4).setFormula("='Eventos 2026'!Z16");
-  sh.getRange(16, 5).setFormula("='Eventos 2026'!AA16");
-  sh.getRange(16, 6).setFormula("='Eventos 2026'!AB16");
-  sh.getRange('B4:E16').setNumberFormat('$#,##0.00');
+  // --- Banco ---
+  sh.getRange('A19').setValue('BANCO (estados de cuenta)');
+  sh.getRange('A19').setFontWeight('bold');
+  sh.getRange('A20:E20').setValues([
+    ['Mes', 'Ingresos banco', 'Gastos banco', 'Neto banco', 'Cuadra'],
+  ]);
+  sh.getRange('A20:E20').setFontWeight('bold');
+
+  for (var bm = 1; bm <= 12; bm++) {
+    var br = 20 + bm; // 21..32
+    sh.getRange(br, 1).setValue(bm);
+    sh.getRange(br, 2).setFormula(
+      "=IFERROR(SUMIF('" + BANCO_SHEET + "'!$A:$A,A" + br + ",'" + BANCO_SHEET + "'!$D:$D),0)"
+    );
+    sh.getRange(br, 3).setFormula(
+      "=IFERROR(SUMIF('" + BANCO_SHEET + "'!$A:$A,A" + br + ",'" + BANCO_SHEET + "'!$E:$E),0)"
+    );
+    sh.getRange(br, 4).setFormula(
+      "=IFERROR(SUMIF('" + BANCO_SHEET + "'!$A:$A,A" + br + ",'" + BANCO_SHEET + "'!$F:$F),0)"
+    );
+    sh.getRange(br, 5).setFormula(
+      "=IFERROR(INDEX('" +
+        BANCO_SHEET +
+        "'!$V:$V,MATCH(A" +
+        br +
+        ",'" +
+        BANCO_SHEET +
+        "'!$A:$A,0)),\"\")"
+    );
+  }
+  sh.getRange(33, 1).setValue('Total anual');
+  sh.getRange(33, 1).setFontWeight('bold');
+  sh.getRange(33, 2).setFormula('=SUM(B21:B32)');
+  sh.getRange(33, 3).setFormula('=SUM(C21:C32)');
+  sh.getRange(33, 4).setFormula('=SUM(D21:D32)');
+  sh.getRange('B21:D33').setNumberFormat('$#,##0.00');
+
+  sh.setColumnWidth(1, 90);
+  for (var c = 2; c <= 6; c++) sh.setColumnWidth(c, 120);
 }
 
 /**
- * P&L 2026 (simple):
- * Ingresos (= Valor total) | Costo total | Ganancia | Margen
- * por mes, desde Eventos.
+ * P&L YYYY — resultado del negocio por mes
+ * Ventas (Eventos) + Banco (estados) → resultado
  */
 function setupPnL_(ss) {
   var sh = ss.getSheetByName(PL_SHEET);
-  if (!sh) {
-    sh = ss.insertSheet(PL_SHEET);
-  }
+  if (!sh) sh = ss.insertSheet(PL_SHEET);
   sh.clear();
-  sh.getRange('A1').setValue('P&L 2026 — enlazado a Eventos 2026');
-  sh.getRange('A3:E3').setValues([
-    ['Mes', 'Ingresos (Venta)', 'Costo total', 'Ganancia', 'Margen'],
+
+  sh.getRange('A1').setValue('P&L ' + YEAR + ' — Bodasesor');
+  sh.getRange('A1').setFontWeight('bold').setFontSize(14);
+  sh.getRange('A2').setValue(
+    'Ventas desde Eventos · Banco desde pestaña Banco (botón Enviar al P&L)'
+  );
+
+  sh.getRange('A4:I4').setValues([
+    [
+      'Mes',
+      'Ingresos ventas',
+      'Costo eventos',
+      'Ganancia eventos',
+      'Margen %',
+      'Ingresos banco',
+      'Gastos banco',
+      'Neto banco',
+      'Resultado mes',
+    ],
   ]);
+  sh.getRange('A4:I4').setFontWeight('bold');
 
   for (var m = 1; m <= 12; m++) {
-    var r = 3 + m;
+    var r = 4 + m; // 5..16
+    var ev = 3 + m; // Eventos tabla W fila 4 = mes 1
     sh.getRange(r, 1).setValue(m);
-    // Ingresos = Valor total Eventos Z
-    sh.getRange(r, 2).setFormula("='Eventos 2026'!Z" + r);
-    // Costo = SUMIF costo por mes
-    sh.getRange(r, 3).setFormula("=SUMIF('Eventos 2026'!$Q:$Q,A" + r + ",'Eventos 2026'!$K:$K)");
-    // Ganancia
-    sh.getRange(r, 4).setFormula("='Eventos 2026'!AA" + r);
-    // Margen
+
+    // B Ingresos ventas = Eventos Z (valor total)
+    sh.getRange(r, 2).setFormula("='" + EVENTOS_SHEET + "'!Z" + ev);
+    // C Costo eventos = SUMIF costo K por mes cierre Q
+    sh.getRange(r, 3).setFormula(
+      "=SUMIF('" + EVENTOS_SHEET + "'!$Q:$Q,A" + r + ",'" + EVENTOS_SHEET + "'!$K:$K)"
+    );
+    // D Ganancia eventos = Eventos AA
+    sh.getRange(r, 4).setFormula("='" + EVENTOS_SHEET + "'!AA" + ev);
+    // E Margen
     sh.getRange(r, 5).setFormula('=IF(B' + r + '=0,"",D' + r + '/B' + r + ')');
+
+    // F/G/H Banco
+    sh.getRange(r, 6).setFormula(
+      "=IFERROR(SUMIF('" + BANCO_SHEET + "'!$A:$A,A" + r + ",'" + BANCO_SHEET + "'!$D:$D),0)"
+    );
+    sh.getRange(r, 7).setFormula(
+      "=IFERROR(SUMIF('" + BANCO_SHEET + "'!$A:$A,A" + r + ",'" + BANCO_SHEET + "'!$E:$E),0)"
+    );
+    sh.getRange(r, 8).setFormula(
+      "=IFERROR(SUMIF('" + BANCO_SHEET + "'!$A:$A,A" + r + ",'" + BANCO_SHEET + "'!$F:$F),0)"
+    );
+
+    // I Resultado = Ganancia eventos + Neto banco
+    sh.getRange(r, 9).setFormula('=D' + r + '+H' + r);
   }
 
-  sh.getRange(16, 1).setValue('Total anual');
-  sh.getRange(16, 2).setFormula('=SUM(B4:B15)');
-  sh.getRange(16, 3).setFormula('=SUM(C4:C15)');
-  sh.getRange(16, 4).setFormula('=SUM(D4:D15)');
-  sh.getRange(16, 5).setFormula('=IF(B16=0,"",D16/B16)');
-  sh.getRange('B4:D16').setNumberFormat('$#,##0.00');
-  sh.getRange('E4:E16').setNumberFormat('0.00%');
-}
+  sh.getRange(17, 1).setValue('Total anual');
+  sh.getRange(17, 1).setFontWeight('bold');
+  sh.getRange(17, 2).setFormula('=SUM(B5:B16)');
+  sh.getRange(17, 3).setFormula('=SUM(C5:C16)');
+  sh.getRange(17, 4).setFormula('=SUM(D5:D16)');
+  sh.getRange(17, 5).setFormula('=IF(B17=0,"",D17/B17)');
+  sh.getRange(17, 6).setFormula('=SUM(F5:F16)');
+  sh.getRange(17, 7).setFormula('=SUM(G5:G16)');
+  sh.getRange(17, 8).setFormula('=SUM(H5:H16)');
+  sh.getRange(17, 9).setFormula('=SUM(I5:I16)');
 
-function testPing() {
-  Logger.log(SCRIPT_VERSION);
+  sh.getRange('B5:D17').setNumberFormat('$#,##0.00');
+  sh.getRange('E5:E17').setNumberFormat('0.00%');
+  sh.getRange('F5:I17').setNumberFormat('$#,##0.00');
+
+  sh.setColumnWidth(1, 70);
+  for (var col = 2; col <= 9; col++) sh.setColumnWidth(col, 130);
+
+  sh.getRange('A19').setValue(
+    'Nota: Costo eventos se llena a mano en Eventos col K. Pagado en col L. Banco llega con el botón del panel /pnl/.'
+  );
 }
