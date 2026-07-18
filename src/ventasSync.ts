@@ -7,6 +7,7 @@ import {
   filaToOrderedValues,
   mapDealToFilaVentas,
   SHEET_HEADERS,
+  yearFromFecha,
 } from "./mapDealToFila";
 import type { FilaVentas, KommoLead, KommoWebhookBody } from "./types";
 
@@ -92,11 +93,9 @@ export async function syncDealToSheet(
   if (appsScriptUrl()) {
     sheetWrite.attempted = true;
     try {
-      const sheetName = `Eventos ${
-        fila.fechaDeCierre
-          ? fila.fechaDeCierre.slice(0, 4)
-          : String(new Date().getUTCFullYear())
-      }`;
+      const year =
+        yearFromFecha(fila.fechaDeCierre) || new Date().getUTCFullYear();
+      const sheetName = `Eventos ${year}`;
       const result = await writeFilaToAppsScript(
         fila.kommoDealId,
         values,

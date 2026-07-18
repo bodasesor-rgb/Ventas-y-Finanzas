@@ -1,5 +1,7 @@
 import type { FilaVentas, KommoLead } from "./types";
-/** "14 ago", "14-agosto", "14 de agosto 2026" → YYYY-MM-DD */
+/** Año desde DD/MM/YYYY o YYYY-MM-DD */
+export declare function yearFromFecha(fecha: string): number | null;
+/** "14 ago", "14-agosto", "14 de agosto 2026" → DD/MM/YYYY */
 export declare function extractFechaFromText(text: string, defaultYear?: number): string;
 /**
  * Campo Kommo "Fecha y horario" → columnas Fecha del evento + Horario.

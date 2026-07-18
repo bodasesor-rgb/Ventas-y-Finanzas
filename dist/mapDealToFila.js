@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SHEET_HEADERS = void 0;
+exports.yearFromFecha = yearFromFecha;
 exports.extractFechaFromText = extractFechaFromText;
 exports.parseFechaYHorario = parseFechaYHorario;
 exports.mapDealToFilaVentas = mapDealToFilaVentas;
@@ -79,24 +80,32 @@ function contactEmail(contact) {
     }
     return "";
 }
-function unixToIsoDate(unixSeconds) {
+/** Sheet: siempre día/mes/año */
+function formatFechaDMY(day, month, year) {
+    const d = String(day).padStart(2, "0");
+    const m = String(month).padStart(2, "0");
+    const y = String(year);
+    return `${d}/${m}/${y}`;
+}
+function unixToFechaDMY(unixSeconds) {
     if (!unixSeconds || !Number.isFinite(unixSeconds))
         return "";
     const d = new Date(unixSeconds * 1000);
     if (Number.isNaN(d.getTime()))
         return "";
-    return d.toISOString().slice(0, 10);
+    // Cierre en UTC date parts (closed_at de Kommo es unix)
+    return formatFechaDMY(d.getUTCDate(), d.getUTCMonth() + 1, d.getUTCFullYear());
 }
 /** Fecha/hora en zona México (eventos locales). */
 function mexicoParts(unixSeconds) {
     const d = new Date(unixSeconds * 1000);
     if (Number.isNaN(d.getTime()))
         return { fecha: "", horario: "" };
-    const fecha = new Intl.DateTimeFormat("en-CA", {
+    const fecha = new Intl.DateTimeFormat("es-MX", {
         timeZone: "America/Mexico_City",
-        year: "numeric",
-        month: "2-digit",
         day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
     }).format(d);
     const horario = new Intl.DateTimeFormat("es-MX", {
         timeZone: "America/Mexico_City",
@@ -105,6 +114,18 @@ function mexicoParts(unixSeconds) {
         hour12: false,
     }).format(d);
     return { fecha, horario };
+}
+/** Año desde DD/MM/YYYY o YYYY-MM-DD */
+function yearFromFecha(fecha) {
+    if (!fecha)
+        return null;
+    const dmy = fecha.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (dmy)
+        return Number(dmy[3]);
+    const iso = fecha.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (iso)
+        return Number(iso[1]);
+    return null;
 }
 const MES_ES = {
     ene: "01",
@@ -133,7 +154,7 @@ const MES_ES = {
     dic: "12",
     diciembre: "12",
 };
-/** "14 ago", "14-agosto", "14 de agosto 2026" → YYYY-MM-DD */
+/** "14 ago", "14-agosto", "14 de agosto 2026" → DD/MM/YYYY */
 function extractFechaFromText(text, defaultYear) {
     if (!text)
         return "";
@@ -141,21 +162,18 @@ function extractFechaFromText(text, defaultYear) {
     // 14/08/2026 or 14-08-2026
     const dmy = text.match(/\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/);
     if (dmy) {
-        const day = dmy[1].padStart(2, "0");
-        const month = dmy[2].padStart(2, "0");
         let year = dmy[3];
         if (year.length === 2)
             year = `20${year}`;
-        return `${year}-${month}-${day}`;
+        return formatFechaDMY(dmy[1], dmy[2], year);
     }
-    // 2026-08-14
+    // 2026-08-14 → 14/08/2026
     const iso = text.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
     if (iso)
-        return `${iso[1]}-${iso[2]}-${iso[3]}`;
+        return formatFechaDMY(iso[3], iso[2], iso[1]);
     // 14 ago / 14 de agosto / 14-agosto
     const named = text.match(/\b(\d{1,2})\s*(?:de\s+)?[-\s]?([A-Za-zÁÉÍÓÚáéíóú]+)(?:\s+(20\d{2}))?\b/i);
     if (named) {
-        const day = named[1].padStart(2, "0");
         const monKey = named[2]
             .toLowerCase()
             .normalize("NFD")
@@ -163,7 +181,7 @@ function extractFechaFromText(text, defaultYear) {
         const month = MES_ES[monKey];
         if (month) {
             const year = named[3] || String(yearFallback);
-            return `${year}-${month}-${day}`;
+            return formatFechaDMY(named[1], month, year);
         }
     }
     return "";
@@ -210,12 +228,10 @@ function parseFechaYHorario(raw) {
     // "14/08/2026 18:00" o "14-08-2026 18:00"
     const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?:\s+(\d{1,2}):(\d{2}))?/);
     if (m) {
-        const day = m[1].padStart(2, "0");
-        const month = m[2].padStart(2, "0");
         let year = m[3];
         if (year.length === 2)
             year = `20${year}`;
-        const fecha = `${year}-${month}-${day}`;
+        const fecha = formatFechaDMY(m[1], m[2], year);
         const horario = m[4] != null ? `${m[4].padStart(2, "0")}:${m[5]}` : "";
         return { fecha, horario };
     }
@@ -225,30 +241,43 @@ function parseFechaYHorario(raw) {
         const timeBit = s.match(/(\d{1,2}\s*(?::\d{2})?\s*(?:am|pm)(?:\s*a\s*\d{1,2}\s*(?::\d{2})?\s*(?:am|pm))?)/i);
         return { fecha: fechaNamed, horario: timeBit ? timeBit[1].trim() : "" };
     }
-    if (/^\d{4}-\d{2}-\d{2}$/.test(s))
-        return { fecha: s, horario: "" };
+    // YYYY-MM-DD → DD/MM/YYYY
+    const isoOnly = s.match(/^(20\d{2})-(\d{2})-(\d{2})$/);
+    if (isoOnly) {
+        return { fecha: formatFechaDMY(isoOnly[3], isoOnly[2], isoOnly[1]), horario: "" };
+    }
     return { fecha: "", horario: s };
 }
-function mesFromFechaCierre(fechaIso) {
-    if (!fechaIso || fechaIso.length < 7)
+function mesFromFechaCierre(fecha) {
+    if (!fecha)
         return "";
-    const month = Number(fechaIso.slice(5, 7));
-    if (!Number.isInteger(month) || month < 1 || month > 12)
+    // DD/MM/YYYY
+    const dmy = fecha.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (dmy) {
+        const month = Number(dmy[2]);
+        if (month >= 1 && month <= 12)
+            return String(month);
         return "";
-    return String(month);
+    }
+    // YYYY-MM-DD (legado)
+    const iso = fecha.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (iso) {
+        const month = Number(iso[2]);
+        if (month >= 1 && month <= 12)
+            return String(month);
+    }
+    return "";
 }
 function mapDealToFilaVentas(lead) {
     const fields = lead.custom_fields_values;
     const contact = lead._embedded?.contacts?.[0];
-    const fechaDeCierre = unixToIsoDate(lead.closed_at) ||
-        unixToIsoDate(lead.updated_at) ||
-        unixToIsoDate(lead.created_at);
+    const fechaDeCierre = unixToFechaDMY(lead.closed_at) ||
+        unixToFechaDMY(lead.updated_at) ||
+        unixToFechaDMY(lead.created_at);
     let { fecha: fechaDelEvento, horario } = parseFechaYHorario(customFieldRaw(fields, kommoFieldIds_1.KOMMO_FIELD_IDS.FECHA_Y_HORARIO));
     // Fallback fecha: Requerimientos ("14 ago") o link cotización ("14-agosto")
     if (!fechaDelEvento) {
-        const yearHint = fechaDeCierre
-            ? Number(fechaDeCierre.slice(0, 4))
-            : undefined;
+        const yearHint = yearFromFecha(fechaDeCierre) ?? undefined;
         fechaDelEvento =
             extractFechaFromText(customFieldValue(fields, kommoFieldIds_1.KOMMO_FIELD_IDS.REQUERIMIENTOS), yearHint) ||
                 extractFechaFromText(customFieldValue(fields, kommoFieldIds_1.KOMMO_FIELD_IDS.LINK_COTIZACION_FINAL), yearHint) ||

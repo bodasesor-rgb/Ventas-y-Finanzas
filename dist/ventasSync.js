@@ -53,9 +53,8 @@ async function syncDealToSheet(leadId, webhookBody) {
     if (appsScriptUrl()) {
         sheetWrite.attempted = true;
         try {
-            const sheetName = `Eventos ${fila.fechaDeCierre
-                ? fila.fechaDeCierre.slice(0, 4)
-                : String(new Date().getUTCFullYear())}`;
+            const year = (0, mapDealToFila_1.yearFromFecha)(fila.fechaDeCierre) || new Date().getUTCFullYear();
+            const sheetName = `Eventos ${year}`;
             const result = await (0, appsScriptClient_1.writeFilaToAppsScript)(fila.kommoDealId, values, sheetName);
             sheetWrite.ok = true;
             sheetWrite.action = result.action;
