@@ -236,7 +236,7 @@ pnlRouter.post("/api/pnl/restore-from-drive", async (_req, res) => {
     res.status(502).json({
       ok: false,
       error: err instanceof Error ? err.message : String(err),
-      hint: "Publica Apps Script v8 (Drive) y autoriza acceso a Drive.",
+      hint: "Apps Script: ejecuta authorizeDrive_ (acepta Drive) y publica Nueva versión v11.",
     });
   }
 });

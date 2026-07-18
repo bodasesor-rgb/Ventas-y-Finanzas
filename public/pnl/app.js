@@ -772,9 +772,20 @@ async function init() {
       const rulesNew = (data.stats.rulesCreated || []).join(", ");
       const rec = data.stats.reconciliation;
       const quadra = rec?.matchCompleto ? " · ✓ cuadra con PDF" : " · ✗ no cuadra aún";
+      const arch = data.stats.archive;
+      let driveMsg = "";
+      if (arch?.ok) {
+        driveMsg = " · ✓ Drive guardado";
+      } else if (arch?.error) {
+        const err = String(arch.error);
+        driveMsg =
+          err.includes("DriveApp") || err.includes("permission")
+            ? " · ✗ Drive SIN PERMISO — en Apps Script ejecuta authorizeDrive_ y republica"
+            : ` · ✗ Drive: ${err.slice(0, 120)}`;
+      }
       status.textContent = `OK: ${data.stats.lines} movs · mes ${period} · ${savedAs} · ${data.stats.needsReview} a revisar${
         rulesNew ? ` · reglas/match: ${rulesNew}` : ""
-      }${quadra}`;
+      }${quadra}${driveMsg}`;
       if (data.categories) {
         categories = data.categories;
         renderCategories();
@@ -807,11 +818,17 @@ async function init() {
           method: "POST",
         });
         if (el) {
-          el.textContent = `OK: ${
-            (data.restored || []).length
-          } restaurados · ${(data.skipped || []).length} ya estaban · ${
-            (data.errors || []).length
-          } errores`;
+          const nRest = (data.restored || []).length;
+          const nSkip = (data.skipped || []).length;
+          const errs = data.errors || [];
+          if (!nRest && !nSkip && !errs.length) {
+            el.textContent =
+              "Drive vacío: aún no hay PDFs archivados. Sube un PDF (si falla permiso, en Apps Script ejecuta authorizeDrive_ y republica v11).";
+          } else {
+            el.textContent = `OK: ${nRest} restaurados · ${nSkip} ya estaban · ${errs.length} errores${
+              errs[0] ? " · " + String(errs[0]).slice(0, 100) : ""
+            }`;
+          }
         }
         await refreshLibrary();
         const runsRes = await api("/api/pnl/runs");

@@ -1,14 +1,17 @@
 /**
  * ============================================================
  * Apps Script — Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-07-18-v10
+ * VERSION: 2026-07-18-v11
  * ============================================================
  * PEGAR TODO ESTE ARCHIVO (borrar lo anterior → pegar → Guardar)
  *
- * Luego:
- *   1) Función setupAll_ → ▶ Ejecutar → autorizar (Drive + Sheets)
- *   2) Implementar → Administrar implementaciones → lápiz
+ * Luego (IMPORTANTE — Drive):
+ *   1) Función authorizeDrive_ → ▶ Ejecutar → aceptar permiso Google Drive
+ *   2) Función setupAll_ → ▶ Ejecutar → autorizar Sheets si pide
+ *   3) Implementar → Administrar implementaciones → lápiz
  *      → Nueva versión → Implementar (misma URL /exec)
+ *
+ * Si el panel dice "no permission DriveApp": falta el paso 1.
  *
  * doPost:
  *   - Eventos YYYY (Kommo cierres)
@@ -18,7 +21,7 @@
  * setupAll_: Eventos + Metricas + P&L + Banco + Estados Archive
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-07-18-v10';
+var SCRIPT_VERSION = '2026-07-18-v11';
 var YEAR = 2026;
 var EVENTOS_SHEET = 'Eventos ' + YEAR;
 var METRICAS_SHEET = 'Metricas ' + YEAR;
@@ -514,7 +517,7 @@ function doPost(e) {
       return json_({
         ok: false,
         version: SCRIPT_VERSION,
-        error: 'values no es array (¿Apps Script v10 publicado?)',
+        error: 'values no es array (¿Apps Script v11 publicado?)',
         typeofValues: typeof values,
         rawPreview: String(raw).slice(0, 200),
       });
@@ -585,6 +588,35 @@ function doPost(e) {
 }
 
 /* ===================== SETUP (Metricas + P&L bien) ===================== */
+
+/**
+ * OBLIGATORIO UNA VEZ: authorizeDrive_ → ▶ Ejecutar → Aceptar Drive.
+ * Sin esto, saveStatementArchive falla y el panel no guarda PDFs.
+ */
+function authorizeDrive_() {
+  var folder = getArchiveFolder_();
+  var sh = ensureArchiveSheet_();
+  var msg =
+    'Drive OK — ' +
+    SCRIPT_VERSION +
+    '\n\nCarpeta: ' +
+    ARCHIVE_FOLDER_NAME +
+    '\nID: ' +
+    folder.getId() +
+    '\nURL: ' +
+    folder.getUrl() +
+    '\nPestaña: ' +
+    ARCHIVE_SHEET +
+    ' (filas: ' +
+    sh.getLastRow() +
+    ')\n\nAhora: setupAll_ (si falta) → Administrar implementaciones → Nueva versión.';
+  try {
+    SpreadsheetApp.getUi().alert(msg);
+  } catch (err) {
+    Logger.log(msg);
+  }
+  return folder.getId();
+}
 
 /**
  * EJECUTAR DESDE EL EDITOR: selecciona setupAll_ → ▶ Ejecutar
