@@ -712,13 +712,15 @@ function setupAll_() {
       '✓ ' +
       BANCO_SHEET +
       ' (estados de cuenta)\n' +
-      '✓ ' +
-      ANALISIS_SHEET +
-      ' (top proveedores / socios)\n' +
-      '✓ ' +
-      ARCHIVE_SHEET +
-      ' + carpeta Drive PDFs\n\n' +
-      'Siguiente: Administrar implementaciones → Nueva versión → Implementar';
+    '✓ ' +
+    ANALISIS_SHEET +
+    ' (top proveedores / socios)\n' +
+    '✓ ' +
+    ARCHIVE_SHEET +
+    ' + carpeta Drive PDFs\n\n' +
+    'Metricas/P&L reconstruidos (ciclo anual).\n' +
+    'Si solo quieres eso: restoreMetricasPnL_\n\n' +
+    'Siguiente: Administrar implementaciones → Nueva versión → Implementar';
   try {
     SpreadsheetApp.getUi().alert(msg);
   } catch (err) {
@@ -832,21 +834,7 @@ function setupMetricas_(ss) {
   sh.getRange('A5:L5').setFontWeight('bold');
   sh.getRange('A5:L5').setBackground('#e8f0ee');
 
-  // Totales desde bloques de abajo
-  sh.getRange('A6').setFormula('=D35'); // valor ventas anual
-  sh.getRange('B6').setFormula('=B35');
-  sh.getRange('C6').setFormula('=C35');
-  sh.getRange('D6').setFormula('=E35');
-  sh.getRange('E6').setFormula('=F35');
-  sh.getRange('F6').setFormula('=B48');
-  sh.getRange('G6').setFormula('=C48');
-  sh.getRange('H6').setFormula('=D48');
-  sh.getRange('I6').setFormula('=E48');
-  sh.getRange('J6').setFormula('=F48');
-  sh.getRange('K6').setFormula('=D6+H6');
-  sh.getRange('L6').setFormula('=IF(A6=0,"",D6/A6)');
-  sh.getRange('A6:K6').setNumberFormat('$#,##0.00');
-  sh.getRange('L6').setNumberFormat('0.0%');
+  // KPIs (fórmulas finales se fijan al final del layout → filas 38 y 54)
   sh.getRange('A6:L6').setFontWeight('bold').setFontSize(12);
 
   // ===== CICLO MENSUAL (todo junto) =====
@@ -933,20 +921,12 @@ function setupMetricas_(ss) {
   }
   sh.getRange(38, 1).setValue('Total anual');
   sh.getRange(38, 1).setFontWeight('bold');
-  // Alias fila 35 usada por KPIs = fila 38 real — ajusto KPIs a fila 38
   sh.getRange(38, 2).setFormula('=SUM(B26:B37)');
   sh.getRange(38, 3).setFormula('=SUM(C26:C37)');
   sh.getRange(38, 4).setFormula('=SUM(D26:D37)');
   sh.getRange(38, 5).setFormula('=SUM(E26:E37)');
   sh.getRange(38, 6).setFormula('=SUM(F26:F37)');
   sh.getRange('B26:E38').setNumberFormat('$#,##0.00');
-
-  // Fix KPI refs to row 38 (not 35)
-  sh.getRange('A6').setFormula('=D38');
-  sh.getRange('B6').setFormula('=B38');
-  sh.getRange('C6').setFormula('=C38');
-  sh.getRange('D6').setFormula('=E38');
-  sh.getRange('E6').setFormula('=F38');
 
   // ===== Detalle BANCO =====
   sh.getRange('A40').setValue('DETALLE BANCO');
@@ -1000,12 +980,21 @@ function setupMetricas_(ss) {
   sh.getRange(54, 6).setFormula('=SUM(F42:F53)');
   sh.getRange('B42:F54').setNumberFormat('$#,##0.00');
 
-  // KPI banco refs → fila 54
+  // KPIs anuales (arriba) → totales de detalle
+  sh.getRange('A6').setFormula('=D38');
+  sh.getRange('B6').setFormula('=B38');
+  sh.getRange('C6').setFormula('=C38');
+  sh.getRange('D6').setFormula('=E38');
+  sh.getRange('E6').setFormula('=F38');
   sh.getRange('F6').setFormula('=B54');
   sh.getRange('G6').setFormula('=C54');
   sh.getRange('H6').setFormula('=D54');
   sh.getRange('I6').setFormula('=E54');
   sh.getRange('J6').setFormula('=F54');
+  sh.getRange('K6').setFormula('=D6+H6');
+  sh.getRange('L6').setFormula('=IF(A6=0,"",D6/A6)');
+  sh.getRange('A6:K6').setNumberFormat('$#,##0.00');
+  sh.getRange('L6').setNumberFormat('0.0%');
 
   sh.getRange('A56').setValue(
     'Nota: este bloque se reconstruye solo con setupAll_ / restoreMetricasPnL_. Enviar estado de cuenta NO lo borra.'
@@ -1049,17 +1038,6 @@ function setupPnL_(ss) {
     ],
   ]);
   sh.getRange('A6:H6').setFontWeight('bold').setBackground('#e8f0ee');
-  sh.getRange('A7').setFormula('=B20');
-  sh.getRange('B7').setFormula('=C20');
-  sh.getRange('C7').setFormula('=D20');
-  sh.getRange('D7').setFormula('=E20');
-  sh.getRange('E7').setFormula('=F20');
-  sh.getRange('F7').setFormula('=G20');
-  sh.getRange('G7').setFormula('=H20');
-  sh.getRange('H7').setFormula('=I20');
-  sh.getRange('A7:C7').setNumberFormat('$#,##0.00');
-  sh.getRange('D7').setNumberFormat('0.0%');
-  sh.getRange('E7:H7').setNumberFormat('$#,##0.00');
   sh.getRange('A7:H7').setFontWeight('bold').setFontSize(12);
 
   sh.getRange('A9').setValue('P&L MENSUAL');
@@ -1113,7 +1091,6 @@ function setupPnL_(ss) {
   sh.getRange(23, 9).setFormula('=SUM(I11:I22)');
   sh.getRange('A23:I23').setBackground('#e8f0ee');
 
-  // Alias fila 20 para KPIs → usar 23
   sh.getRange('A7').setFormula('=B23');
   sh.getRange('B7').setFormula('=C23');
   sh.getRange('C7').setFormula('=D23');
@@ -1122,6 +1099,9 @@ function setupPnL_(ss) {
   sh.getRange('F7').setFormula('=G23');
   sh.getRange('G7').setFormula('=H23');
   sh.getRange('H7').setFormula('=I23');
+  sh.getRange('A7:C7').setNumberFormat('$#,##0.00');
+  sh.getRange('D7').setNumberFormat('0.0%');
+  sh.getRange('E7:H7').setNumberFormat('$#,##0.00');
 
   sh.getRange('B11:D23').setNumberFormat('$#,##0.00');
   sh.getRange('E11:E23').setNumberFormat('0.0%');
