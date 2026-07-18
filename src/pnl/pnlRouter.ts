@@ -248,7 +248,11 @@ pnlRouter.get("/api/pnl/runs", (_req, res) => {
 pnlRouter.get("/api/pnl/runs/:id", (req, res) => {
   const run = loadRuns().find((r) => r.id === req.params.id);
   if (!run) {
-    res.status(404).json({ ok: false, error: "Run no encontrado" });
+    res.status(404).json({
+      ok: false,
+      error: "Run no encontrado",
+      hint: "El deploy borró data/ local. Vuelve a subir el PDF (y autoriza Drive para que no se pierda).",
+    });
     return;
   }
   res.json({ ok: true, run: runPublic(run) });
@@ -445,7 +449,11 @@ pnlRouter.post("/api/pnl/runs/:id/send-to-sheet", async (req, res) => {
   const runs = loadRuns();
   const idx = runs.findIndex((r) => r.id === req.params.id);
   if (idx < 0) {
-    res.status(404).json({ ok: false, error: "Run no encontrado" });
+    res.status(404).json({
+      ok: false,
+      error: "Run no encontrado",
+      hint: "Sube de nuevo el PDF y luego pulsa Enviar al P&L.",
+    });
     return;
   }
   const run = runs[idx];
@@ -485,7 +493,11 @@ pnlRouter.patch("/api/pnl/runs/:runId/lines/:lineId", (req, res) => {
   const runs = loadRuns();
   const run = runs.find((r) => r.id === req.params.runId);
   if (!run) {
-    res.status(404).json({ ok: false, error: "Run no encontrado" });
+    res.status(404).json({
+      ok: false,
+      error: "Run no encontrado",
+      hint: "Sube de nuevo el PDF; el estado en pantalla ya no está en el servidor.",
+    });
     return;
   }
   const line = run.lines.find((l) => l.id === req.params.lineId);

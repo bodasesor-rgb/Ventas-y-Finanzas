@@ -4,13 +4,48 @@ let currentRun = null;
 let selectedFile = null;
 let runsCache = [];
 
+function isRunMissingError(msg) {
+  return /run no encontrado/i.test(String(msg || ""));
+}
+
+function runMissingHint() {
+  return (
+    "Ese estado ya no está en el servidor (se borró con el deploy). " +
+    "Sube de nuevo el PDF y luego cambia categoría o envía al Sheet."
+  );
+}
+
 async function api(path, opts) {
   const res = await fetch(path, opts);
   const data = await res.json();
   if (!res.ok || data.ok === false) {
-    throw new Error(data.error || res.statusText);
+    const err = data.error || res.statusText;
+    if (isRunMissingError(err)) throw new Error(runMissingHint());
+    throw new Error(data.hint ? `${err} — ${data.hint}` : err);
   }
   return data;
+}
+
+/** Si el run en pantalla ya no existe en el server, limpia la UI. */
+async function ensureCurrentRunAlive() {
+  if (!currentRun?.id) return false;
+  try {
+    const data = await api(`/api/pnl/runs/${encodeURIComponent(currentRun.id)}`);
+    if (data.run) {
+      currentRun = data.run;
+      return true;
+    }
+  } catch (e) {
+    if (isRunMissingError(e.message) || /Sube de nuevo/.test(e.message)) {
+      currentRun = null;
+      const meta = document.getElementById("currentRunMeta");
+      if (meta) meta.textContent = runMissingHint();
+      const tbody = document.querySelector("#linesTable tbody");
+      if (tbody) tbody.innerHTML = "";
+      return false;
+    }
+  }
+  return Boolean(currentRun?.id);
 }
 
 function money(n) {
@@ -586,14 +621,21 @@ function renderRun(run) {
   }
 
   async function patchLine(lineId, body) {
-    await api(`/api/pnl/runs/${run.id}/lines/${lineId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const fresh = await api(`/api/pnl/runs/${run.id}`);
-    renderRun(fresh.run);
-    refreshLibrary();
+    try {
+      await api(`/api/pnl/runs/${run.id}/lines/${lineId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const fresh = await api(`/api/pnl/runs/${run.id}`);
+      renderRun(fresh.run);
+      refreshLibrary();
+    } catch (e) {
+      if (/Sube de nuevo|run no encontrado/i.test(e.message)) {
+        await ensureCurrentRunAlive();
+      }
+      throw e;
+    }
   }
 
   tbody.querySelectorAll("select[data-field='category']").forEach((sel) => {
@@ -847,13 +889,17 @@ async function init() {
     sendBtn.onclick = async () => {
       if (!currentRun?.id) {
         const el = document.getElementById("sendToSheetStatus");
-        if (el) el.textContent = "Abre un estado de cuenta primero.";
+        if (el) el.textContent = "Abre un estado de cuenta primero (o sube el PDF).";
         return;
       }
       sendBtn.disabled = true;
       const el = document.getElementById("sendToSheetStatus");
       if (el) el.textContent = "Enviando al Sheet…";
       try {
+        const alive = await ensureCurrentRunAlive();
+        if (!alive || !currentRun?.id) {
+          throw new Error(runMissingHint());
+        }
         const data = await api(
           `/api/pnl/runs/${encodeURIComponent(currentRun.id)}/send-to-sheet`,
           { method: "POST" }
