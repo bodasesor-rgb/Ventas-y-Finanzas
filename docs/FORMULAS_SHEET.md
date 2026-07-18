@@ -1,26 +1,36 @@
-# Enlace completo del Sheet (Eventos → Metricas → P&L)
+# Enlace Sheet (Eventos · Banco · P&L · Metricas)
 
-## Cómo aplicar (recomendado)
+## Cómo aplicar (v15)
 
-1. Pega el Apps Script actual (`apps-script/Codigo.gs`, VERSION `2026-07-18-v14`).
+1. Pega `apps-script/Codigo.gs` (VERSION `2026-07-18-v15`).
 2. Guarda.
-3. En el editor: **`restoreMetricasPnL_`** (si se borró el ciclo) o **`setupAll_`** → ▶ Ejecutar.
-4. **Implementar → Administrar implementaciones → Editar → Nueva versión → Implementar** (misma URL `/exec`).
-5. Autoriza **Drive** si pide (`authorizeDrive_`).
-6. Confirma en `/exec` que `version` sea `2026-07-18-v14`.
+3. **`authorizeDrive_`** → ▶ Ejecutar (si usas archive PDFs).
+4. **`restorePnLBanco_`** → ▶ Ejecutar (solo P&L de estados de cuenta; **no toca Metricas**).
+5. Implementar → Nueva versión → misma URL `/exec`.
+6. Confirma en `/exec` que `version` sea `2026-07-18-v15`.
 
-**Importante (v14):** enviar un estado de cuenta al Sheet **ya no borra** Metricas/P&L.
+**Regla v15**
 
-Eso hace:
+| Acción | Qué escribe / toca |
+|--------|---------------------|
+| Enviar al P&L (`/pnl/`) | Solo fila en **Banco YYYY** (1 mes) |
+| Fórmulas P&L | **P&L YYYY** lee Banco por mes |
+| Metricas | **Nunca** la toca el bot |
+| Kommo cierres | Solo **Eventos YYYY** |
 
-| Qué | Dónde |
-|-----|--------|
-| Fórmulas Por pagar / Ganancia / Margen | Eventos 2026 cols M/N/O |
-| Tabla mensual viva (SUMIF) | Eventos 2026 `W3:AB16` |
-| Mirror mensual | Metricas 2026 |
-| Ingresos / Costo / Ganancia / Margen | P&L 2026 |
+No ejecutes `setupMetricas_` ni la vieja `restoreMetricasPnL_` si quieres conservar tu dashboard restaurado. En v15, `restoreMetricasPnL_` solo regenera el P&L banco.
 
-El bot **sigue escribiendo solo** en Eventos YYYY. Metricas y P&L son fórmulas.
+---
+
+## Flujo P&L banco
+
+```
+PDF Banamex → /pnl/ parse → Enviar al P&L
+       ↓
+  Banco 2026 (1 fila / mes: ingresos, gastos, categorías, socios, proveedores)
+       ↓  fórmulas SUMIF
+  P&L 2026 (columnas Ene…Dic + Total)
+```
 
 ---
 
@@ -32,10 +42,6 @@ El bot **sigue escribiendo solo** en Eventos YYYY. Metricas y P&L son fórmulas.
 | K Costo, L Pagado, S IVA | manual | tú |
 | M Por pagar, N Ganancia, O Margen | fórmula | Sheet / setup |
 
----
-
-## Fórmulas (si las pegas a mano)
-
 ### Por fila
 ```
 M2 =IF(J2="","",J2-IF(L2="",0,L2))
@@ -43,7 +49,7 @@ N2 =IF(J2="","",J2-IF(K2="",0,K2))
 O2 =IF(OR(J2="",J2=0),"",N2/J2)
 ```
 
-### Tabla mensual (W4 con mes=1)
+### Tabla mensual Eventos (W4 con mes=1)
 ```
 X4  =SUMIF($Q:$Q,W4,$L:$L)
 Y4  =SUMIF($Q:$Q,W4,$M:$M)
@@ -52,12 +58,7 @@ AA4 =SUMIF($Q:$Q,W4,$N:$N)
 AB4 =COUNTIFS($Q:$Q,W4,$A:$A,"<>")
 ```
 
-### Metricas (ejemplo mes 1)
+### P&L banco (ejemplo Ingresos, mes 1 = col B fila 6)
 ```
-B4 ='Eventos 2026'!X4
-```
-
-### P&L costo mes 1
-```
-C4 =SUMIF('Eventos 2026'!$Q:$Q,A4,'Eventos 2026'!$K:$K)
+B6 =IFERROR(SUMIF('Banco 2026'!$A:$A,1,'Banco 2026'!$D:$D),0)
 ```
