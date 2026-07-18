@@ -716,12 +716,12 @@ function setupAll_() {
     ' (estados de cuenta, 1 fila/mes)\n' +
     '✓ ' +
     PL_SHEET +
-    ' (P&L banco por mes — fórmulas)\n' +
+    ' (resumen Ingreso/Egreso/Gastos por mes)\n' +
     '✓ ' +
     ARCHIVE_SHEET +
     ' + Drive\n\n' +
     'Metricas NO se tocó.\n' +
-    'P&L banco: restorePnLBanco_\n\n' +
+    'P&L: restorePnLBanco_\n\n' +
     'Siguiente: Nueva versión → Implementar';
   try {
     SpreadsheetApp.getUi().alert(msg);
@@ -1242,13 +1242,13 @@ function restorePnLBanco_() {
   ensureBancoSheet_(ss);
   setupPnL_(ss);
   var msg =
-    'P&L banco regenerado — ' +
+    'P&L resumen regenerado — ' +
     SCRIPT_VERSION +
     '\n\n' +
     PL_SHEET +
-    ' lee ' +
+    ': Ingreso → Egreso → Gastos → Neto (datos web / ' +
     BANCO_SHEET +
-    ' por mes.\nMetricas NO se modificó.';
+    ').\nMetricas NO se modificó.';
   try {
     SpreadsheetApp.getUi().alert(msg);
   } catch (err) {
