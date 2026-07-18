@@ -53,7 +53,7 @@
 
     <section class="panel wide">
       <h2>3. Estados guardados por mes</h2>
-      <p class="muted">Un PDF por mes. Se guarda también en Google Drive (carpeta <code>Bodasesor Estados de Cuenta</code>) para que no se pierda al hacer deploy. Si vuelves a subir el mismo mes, se reemplaza.</p>
+      <p class="muted">Un PDF por mes. Copia durable en Drive (carpeta <code>Bodasesor Estados de Cuenta</code>). Si Drive falla por permiso: Apps Script → <code>authorizeDrive_</code> → Ejecutar → Nueva versión del /exec. Luego vuelve a subir el PDF.</p>
       <button type="button" id="restoreDriveBtn" class="secondary">Restaurar desde Drive</button>
       <p id="restoreDriveStatus" class="muted"></p>
       <div id="library" class="library"></div>
