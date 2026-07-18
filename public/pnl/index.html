@@ -9,7 +9,7 @@
 </head>
 <body>
   <div class="version-banner" id="versionBanner">
-    UI v2026-07-18a — 1 PDF por mes · Enviar al P&L (Sheet)
+    UI v2026-07-18b — PDFs en Drive (sobreviven deploy) · Enviar al P&L
   </div>
 
   <header class="top">
@@ -19,7 +19,7 @@
       <p class="sub">Netlify/OpenAI/Ebanx = etiqueta (regla), categoría = Apps. Los totales deben cuadrar con Depósitos y Otros cargos del estado.</p>
     </div>
     <div class="top-links">
-      <span class="version-pill">v2026-07-18a</span>
+      <span class="version-pill">v2026-07-18b</span>
       <a class="link" href="/health">API health</a>
     </div>
   </header>
@@ -53,7 +53,9 @@
 
     <section class="panel wide">
       <h2>3. Estados guardados por mes</h2>
-      <p class="muted">Un PDF por mes: <code>AAAA-MM_estado-cuenta.pdf</code>. Si vuelves a subir el mismo mes, se reemplaza (no se duplica).</p>
+      <p class="muted">Un PDF por mes. Se guarda también en Google Drive (carpeta <code>Bodasesor Estados de Cuenta</code>) para que no se pierda al hacer deploy. Si vuelves a subir el mismo mes, se reemplaza.</p>
+      <button type="button" id="restoreDriveBtn" class="secondary">Restaurar desde Drive</button>
+      <p id="restoreDriveStatus" class="muted"></p>
       <div id="library" class="library"></div>
       <div id="pdfViewer" class="pdf-viewer" hidden>
         <div class="pdf-viewer-bar">
@@ -132,6 +134,6 @@
     </section>
   </main>
 
-  <script src="/pnl/app.js?v=20260718a"></script>
+  <script src="/pnl/app.js?v=20260718b"></script>
 </body>
 </html>

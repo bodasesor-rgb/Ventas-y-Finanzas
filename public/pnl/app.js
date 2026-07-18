@@ -796,6 +796,35 @@ async function init() {
     }
   }
 
+  const restoreBtn = document.getElementById("restoreDriveBtn");
+  if (restoreBtn) {
+    restoreBtn.onclick = async () => {
+      const el = document.getElementById("restoreDriveStatus");
+      restoreBtn.disabled = true;
+      if (el) el.textContent = "Restaurando desde Google Drive…";
+      try {
+        const data = await api("/api/pnl/restore-from-drive", {
+          method: "POST",
+        });
+        if (el) {
+          el.textContent = `OK: ${
+            (data.restored || []).length
+          } restaurados · ${(data.skipped || []).length} ya estaban · ${
+            (data.errors || []).length
+          } errores`;
+        }
+        await refreshLibrary();
+        const runsRes = await api("/api/pnl/runs");
+        runsCache = runsRes.runs || [];
+        if (runsCache[0]) renderRun(runsCache[0]);
+      } catch (e) {
+        if (el) el.textContent = "Error: " + e.message;
+      } finally {
+        restoreBtn.disabled = false;
+      }
+    };
+  }
+
   const sendBtn = document.getElementById("sendToSheetBtn");
   if (sendBtn) {
     sendBtn.onclick = async () => {

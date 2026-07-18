@@ -11,10 +11,7 @@ import {
   summarizeTotals,
 } from "./parseStatement";
 import { detectPeriodFromText } from "./period";
-import {
-  resolveStatementFile,
-  saveStatementPdf,
-} from "./statementFiles";
+import { saveStatementPdf } from "./statementFiles";
 import {
   autoCreateCategoriesFromLines,
   pruneMerchantCategories,
@@ -24,6 +21,12 @@ import {
   extractStatementOfficialTotals,
   reconcileTotals,
 } from "./statementSummary";
+import {
+  archiveStatementToDrive,
+  resolvePdfBytes,
+  restoreArchivesFromDrive,
+  shouldAutoRestoreOnce,
+} from "./driveArchive";
 import { sendRunToBancoSheet } from "./sendToSheet";
 import {
   isIncomeCategory,
@@ -185,8 +188,22 @@ pnlRouter.put("/api/pnl/rules", (req, res) => {
   res.json({ ok: true, rules: cleaned });
 });
 
-/** Lista de PDFs agrupada por mes */
-pnlRouter.get("/api/pnl/library", (_req, res) => {
+/** Lista de PDFs agrupada por mes (restaura desde Drive si el deploy borró data/) */
+pnlRouter.get("/api/pnl/library", async (_req, res) => {
+  let restore:
+    | { restored: string[]; skipped: string[]; errors: string[] }
+    | undefined;
+  try {
+    if (shouldAutoRestoreOnce()) {
+      restore = await restoreArchivesFromDrive();
+      if (restore.restored.length) {
+        console.log("[pnl] restaurados desde Drive", restore.restored);
+      }
+    }
+  } catch (err) {
+    console.warn("[pnl] restore Drive", err);
+  }
+
   const runs = loadRuns().map(runPublic);
   const byMonth: Record<string, typeof runs> = {};
   for (const run of runs) {
@@ -197,12 +214,31 @@ pnlRouter.get("/api/pnl/library", (_req, res) => {
   const months = Object.keys(byMonth).sort().reverse();
   res.json({
     ok: true,
+    restore,
     months: months.map((key) => ({
       periodKey: key,
       periodLabel: byMonth[key][0]?.periodLabel || key,
       statements: byMonth[key],
     })),
   });
+});
+
+/** Fuerza restauración desde Google Drive */
+pnlRouter.post("/api/pnl/restore-from-drive", async (_req, res) => {
+  try {
+    const result = await restoreArchivesFromDrive();
+    res.json({
+      ok: true,
+      ...result,
+      runs: loadRuns().map(runPublic),
+    });
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+      hint: "Publica Apps Script v8 (Drive) y autoriza acceso a Drive.",
+    });
+  }
 });
 
 pnlRouter.get("/api/pnl/runs", (_req, res) => {
@@ -218,24 +254,35 @@ pnlRouter.get("/api/pnl/runs/:id", (req, res) => {
   res.json({ ok: true, run: runPublic(run) });
 });
 
-/** Ver / descargar el PDF guardado */
-pnlRouter.get("/api/pnl/runs/:id/pdf", (req, res) => {
+/** Ver / descargar el PDF (disco o Drive si se borró en el deploy) */
+pnlRouter.get("/api/pnl/runs/:id/pdf", async (req, res) => {
   const run = loadRuns().find((r) => r.id === req.params.id);
-  if (!run?.storedRelativePath) {
-    res.status(404).json({ ok: false, error: "PDF no encontrado" });
+  if (!run) {
+    res.status(404).json({ ok: false, error: "Run no encontrado" });
     return;
   }
-  const full = resolveStatementFile(run.storedRelativePath);
-  if (!full) {
-    res.status(404).json({ ok: false, error: "Archivo no está en disco" });
-    return;
+  try {
+    const pdf = await resolvePdfBytes(run);
+    if (!pdf) {
+      res.status(404).json({
+        ok: false,
+        error: "PDF no está en disco ni en Drive",
+        hint: "Vuelve a subir el estado o publica Apps Script v8.",
+      });
+      return;
+    }
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="${pdf.filename}"`
+    );
+    res.send(pdf.bytes);
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
-  res.setHeader("Content-Type", "application/pdf");
-  res.setHeader(
-    "Content-Disposition",
-    `inline; filename="${run.storedName || "estado-cuenta.pdf"}"`
-  );
-  fs.createReadStream(full).pipe(res);
 });
 
 pnlRouter.post(
@@ -285,6 +332,37 @@ pnlRouter.post(
         sentToSheetAt: prev?.sentToSheetAt,
         sentToSheet: prev?.sentToSheet,
       };
+
+      // Memoria durable: copia a Google Drive (no bloquea si falla)
+      let archive:
+        | { ok: true; pdfUrl?: string; version?: string }
+        | { ok: false; error: string } = {
+        ok: false,
+        error: "no intentado",
+      };
+      try {
+        const archived = await archiveStatementToDrive(
+          run,
+          saved.storedPath
+        );
+        run.drivePdfFileId = archived.pdfFileId;
+        run.driveRunFileId = archived.runFileId;
+        run.drivePdfUrl = archived.pdfUrl;
+        run.archivedAt = new Date().toISOString();
+        archive = {
+          ok: true,
+          pdfUrl: archived.pdfUrl,
+          version: archived.version,
+        };
+      } catch (archErr) {
+        archive = {
+          ok: false,
+          error:
+            archErr instanceof Error ? archErr.message : String(archErr),
+        };
+        console.warn("[pnl] archive Drive FAIL", archive.error);
+      }
+
       upsertRunByPeriod(run);
 
       res.json({
@@ -301,6 +379,7 @@ pnlRouter.post(
           rulesCreated,
           totals,
           reconciliation,
+          archive,
         },
       });
     } catch (err) {

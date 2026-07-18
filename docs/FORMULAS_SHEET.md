@@ -2,11 +2,12 @@
 
 ## Cómo aplicar (recomendado)
 
-1. Pega el Apps Script actual (`apps-script/Codigo.gs`, VERSION `2026-07-17-v5`).
+1. Pega el Apps Script actual (`apps-script/Codigo.gs`, VERSION `2026-07-18-v8`).
 2. Guarda.
 3. En el editor: selecciona la función **`setupAll_`** → ▶ Ejecutar → autoriza (solo 1ª vez).
 4. **Implementar → Administrar implementaciones → Editar → Nueva versión → Implementar** (misma URL `/exec`).
-5. Confirma en un sync que `version` sea `2026-07-17-v5`.
+5. La primera vez con v8 Google pedirá permiso de **Drive** (PDFs persistentes).
+6. Confirma en un sync / envío que `version` sea `2026-07-18-v8`.
 
 Eso hace:
 

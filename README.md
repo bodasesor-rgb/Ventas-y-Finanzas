@@ -42,5 +42,6 @@ Regla de filas v6:
 ## P&L PDF (banco)
 
 - UI: `/pnl/` — 1 PDF por mes (reemplaza si subes de nuevo el mismo mes)
+- **Memoria en Google Drive**: al subir, copia PDF + JSON del run a la carpeta `Bodasesor Estados de Cuenta`. Tras un deploy, la biblioteca se restaura sola (o con **Restaurar desde Drive**).
 - Botón **Enviar al P&L (Sheet)** → pestaña `Banco YYYY` + cols F/G en `P&L YYYY`
-- Requiere Apps Script **v7** (`upsertBanco`) republicado en la misma URL `/exec`
+- Requiere Apps Script **v8** (`upsertBanco` + archive Drive) republicado en la misma URL `/exec` (autoriza Drive la 1ª vez)

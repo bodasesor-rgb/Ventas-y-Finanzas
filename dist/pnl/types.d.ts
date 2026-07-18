@@ -47,6 +47,11 @@ export interface StatementRun {
     storedName?: string;
     /** Ruta relativa bajo data/statements/ */
     storedRelativePath?: string;
+    /** Copia durable en Google Drive (sobrevive deploys) */
+    drivePdfFileId?: string;
+    driveRunFileId?: string;
+    drivePdfUrl?: string;
+    archivedAt?: string;
     textPreview: string;
     /** Texto completo (hasta ~300k) para reparse / debug Banamex */
     textFull?: string;

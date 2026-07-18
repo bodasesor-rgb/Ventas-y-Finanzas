@@ -1,24 +1,25 @@
 /**
  * ============================================================
  * Apps Script — Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-07-18-v7
+ * VERSION: 2026-07-18-v8
  * ============================================================
- * doPost  → Eventos YYYY (Kommo) | action=upsertBanco → Banco YYYY
+ * doPost  → Eventos | upsertBanco | saveStatementArchive |
+ *           listStatementArchive | getStatementArchive
  * doGet   → { version }
  * setupAll_ → fórmulas Eventos + Metricas + P&L
  *
- * REGLA Eventos:
- *  - Deal ID en col T → UPDATE; si no → última fila Cliente + 1
- * Banco YYYY:
- *  - Una fila por mes (periodKey); botón "Enviar al P&L" del panel
+ * Memoria de PDFs: carpeta Drive "Bodasesor Estados de Cuenta"
+ * + índice en pestaña "Estados Archive" (sobrevive a deploys).
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-07-18-v7';
+var SCRIPT_VERSION = '2026-07-18-v8';
 var DEFAULT_SHEET_NAME = 'Eventos 2026';
 var DEAL_ID_COL = 20; // T
 var CLIENTE_COL = 1; // A
 var METRICAS_SHEET = 'Metricas 2026';
 var PL_SHEET = 'P&L 2026';
+var ARCHIVE_FOLDER_NAME = 'Bodasesor Estados de Cuenta';
+var ARCHIVE_SHEET = 'Estados Archive';
 /** No mirar más abajo de esta fila al buscar el último cliente (evita basura) */
 var MAX_CLIENT_SCAN = 500;
 
@@ -246,6 +247,219 @@ function linkPnLBanco_(ss, year) {
   sh.getRange('F16:G16').setNumberFormat('$#,##0.00');
 }
 
+function getArchiveFolder_() {
+  var it = DriveApp.getFoldersByName(ARCHIVE_FOLDER_NAME);
+  if (it.hasNext()) return it.next();
+  return DriveApp.createFolder(ARCHIVE_FOLDER_NAME);
+}
+
+function ensureArchiveSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(ARCHIVE_SHEET);
+  var headers = [
+    'Periodo',
+    'Label',
+    'PdfFileId',
+    'RunFileId',
+    'PdfUrl',
+    'StoredName',
+    'Actualizado',
+    'RunId',
+  ];
+  if (!sh) {
+    sh = ss.insertSheet(ARCHIVE_SHEET);
+    sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sh.setFrozenRows(1);
+  } else if (String(sh.getRange(1, 1).getValue()).trim() !== 'Periodo') {
+    sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+  }
+  return sh;
+}
+
+function removeFilesNamedInFolder_(folder, name) {
+  var files = folder.getFilesByName(name);
+  while (files.hasNext()) {
+    try {
+      files.next().setTrashed(true);
+    } catch (err) {
+      /* ignore */
+    }
+  }
+}
+
+function findArchiveRow_(sh, periodKey) {
+  var lastRow = Math.max(sh.getLastRow(), 1);
+  if (lastRow < 2) return -1;
+  var keys = sh.getRange(2, 1, lastRow, 1).getValues();
+  for (var i = 0; i < keys.length; i++) {
+    if (String(keys[i][0]).trim() === periodKey) return i + 2;
+  }
+  return -1;
+}
+
+/** Guarda PDF + JSON del run en Drive (memoria entre deploys). */
+function saveStatementArchive_(data) {
+  var periodKey = String(data.periodKey || '').trim();
+  if (!/^\d{4}-\d{2}$/.test(periodKey)) {
+    return json_({
+      ok: false,
+      version: SCRIPT_VERSION,
+      error: 'saveStatementArchive: periodKey inválido',
+    });
+  }
+  if (!data.pdfBase64) {
+    return json_({
+      ok: false,
+      version: SCRIPT_VERSION,
+      error: 'saveStatementArchive: falta pdfBase64',
+    });
+  }
+
+  var storedName =
+    String(data.storedName || periodKey + '_estado-cuenta.pdf').trim();
+  var pdfName = periodKey + '_estado-cuenta.pdf';
+  var jsonName = periodKey + '_run.json';
+  var folder = getArchiveFolder_();
+
+  removeFilesNamedInFolder_(folder, pdfName);
+  removeFilesNamedInFolder_(folder, jsonName);
+
+  var pdfBytes = Utilities.base64Decode(data.pdfBase64);
+  var pdfFile = folder.createFile(
+    Utilities.newBlob(pdfBytes, 'application/pdf', pdfName)
+  );
+
+  var runPayload =
+    typeof data.runJson === 'string'
+      ? data.runJson
+      : JSON.stringify(data.runJson || {});
+  var runFile = folder.createFile(
+    Utilities.newBlob(runPayload, 'application/json', jsonName)
+  );
+
+  var sh = ensureArchiveSheet_();
+  var rowIndex = findArchiveRow_(sh, periodKey);
+  var rowVals = [
+    periodKey,
+    String(data.periodLabel || periodKey),
+    pdfFile.getId(),
+    runFile.getId(),
+    pdfFile.getUrl(),
+    storedName,
+    new Date(),
+    String(data.runId || ''),
+  ];
+  var action;
+  if (rowIndex === -1) {
+    rowIndex = Math.max(sh.getLastRow() + 1, 2);
+    action = 'appended';
+  } else {
+    action = 'updated';
+  }
+  sh.getRange(rowIndex, 1, 1, rowVals.length).setValues([rowVals]);
+
+  return json_({
+    ok: true,
+    version: SCRIPT_VERSION,
+    action: action,
+    periodKey: periodKey,
+    pdfFileId: pdfFile.getId(),
+    runFileId: runFile.getId(),
+    pdfUrl: pdfFile.getUrl(),
+    sheetName: ARCHIVE_SHEET,
+    row: rowIndex,
+  });
+}
+
+function listStatementArchive_() {
+  var sh = ensureArchiveSheet_();
+  var lastRow = Math.max(sh.getLastRow(), 1);
+  var items = [];
+  if (lastRow >= 2) {
+    var values = sh.getRange(2, 1, lastRow, 8).getValues();
+    for (var i = 0; i < values.length; i++) {
+      var periodKey = String(values[i][0] || '').trim();
+      if (!periodKey) continue;
+      items.push({
+        periodKey: periodKey,
+        periodLabel: String(values[i][1] || periodKey),
+        pdfFileId: String(values[i][2] || ''),
+        runFileId: String(values[i][3] || ''),
+        pdfUrl: String(values[i][4] || ''),
+        storedName: String(values[i][5] || ''),
+        updatedAt: values[i][6] ? String(values[i][6]) : '',
+        runId: String(values[i][7] || ''),
+      });
+    }
+  }
+  return json_({
+    ok: true,
+    version: SCRIPT_VERSION,
+    action: 'listed',
+    count: items.length,
+    items: items,
+  });
+}
+
+function getStatementArchive_(data) {
+  var periodKey = String(data.periodKey || '').trim();
+  if (!periodKey) {
+    return json_({
+      ok: false,
+      version: SCRIPT_VERSION,
+      error: 'getStatementArchive: falta periodKey',
+    });
+  }
+  var sh = ensureArchiveSheet_();
+  var rowIndex = findArchiveRow_(sh, periodKey);
+  if (rowIndex === -1) {
+    return json_({
+      ok: false,
+      version: SCRIPT_VERSION,
+      error: 'No hay archivo archivado para ' + periodKey,
+    });
+  }
+  var row = sh.getRange(rowIndex, 1, 1, 8).getValues()[0];
+  var pdfFileId = String(row[2] || '');
+  var runFileId = String(row[3] || '');
+  if (!pdfFileId || !runFileId) {
+    return json_({
+      ok: false,
+      version: SCRIPT_VERSION,
+      error: 'Archivo incompleto en índice para ' + periodKey,
+    });
+  }
+
+  var pdfFile = DriveApp.getFileById(pdfFileId);
+  var runFile = DriveApp.getFileById(runFileId);
+  var pdfBase64 = Utilities.base64Encode(pdfFile.getBlob().getBytes());
+  var runText = runFile.getBlob().getDataAsString('UTF-8');
+  var runObj = null;
+  try {
+    runObj = JSON.parse(runText);
+  } catch (err) {
+    return json_({
+      ok: false,
+      version: SCRIPT_VERSION,
+      error: 'JSON del run corrupto: ' + String(err),
+    });
+  }
+
+  return json_({
+    ok: true,
+    version: SCRIPT_VERSION,
+    action: 'fetched',
+    periodKey: periodKey,
+    periodLabel: String(row[1] || periodKey),
+    storedName: String(row[5] || periodKey + '_estado-cuenta.pdf'),
+    pdfFileId: pdfFileId,
+    runFileId: runFileId,
+    pdfUrl: String(row[4] || pdfFile.getUrl()),
+    pdfBase64: pdfBase64,
+    run: runObj,
+  });
+}
+
 function doPost(e) {
   try {
     var raw = e && e.postData && e.postData.contents ? e.postData.contents : '';
@@ -262,13 +476,22 @@ function doPost(e) {
     if (data && data.action === 'upsertBanco') {
       return upsertBanco_(data);
     }
+    if (data && data.action === 'saveStatementArchive') {
+      return saveStatementArchive_(data);
+    }
+    if (data && data.action === 'listStatementArchive') {
+      return listStatementArchive_();
+    }
+    if (data && data.action === 'getStatementArchive') {
+      return getStatementArchive_(data);
+    }
 
     var values = data.values;
     if (!values || !Array.isArray(values)) {
       return json_({
         ok: false,
         version: SCRIPT_VERSION,
-        error: 'values no es array (¿falta republicar Apps Script v7?)',
+        error: 'values no es array (¿falta republicar Apps Script v8?)',
         typeofValues: typeof values,
         rawPreview: String(raw).slice(0, 200),
       });

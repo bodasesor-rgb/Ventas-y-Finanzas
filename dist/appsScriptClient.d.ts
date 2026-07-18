@@ -7,6 +7,17 @@ export interface AppsScriptWriteResult {
     sheetName?: string;
     error?: string;
     raw?: string;
+    /** Archive / Drive */
+    pdfFileId?: string;
+    runFileId?: string;
+    pdfUrl?: string;
+    periodKey?: string;
+    items?: unknown[];
+    count?: number;
+    pdfBase64?: string;
+    run?: unknown;
+    storedName?: string;
+    periodLabel?: string;
 }
 export declare function getAppsScriptUrl(): string;
 /**
