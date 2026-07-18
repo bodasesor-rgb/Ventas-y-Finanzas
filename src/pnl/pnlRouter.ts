@@ -27,7 +27,9 @@ import {
   restoreArchivesFromDrive,
   shouldAutoRestoreOnce,
 } from "./driveArchive";
-import { sendRunToBancoSheet } from "./sendToSheet";
+import { applyCounterpartyCategories } from "./counterparties";
+import { buildYearAnalysis } from "./providerAnalysis";
+import { sendRunToBancoSheet, sendYearAnalysisToSheet } from "./sendToSheet";
 import {
   isIncomeCategory,
   loadCategories,
@@ -303,7 +305,9 @@ pnlRouter.post(
       pruneMerchantCategories();
       const rules = loadRules();
       const { text, lines: parsed } = await parsePdfToLines(buffer, rules);
-      const { lines, rulesCreated } = autoCreateCategoriesFromLines(parsed);
+      const { lines: autoLines, rulesCreated } =
+        autoCreateCategoriesFromLines(parsed);
+      const lines = applyCounterpartyCategories(autoLines);
       const summaryByCategory = summarizeByCategory(lines);
       const totals = summarizeTotals(lines);
       const oficial = extractStatementOfficialTotals(text);
@@ -415,7 +419,9 @@ pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
   pruneMerchantCategories();
   const rules = loadRules();
   const parsed = extractLinesFromText(text, rules);
-  const { lines, rulesCreated } = autoCreateCategoriesFromLines(parsed);
+  const { lines: autoLines, rulesCreated } =
+    autoCreateCategoriesFromLines(parsed);
+  const lines = applyCounterpartyCategories(autoLines);
   const period = detectPeriodFromText(text);
   run.lines = lines;
   run.summaryByCategory = summarizeByCategory(lines);
@@ -469,11 +475,27 @@ pnlRouter.post("/api/pnl/runs/:id/send-to-sheet", async (req, res) => {
     };
     runs[idx] = run;
     saveRuns(runs);
+
+    let analysisSheet: { sheetName: string; version?: string } | undefined;
+    try {
+      const year = Number(String(run.periodKey || "").slice(0, 4)) || 2026;
+      const a = await sendYearAnalysisToSheet(year);
+      analysisSheet = { sheetName: a.sheetName, version: a.version };
+    } catch (aErr) {
+      console.warn(
+        "[pnl] analisis Sheet",
+        aErr instanceof Error ? aErr.message : aErr
+      );
+    }
+
     res.json({
       ok: true,
-      message: `Enviado a ${result.sheetName} (fila ${result.row}, ${result.action}).`,
+      message: `Enviado a ${result.sheetName} (fila ${result.row}, ${result.action})${
+        analysisSheet ? ` · ${analysisSheet.sheetName} actualizado` : ""
+      }.`,
       run: runPublic(run),
       sheet: result,
+      analysisSheet,
     });
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
@@ -484,7 +506,67 @@ pnlRouter.post("/api/pnl/runs/:id/send-to-sheet", async (req, res) => {
       ok: false,
       error,
       hint:
-        "Si dice que falta action upsertBanco, pega Codigo.gs v10 en Apps Script y publica Nueva versión.",
+        "Si falta upsertBanco/upsertAnalisis, pega Codigo.gs v12 en Apps Script y publica Nueva versión.",
+    });
+  }
+});
+
+function yearsFromRuns(): number[] {
+  const ys = new Set<number>();
+  for (const r of loadRuns()) {
+    const y = Number(String(r.periodKey || "").slice(0, 4));
+    if (y >= 2000 && y <= 2100) ys.add(y);
+  }
+  return Array.from(ys).sort((a, b) => a - b);
+}
+
+/** Análisis anual: top proveedores, socios, mensual */
+pnlRouter.get("/api/pnl/analysis", (req, res) => {
+  const runs = loadRuns();
+  const years = yearsFromRuns();
+  const year = Number(req.query.year) || years[years.length - 1] || 2026;
+  const analysis = buildYearAnalysis(runs, year);
+  res.json({
+    ok: true,
+    years,
+    analysis,
+    runs: runs.map((r) => ({
+      id: r.id,
+      periodKey: r.periodKey,
+      periodLabel: r.periodLabel,
+      lines: r.lines?.length || 0,
+      sentToSheetAt: r.sentToSheetAt,
+      archivedAt: r.archivedAt,
+    })),
+  });
+});
+
+pnlRouter.post("/api/pnl/analysis/send-to-sheet", async (req, res) => {
+  try {
+    const years =
+      req.body?.year != null
+        ? [Number(req.body.year)]
+        : yearsFromRuns().length
+          ? yearsFromRuns()
+          : [2026];
+    const results = [];
+    for (const year of years) {
+      results.push(await sendYearAnalysisToSheet(year));
+    }
+    const last = results[results.length - 1];
+    res.json({
+      ok: true,
+      message: `Análisis enviado: ${results.map((r) => r.sheetName).join(", ")}`,
+      sheetName: last?.sheetName,
+      version: last?.version,
+      analysis: last?.analysis,
+      sheets: results.map((r) => r.sheetName),
+    });
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+      hint: "Pega Codigo.gs v12 (upsertAnalisis) y publica Nueva versión.",
     });
   }
 });

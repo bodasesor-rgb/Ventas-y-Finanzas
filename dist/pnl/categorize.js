@@ -34,7 +34,8 @@ function categorizeLine(description, amount, direction, rules) {
                 category: rule.category,
                 matchedRuleId: rule.id,
                 needsReview: rule.category === "transferencia_persona" ||
-                    rule.category === "revisar",
+                    rule.category === "revisar" ||
+                    rule.category === "proveedor",
             };
         }
     }

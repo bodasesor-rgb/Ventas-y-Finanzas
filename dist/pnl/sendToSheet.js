@@ -1,7 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.sendRunToBancoSheet = sendRunToBancoSheet;
+exports.sendYearAnalysisToSheet = sendYearAnalysisToSheet;
 const appsScriptClient_1 = require("../appsScriptClient");
+const providerAnalysis_1 = require("./providerAnalysis");
 const store_1 = require("./store");
 const CATEGORY_COLS = [
     "ads",
@@ -11,6 +13,8 @@ const CATEGORY_COLS = [
     "servicios",
     "pago",
     "transferencia_persona",
+    "socio",
+    "proveedor",
     "evento",
     "revisar",
     "otro",
@@ -66,6 +70,20 @@ async function sendRunToBancoSheet(run) {
         row: result.row,
         action: result.action,
         version: result.version,
+    };
+}
+/** Escribe pestaña Análisis YYYY con ranking proveedores + mensual/anual. */
+async function sendYearAnalysisToSheet(year = 2026) {
+    const analysis = (0, providerAnalysis_1.buildYearAnalysis)((0, store_1.loadRuns)(), year);
+    const result = await (0, appsScriptClient_1.postToAppsScript)({
+        action: "upsertAnalisis",
+        year,
+        analysis,
+    });
+    return {
+        sheetName: result.sheetName || `Analisis ${year}`,
+        version: result.version,
+        analysis,
     };
 }
 //# sourceMappingURL=sendToSheet.js.map

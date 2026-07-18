@@ -9,17 +9,17 @@
 </head>
 <body>
   <div class="version-banner" id="versionBanner">
-    UI v2026-07-18d — Si dice “run no encontrado”: vuelve a subir el PDF
+    UI v2026-07-18e — Socios vs proveedores · Top gasto · Analisis Sheet
   </div>
 
   <header class="top">
     <div>
       <p class="brand">Bodasesor / Capybara</p>
       <h1>P&L desde estados de cuenta</h1>
-      <p class="sub">Netlify/OpenAI/Ebanx = etiqueta (regla), categoría = Apps. Los totales deben cuadrar con Depósitos y Otros cargos del estado.</p>
+      <p class="sub">Traspasos: Luis Alejandro Sanchez Campbell y Alejandro Zorrilla Elorza = socios; el resto = proveedores. Top de gasto para negociar.</p>
     </div>
     <div class="top-links">
-      <span class="version-pill">v2026-07-18d</span>
+      <span class="version-pill">v2026-07-18e</span>
       <a class="link" href="/health">API health</a>
     </div>
   </header>
@@ -67,7 +67,18 @@
     </section>
 
     <section class="panel wide">
-      <h2>4. Pagos frecuentes (reglas)</h2>
+      <h2>4. Análisis anual / proveedores</h2>
+      <p class="muted">Ranking de a quién le pagas más (concentración de gasto). Socios separados. Al enviar al Sheet también llena la pestaña <code>Analisis 2026</code>.</p>
+      <div class="send-sheet-bar">
+        <button type="button" id="refreshAnalysisBtn" class="secondary">Actualizar análisis</button>
+        <button type="button" id="sendAnalysisBtn" class="btn-big">Enviar Análisis al Sheet</button>
+      </div>
+      <p id="analysisStatus" class="muted"></p>
+      <div id="analysisPanel" class="analysis-panel"></div>
+    </section>
+
+    <section class="panel wide">
+      <h2>5. Pagos frecuentes (reglas)</h2>
       <p class="muted">Si el texto del movimiento contiene el “match”, se asigna la categoría. Sin IA.</p>
       <div class="table-wrap">
         <table id="rulesTable">
@@ -89,7 +100,7 @@
     </section>
 
     <section class="panel wide">
-      <h2>5. Resultado del PDF seleccionado</h2>
+      <h2>6. Resultado del PDF seleccionado</h2>
       <p id="currentRunMeta" class="muted"></p>
       <div id="totalsBar" class="totals-bar" hidden>
         <div class="total-card income-total">
@@ -134,6 +145,6 @@
     </section>
   </main>
 
-  <script src="/pnl/app.js?v=20260718d"></script>
+  <script src="/pnl/app.js?v=20260718e"></script>
 </body>
 </html>

@@ -23,6 +23,7 @@ const BUILTIN_COLORS: Record<string, string> = {
   pass: "#b45309",
   nomina: "#7c3aed",
   proveedor: "#c2410c",
+  socio: "#7c2d12",
   renta: "#0e7490",
   servicios: "#0369a1",
   apps: "#6d28d9",

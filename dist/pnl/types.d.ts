@@ -34,6 +34,10 @@ export interface BankLine {
     category: PnlCategory;
     matchedRuleId?: string;
     needsReview: boolean;
+    /** Beneficiario SPEI/traspaso (si se detectó) */
+    counterparty?: string;
+    /** socio = Luis/Alejandro Zorrilla; proveedor = resto */
+    counterpartyKind?: "socio" | "proveedor";
 }
 export interface StatementRun {
     id: string;

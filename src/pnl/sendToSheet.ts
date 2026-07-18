@@ -1,5 +1,6 @@
 import { postToAppsScript } from "../appsScriptClient";
-import { loadCategories } from "./store";
+import { buildYearAnalysis } from "./providerAnalysis";
+import { loadCategories, loadRuns } from "./store";
 import type { StatementRun } from "./types";
 
 const CATEGORY_COLS = [
@@ -10,6 +11,8 @@ const CATEGORY_COLS = [
   "servicios",
   "pago",
   "transferencia_persona",
+  "socio",
+  "proveedor",
   "evento",
   "revisar",
   "otro",
@@ -76,5 +79,24 @@ export async function sendRunToBancoSheet(run: StatementRun): Promise<{
     row: result.row,
     action: result.action,
     version: result.version,
+  };
+}
+
+/** Escribe pestaña Análisis YYYY con ranking proveedores + mensual/anual. */
+export async function sendYearAnalysisToSheet(year = 2026): Promise<{
+  sheetName: string;
+  version?: string;
+  analysis: ReturnType<typeof buildYearAnalysis>;
+}> {
+  const analysis = buildYearAnalysis(loadRuns(), year);
+  const result = await postToAppsScript({
+    action: "upsertAnalisis",
+    year,
+    analysis,
+  });
+  return {
+    sheetName: result.sheetName || `Analisis ${year}`,
+    version: result.version,
+    analysis,
   };
 }

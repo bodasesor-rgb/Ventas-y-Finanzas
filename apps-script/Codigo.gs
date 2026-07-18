@@ -1,7 +1,7 @@
 /**
  * ============================================================
  * Apps Script — Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-07-18-v11
+ * VERSION: 2026-07-18-v12
  * ============================================================
  * PEGAR TODO ESTE ARCHIVO (borrar lo anterior → pegar → Guardar)
  *
@@ -16,17 +16,19 @@
  * doPost:
  *   - Eventos YYYY (Kommo cierres)
  *   - action=upsertBanco
+ *   - action=upsertAnalisis  (pestaña Analisis YYYY)
  *   - action=saveStatementArchive | listStatementArchive | getStatementArchive
  * doGet: { version }
- * setupAll_: Eventos + Metricas + P&L + Banco + Estados Archive
+ * setupAll_: Eventos + Metricas + P&L + Banco + Analisis + Estados Archive
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-07-18-v11';
+var SCRIPT_VERSION = '2026-07-18-v12';
 var YEAR = 2026;
 var EVENTOS_SHEET = 'Eventos ' + YEAR;
 var METRICAS_SHEET = 'Metricas ' + YEAR;
 var PL_SHEET = 'P&L ' + YEAR;
 var BANCO_SHEET = 'Banco ' + YEAR;
+var ANALISIS_SHEET = 'Analisis ' + YEAR;
 var ARCHIVE_SHEET = 'Estados Archive';
 var ARCHIVE_FOLDER_NAME = 'Bodasesor Estados de Cuenta';
 
@@ -87,6 +89,8 @@ var BANCO_HEADERS = [
   'Actualizado',
   'RunId',
   'Archivo',
+  'Socios',
+  'Proveedores',
 ];
 
 function isWritableSheet_(name) {
@@ -104,7 +108,14 @@ function doGet() {
     ok: true,
     version: SCRIPT_VERSION,
     ping: true,
-    sheets: [EVENTOS_SHEET, METRICAS_SHEET, PL_SHEET, BANCO_SHEET, ARCHIVE_SHEET],
+    sheets: [
+      EVENTOS_SHEET,
+      METRICAS_SHEET,
+      PL_SHEET,
+      BANCO_SHEET,
+      ANALISIS_SHEET,
+      ARCHIVE_SHEET,
+    ],
   });
 }
 
@@ -190,7 +201,11 @@ function writeRowValues_(sheet, rowIndex, values) {
 function ensureBancoSheet_(ss) {
   var sh = ss.getSheetByName(BANCO_SHEET);
   if (!sh) sh = ss.insertSheet(BANCO_SHEET);
-  if (String(sh.getRange(1, 1).getValue()).trim() !== 'Mes') {
+  var h1 = String(sh.getRange(1, 1).getValue()).trim();
+  var lastH = String(
+    sh.getRange(1, BANCO_HEADERS.length).getValue()
+  ).trim();
+  if (h1 !== 'Mes' || lastH !== 'Proveedores') {
     sh.getRange(1, 1, 1, BANCO_HEADERS.length).setValues([BANCO_HEADERS]);
     sh.setFrozenRows(1);
   }
@@ -244,6 +259,8 @@ function upsertBanco_(data) {
     new Date(),
     String(data.runId || ''),
     String(data.filename || ''),
+    by.socio || 0,
+    by.proveedor || 0,
   ];
 
   var lastRow = Math.max(sh.getLastRow(), 1);
@@ -498,6 +515,7 @@ function doPost(e) {
     var data = JSON.parse(raw);
 
     if (data && data.action === 'upsertBanco') return upsertBanco_(data);
+    if (data && data.action === 'upsertAnalisis') return upsertAnalisis_(data);
     if (data && data.action === 'saveStatementArchive') {
       return saveStatementArchive_(data);
     }
@@ -517,7 +535,7 @@ function doPost(e) {
       return json_({
         ok: false,
         version: SCRIPT_VERSION,
-        error: 'values no es array (¿Apps Script v11 publicado?)',
+        error: 'values no es array (¿Apps Script v12 publicado?)',
         typeofValues: typeof values,
         rawPreview: String(raw).slice(0, 200),
       });
@@ -638,13 +656,16 @@ function setupAll_() {
     '✓ ' +
     PL_SHEET +
     ' (P&L completo)\n' +
-    '✓ ' +
-    BANCO_SHEET +
-    ' (estados de cuenta)\n' +
-    '✓ ' +
-    ARCHIVE_SHEET +
-    ' + carpeta Drive PDFs\n\n' +
-    'Siguiente: Administrar implementaciones → Nueva versión → Implementar';
+      '✓ ' +
+      BANCO_SHEET +
+      ' (estados de cuenta)\n' +
+      '✓ ' +
+      ANALISIS_SHEET +
+      ' (top proveedores / socios)\n' +
+      '✓ ' +
+      ARCHIVE_SHEET +
+      ' + carpeta Drive PDFs\n\n' +
+      'Siguiente: Administrar implementaciones → Nueva versión → Implementar';
   try {
     SpreadsheetApp.getUi().alert(msg);
   } catch (err) {
@@ -662,6 +683,7 @@ function setupAllSilent_() {
   getArchiveFolder_();
   setupMetricas_(ss);
   setupPnL_(ss);
+  ensureAnalisisSheet_(ss, YEAR);
 }
 
 function ensureEventosSheet_(ss) {
@@ -879,4 +901,195 @@ function setupPnL_(ss) {
   sh.getRange('A19').setValue(
     'Nota: Costo eventos se llena a mano en Eventos col K. Pagado en col L. Banco llega con el botón del panel /pnl/.'
   );
+}
+
+/* ===================== Analisis (proveedores / socios / anual) ===================== */
+
+function ensureAnalisisSheet_(ss, year) {
+  var y = year || YEAR;
+  var name = 'Analisis ' + y;
+  var sh = ss.getSheetByName(name);
+  if (!sh) sh = ss.insertSheet(name);
+  return sh;
+}
+
+/**
+ * Reescribe Analisis YYYY con resumen mensual, top proveedores y socios.
+ * Socios fijos: Luis Alejandro Sanchez Campbell, Alejandro Zorrilla Elorza.
+ * Resto de traspasos con nombre = proveedor.
+ */
+function upsertAnalisis_(data) {
+  var year = Number(data.year) || YEAR;
+  var a = data.analysis || {};
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ensureAnalisisSheet_(ss, year);
+  var sheetName = 'Analisis ' + year;
+  sh.clear();
+
+  sh.getRange('A1').setValue('Analisis ' + year + ' — Bodasesor (banco)');
+  sh.getRange('A1').setFontWeight('bold').setFontSize(14);
+  sh.getRange('A2').setValue(
+    'Socios: Luis Alejandro Sanchez Campbell · Alejandro Zorrilla Elorza. Resto de traspasos con beneficiario = Proveedor.'
+  );
+  sh.getRange('A3').setValue(
+    'Actualizado: ' +
+      new Date() +
+      ' · Meses: ' +
+      ((a.monthsPresent || []).join(', ') || '(sin datos)') +
+      ' · Runs: ' +
+      (a.runsCount || 0)
+  );
+
+  // --- Resumen anual ---
+  sh.getRange('A5').setValue('RESUMEN ANUAL');
+  sh.getRange('A5').setFontWeight('bold');
+  sh.getRange('A6:B11').setValues([
+    ['Ingresos', Number(a.ingresos) || 0],
+    ['Gastos', Number(a.gastos) || 0],
+    ['Neto', Number(a.neto) || 0],
+    ['Pagos a socios', Number(a.sociosTotal) || 0],
+    ['Pagos a proveedores', Number(a.proveedoresTotal) || 0],
+    [
+      'Concentración top 1 / top 3 / top 5',
+      ((a.concentracion && a.concentracion.top1Share) || 0) * 100 +
+        '% / ' +
+        ((a.concentracion && a.concentracion.top3Share) || 0) * 100 +
+        '% / ' +
+        ((a.concentracion && a.concentracion.top5Share) || 0) * 100 +
+        '%',
+    ],
+  ]);
+  sh.getRange('B6:B10').setNumberFormat('$#,##0.00');
+
+  // --- Mensual ---
+  sh.getRange('A13').setValue('MENSUAL');
+  sh.getRange('A13').setFontWeight('bold');
+  sh.getRange('A14:K14').setValues([
+    [
+      'Mes',
+      'Label',
+      'Ingresos',
+      'Gastos',
+      'Neto',
+      'Socios',
+      'Proveedores',
+      'Ads',
+      'Apps',
+      'Comisiones',
+      'Cuadra',
+    ],
+  ]);
+  sh.getRange('A14:K14').setFontWeight('bold');
+
+  var months = a.byMonth || [];
+  for (var i = 0; i < months.length; i++) {
+    var m = months[i];
+    var r = 15 + i;
+    sh.getRange(r, 1, 1, 11).setValues([
+      [
+        String(m.periodKey || ''),
+        String(m.periodLabel || ''),
+        Number(m.ingresos) || 0,
+        Number(m.gastos) || 0,
+        Number(m.neto) || 0,
+        Number(m.socios) || 0,
+        Number(m.proveedores) || 0,
+        Number(m.ads) || 0,
+        Number(m.apps) || 0,
+        Number(m.comisiones) || 0,
+        m.cuadra === true ? 'SI' : m.cuadra === false ? 'NO' : '',
+      ],
+    ]);
+  }
+  if (months.length) {
+    sh.getRange(15, 3, months.length, 8).setNumberFormat('$#,##0.00');
+  }
+
+  var topStart = 15 + Math.max(months.length, 1) + 2;
+  sh.getRange(topStart, 1).setValue('TOP PROVEEDORES DEL AÑO (negociación)');
+  sh.getRange(topStart, 1).setFontWeight('bold');
+  sh.getRange(topStart + 1, 1, 1, 5).setValues([
+    ['#', 'Proveedor', 'Gasto acumulado', '% del gasto proveedores', '# pagos'],
+  ]);
+  sh.getRange(topStart + 1, 1, 1, 5).setFontWeight('bold');
+
+  var tops = a.topProveedores || a.top5Proveedores || [];
+  var maxTop = Math.min(tops.length, 25);
+  for (var t = 0; t < maxTop; t++) {
+    var p = tops[t];
+    sh.getRange(topStart + 2 + t, 1, 1, 5).setValues([
+      [
+        t + 1,
+        String(p.name || ''),
+        Number(p.total) || 0,
+        Number(p.shareOfProviders) || 0,
+        Number(p.payments) || 0,
+      ],
+    ]);
+  }
+  if (maxTop) {
+    sh.getRange(topStart + 2, 3, maxTop, 1).setNumberFormat('$#,##0.00');
+    sh.getRange(topStart + 2, 4, maxTop, 1).setNumberFormat('0.0%');
+  }
+
+  var socStart = topStart + 2 + maxTop + 2;
+  sh.getRange(socStart, 1).setValue('SOCIOS (traspasos)');
+  sh.getRange(socStart, 1).setFontWeight('bold');
+  sh.getRange(socStart + 1, 1, 1, 3).setValues([
+    ['Socio', 'Total transferido', '# pagos'],
+  ]);
+  sh.getRange(socStart + 1, 1, 1, 3).setFontWeight('bold');
+  var socios = a.socios || [];
+  for (var s = 0; s < socios.length; s++) {
+    sh.getRange(socStart + 2 + s, 1, 1, 3).setValues([
+      [
+        String(socios[s].name || ''),
+        Number(socios[s].total) || 0,
+        Number(socios[s].payments) || 0,
+      ],
+    ]);
+  }
+  if (socios.length) {
+    sh.getRange(socStart + 2, 2, socios.length, 1).setNumberFormat('$#,##0.00');
+  }
+
+  // Top proveedores por mes (bloque a la derecha)
+  sh.getRange('M13').setValue('TOP 5 PROVEEDORES POR MES');
+  sh.getRange('M13').setFontWeight('bold');
+  var col = 13; // M
+  var row = 14;
+  for (var mi = 0; mi < months.length; mi++) {
+    var mm = months[mi];
+    sh.getRange(row, col).setValue(String(mm.periodLabel || mm.periodKey));
+    sh.getRange(row, col).setFontWeight('bold');
+    sh.getRange(row + 1, col, 1, 3).setValues([['Proveedor', 'Gasto', 'Pagos']]);
+    var tp = mm.topProveedores || [];
+    for (var pi = 0; pi < tp.length; pi++) {
+      sh.getRange(row + 2 + pi, col, 1, 3).setValues([
+        [
+          String(tp[pi].name || ''),
+          Number(tp[pi].total) || 0,
+          Number(tp[pi].payments) || 0,
+        ],
+      ]);
+    }
+    if (tp.length) {
+      sh.getRange(row + 2, col + 1, tp.length, 1).setNumberFormat('$#,##0.00');
+    }
+    row += 9;
+  }
+
+  sh.setColumnWidth(1, 220);
+  sh.setColumnWidth(2, 160);
+  for (var c = 3; c <= 11; c++) sh.setColumnWidth(c, 110);
+
+  return json_({
+    ok: true,
+    version: SCRIPT_VERSION,
+    action: 'upsertAnalisis',
+    sheetName: sheetName,
+    year: year,
+    months: (a.monthsPresent || []).length,
+    topProveedores: maxTop,
+  });
 }

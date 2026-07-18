@@ -104,6 +104,7 @@ const BROAD_CATS = new Set([
     "pass",
     "nomina",
     "proveedor",
+    "socio",
     "renta",
     "servicios",
     "comisiones",
@@ -204,6 +205,7 @@ function guessBroadCategory(description, merchant) {
         return "ads";
     if (/\b(comisi[oó]n|iva comisi)\b/i.test(desc))
         return "comisiones";
+    // Los traspasos con beneficiario los reclasifica applyCounterpartyCategories
     if (/\b(pago interbancario|traspaso|beneficiario)\b/i.test(desc)) {
         return "transferencia_persona";
     }

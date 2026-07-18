@@ -44,7 +44,8 @@ export function categorizeLine(
         matchedRuleId: rule.id,
         needsReview:
           rule.category === "transferencia_persona" ||
-          rule.category === "revisar",
+          rule.category === "revisar" ||
+          rule.category === "proveedor",
       };
     }
   }

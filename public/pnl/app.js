@@ -588,6 +588,13 @@ function renderRun(run) {
         <input class="desc-edit" data-field="description" data-line="${escapeAttr(
           line.id
         )}" value="${escapeAttr(line.description)}" />
+        ${
+          line.counterparty
+            ? `<span class="cp-tag">${escapeHtml(
+                line.counterpartyKind === "socio" ? "socio" : "proveedor"
+              )}: ${escapeHtml(line.counterparty)}</span>`
+            : ""
+        }
       </td>
       <td class="amount ${income ? "income" : ""}">
         <span class="money-edit-wrap">
@@ -707,6 +714,126 @@ function renderRun(run) {
   }
 }
 
+function pct(n) {
+  return new Intl.NumberFormat("es-MX", {
+    style: "percent",
+    maximumFractionDigits: 1,
+  }).format(Number(n) || 0);
+}
+
+function renderAnalysis(analysis) {
+  const root = document.getElementById("analysisPanel");
+  if (!root || !analysis) return;
+  const top = analysis.top5Proveedores || analysis.topProveedores?.slice(0, 5) || [];
+  const socios = analysis.socios || [];
+  const months = analysis.byMonth || [];
+  const c = analysis.concentracion || {};
+  root.innerHTML = `
+    <div class="analysis-grid">
+      <div class="analysis-card"><span>Ingresos año</span><strong>${money(analysis.ingresos)}</strong></div>
+      <div class="analysis-card"><span>Gastos año</span><strong>${money(analysis.gastos)}</strong></div>
+      <div class="analysis-card"><span>Neto</span><strong>${money(analysis.neto)}</strong></div>
+      <div class="analysis-card"><span>Socios</span><strong>${money(analysis.sociosTotal)}</strong></div>
+      <div class="analysis-card"><span>Proveedores</span><strong>${money(analysis.proveedoresTotal)}</strong></div>
+      <div class="analysis-card"><span>Concentración top1/3/5</span><strong>${pct(c.top1Share)} / ${pct(c.top3Share)} / ${pct(c.top5Share)}</strong></div>
+    </div>
+    <div>
+      <h3 style="font-size:0.95rem;margin:0 0 0.4rem">Top 5 proveedores (año)</h3>
+      <table class="analysis-table">
+        <thead><tr><th>#</th><th>Proveedor</th><th>Gasto</th><th>%</th><th>Pagos</th></tr></thead>
+        <tbody>
+          ${
+            top.length
+              ? top
+                  .map(
+                    (p, i) =>
+                      `<tr><td>${i + 1}</td><td>${escapeHtml(p.name)}</td><td>${money(
+                        p.total
+                      )}</td><td>${pct(p.shareOfProviders)}</td><td>${p.payments}</td></tr>`
+                  )
+                  .join("")
+              : `<tr><td colspan="5">Sin proveedores aún — sube estados de cuenta.</td></tr>`
+          }
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <h3 style="font-size:0.95rem;margin:0 0 0.4rem">Socios</h3>
+      <table class="analysis-table">
+        <thead><tr><th>Socio</th><th>Total</th><th>Pagos</th></tr></thead>
+        <tbody>
+          ${
+            socios.length
+              ? socios
+                  .map(
+                    (p) =>
+                      `<tr><td>${escapeHtml(p.name)}</td><td>${money(
+                        p.total
+                      )}</td><td>${p.payments}</td></tr>`
+                  )
+                  .join("")
+              : `<tr><td colspan="3">Sin traspasos a socios en los meses cargados.</td></tr>`
+          }
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <h3 style="font-size:0.95rem;margin:0 0 0.4rem">Mensual</h3>
+      <table class="analysis-table">
+        <thead><tr><th>Mes</th><th>Ingresos</th><th>Gastos</th><th>Neto</th><th>Socios</th><th>Proveedores</th><th>Top proveedor</th></tr></thead>
+        <tbody>
+          ${
+            months.length
+              ? months
+                  .map((m) => {
+                    const t0 = (m.topProveedores || [])[0];
+                    return `<tr>
+                      <td>${escapeHtml(m.periodLabel || m.periodKey)}</td>
+                      <td>${money(m.ingresos)}</td>
+                      <td>${money(m.gastos)}</td>
+                      <td>${money(m.neto)}</td>
+                      <td>${money(m.socios)}</td>
+                      <td>${money(m.proveedores)}</td>
+                      <td>${
+                        t0
+                          ? `${escapeHtml(t0.name)} (${money(t0.total)})`
+                          : "—"
+                      }</td>
+                    </tr>`;
+                  })
+                  .join("")
+              : `<tr><td colspan="7">Sin meses cargados.</td></tr>`
+          }
+        </tbody>
+      </table>
+      <p class="muted" style="margin-top:0.4rem">Meses en server: ${(
+        analysis.monthsPresent || []
+      ).join(", ") || "ninguno"} · runs ${analysis.runsCount || 0}</p>
+    </div>
+  `;
+}
+
+async function refreshAnalysis() {
+  const el = document.getElementById("analysisStatus");
+  try {
+    const data = await api("/api/pnl/analysis");
+    renderAnalysis(data.analysis);
+    if (el) {
+      el.textContent = `OK · año ${data.analysis?.year || "?"} · ${
+        data.analysis?.runsCount || 0
+      } run(s) · ${
+        (data.analysis?.monthsPresent || []).join(", ") || "sin meses"
+      }${
+        data.years?.length ? ` · años en server: ${data.years.join(", ")}` : ""
+      }`;
+    }
+    return data;
+  } catch (e) {
+    if (el) el.textContent = "Error: " + e.message;
+    return null;
+  }
+}
+
 async function init() {
   // Botones deben funcionar aunque falle alguna API
   document.getElementById("addCategory")?.addEventListener("click", () => {
@@ -753,6 +880,34 @@ async function init() {
     console.error(e);
   }
   await refreshLibrary();
+  await refreshAnalysis();
+
+  document.getElementById("refreshAnalysisBtn")?.addEventListener("click", () => {
+    refreshAnalysis();
+  });
+  document.getElementById("sendAnalysisBtn")?.addEventListener("click", async () => {
+    const el = document.getElementById("analysisStatus");
+    const btn = document.getElementById("sendAnalysisBtn");
+    if (btn) btn.disabled = true;
+    if (el) el.textContent = "Enviando Análisis al Sheet…";
+    try {
+      const data = await api("/api/pnl/analysis/send-to-sheet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (data.analysis) renderAnalysis(data.analysis);
+      if (el) {
+        el.textContent = `OK → ${(data.sheets || [data.sheetName])
+          .filter(Boolean)
+          .join(", ")} (v ${data.version || "?"})`;
+      }
+    } catch (e) {
+      if (el) el.textContent = "Error: " + e.message;
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  });
 
   document.getElementById("addRule").onclick = () => {
     rules.push({
@@ -838,6 +993,7 @@ async function init() {
       }
       renderRun(data.run);
       await refreshLibrary();
+      await refreshAnalysis();
       const runsRes = await api("/api/pnl/runs");
       runsCache = runsRes.runs || [];
     } catch (e) {
