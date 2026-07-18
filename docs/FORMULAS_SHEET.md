@@ -1,35 +1,39 @@
 # Enlace Sheet (Eventos · Banco · P&L · Metricas)
 
-## Cómo aplicar (v15)
+## Cómo aplicar (v16)
 
-1. Pega `apps-script/Codigo.gs` (VERSION `2026-07-18-v15`).
+1. Pega `apps-script/Codigo.gs` (VERSION `2026-07-18-v16`).
 2. Guarda.
 3. **`authorizeDrive_`** → ▶ Ejecutar (si usas archive PDFs).
-4. **`restorePnLBanco_`** → ▶ Ejecutar (solo P&L de estados de cuenta; **no toca Metricas**).
+4. **`restorePnLBanco_`** → ▶ Ejecutar (regenera P&L resumen; **no toca Metricas**).
 5. Implementar → Nueva versión → misma URL `/exec`.
-6. Confirma en `/exec` que `version` sea `2026-07-18-v15`.
+6. Confirma en `/exec` que `version` sea `2026-07-18-v16`.
 
-**Regla v15**
+**Regla v16**
 
 | Acción | Qué escribe / toca |
 |--------|---------------------|
 | Enviar al P&L (`/pnl/`) | Solo fila en **Banco YYYY** (1 mes) |
-| Fórmulas P&L | **P&L YYYY** lee Banco por mes |
+| P&L resumen | Ingreso → Egreso → Gastos → Neto por mes (mapeo web) |
 | Metricas | **Nunca** la toca el bot |
 | Kommo cierres | Solo **Eventos YYYY** |
 
-No ejecutes `setupMetricas_` ni la vieja `restoreMetricasPnL_` si quieres conservar tu dashboard restaurado. En v15, `restoreMetricasPnL_` solo regenera el P&L banco.
+No ejecutes `setupMetricas_` si quieres conservar tu dashboard. `restoreMetricasPnL_` solo regenera el P&L.
 
 ---
 
-## Flujo P&L banco
+## Flujo P&L resumen
 
 ```
-PDF Banamex → /pnl/ parse → Enviar al P&L
+PDF Banamex → /pnl/ → Enviar al P&L
        ↓
-  Banco 2026 (1 fila / mes: ingresos, gastos, categorías, socios, proveedores)
-       ↓  fórmulas SUMIF
-  P&L 2026 (columnas Ene…Dic + Total)
+  Banco 2026 (1 fila / mes)
+       ↓  fórmulas (mapeo)
+  P&L 2026
+    Ingreso:  venta + ingreso (+ Intereses/Catering… manual)
+    Egreso:   proveedores + costo evento (+ Banquete… manual)
+    Gastos:   Marketing←ads · RH←pagos · Programas←apps+pass · Otros←…
+    Neto / Banco←neto · CAPITAL←socios
 ```
 
 ---
