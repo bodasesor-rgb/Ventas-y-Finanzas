@@ -802,107 +802,238 @@ function syncYearSelect(years, preferredYear) {
     .join("");
 }
 
+function catLabel(id) {
+  const c = categories.find((x) => x.id === id);
+  return c?.label || id;
+}
+
 function renderAnalysis(analysis) {
   const root = document.getElementById("analysisPanel");
   if (!root || !analysis) return;
   const year = analysis.year || selectedAnalysisYear || "?";
-  const top = analysis.top5Proveedores || analysis.topProveedores?.slice(0, 5) || [];
+  const allProv = analysis.topProveedores || [];
+  const top5 = analysis.top5Proveedores || allProv.slice(0, 5);
   const socios = analysis.socios || [];
   const months = analysis.byMonth || [];
+  const cats = (analysis.byCategory || []).filter((c) => Number(c.total) !== 0);
   const c = analysis.concentracion || {};
+  const top1 = top5[0];
+
   if (!months.length) {
     root.innerHTML = `
-      <p class="muted">No hay estados de cuenta del año <strong>${escapeHtml(
-        String(year)
-      )}</strong>. Elige otro año o sube PDFs de ${escapeHtml(String(year))}.</p>`;
+      <section class="analysis-block">
+        <p class="muted" style="margin:0">No hay estados de cuenta del año <strong>${escapeHtml(
+          String(year)
+        )}</strong>. Elige otro año en el selector o sube PDFs de ${escapeHtml(
+      String(year)
+    )} desde <em>Estados de cuenta</em>.</p>
+      </section>`;
     return;
   }
+
   root.innerHTML = `
-    <p class="muted" style="margin:0">Mostrando solo <strong>${escapeHtml(
-      String(year)
-    )}</strong> · meses: ${(analysis.monthsPresent || []).join(", ")}</p>
-    <div class="analysis-grid">
-      <div class="analysis-card"><span>Ingresos ${escapeHtml(String(year))}</span><strong>${money(analysis.ingresos)}</strong></div>
-      <div class="analysis-card"><span>Gastos ${escapeHtml(String(year))}</span><strong>${money(analysis.gastos)}</strong></div>
-      <div class="analysis-card"><span>Neto</span><strong>${money(analysis.neto)}</strong></div>
-      <div class="analysis-card"><span>Socios</span><strong>${money(analysis.sociosTotal)}</strong></div>
-      <div class="analysis-card"><span>Proveedores</span><strong>${money(analysis.proveedoresTotal)}</strong></div>
-      <div class="analysis-card"><span>Concentración top1/3/5</span><strong>${pct(c.top1Share)} / ${pct(c.top3Share)} / ${pct(c.top5Share)}</strong></div>
-    </div>
-    <div>
-      <h3 style="font-size:0.95rem;margin:0 0 0.4rem">Top 5 proveedores (${escapeHtml(String(year))})</h3>
-      <table class="analysis-table">
-        <thead><tr><th>#</th><th>Proveedor</th><th>Gasto</th><th>%</th><th>Pagos</th></tr></thead>
-        <tbody>
-          ${
-            top.length
-              ? top
-                  .map(
-                    (p, i) =>
-                      `<tr><td>${i + 1}</td><td>${escapeHtml(p.name)}</td><td>${money(
-                        p.total
-                      )}</td><td>${pct(p.shareOfProviders)}</td><td>${p.payments}</td></tr>`
-                  )
-                  .join("")
-              : `<tr><td colspan="5">Sin proveedores aún — sube estados de cuenta.</td></tr>`
-          }
-        </tbody>
-      </table>
-    </div>
-    <div>
-      <h3 style="font-size:0.95rem;margin:0 0 0.4rem">Socios</h3>
-      <table class="analysis-table">
-        <thead><tr><th>Socio</th><th>Total</th><th>Pagos</th></tr></thead>
-        <tbody>
-          ${
-            socios.length
-              ? socios
-                  .map(
-                    (p) =>
-                      `<tr><td>${escapeHtml(p.name)}</td><td>${money(
-                        p.total
-                      )}</td><td>${p.payments}</td></tr>`
-                  )
-                  .join("")
-              : `<tr><td colspan="3">Sin traspasos a socios en los meses cargados.</td></tr>`
-          }
-        </tbody>
-      </table>
-    </div>
-    <div>
-      <h3 style="font-size:0.95rem;margin:0 0 0.4rem">Mensual</h3>
-      <table class="analysis-table">
-        <thead><tr><th>Mes</th><th>Ingresos</th><th>Gastos</th><th>Neto</th><th>Socios</th><th>Proveedores</th><th>Top proveedor</th></tr></thead>
-        <tbody>
-          ${
-            months.length
-              ? months
-                  .map((m) => {
-                    const t0 = (m.topProveedores || [])[0];
-                    return `<tr>
-                      <td>${escapeHtml(m.periodLabel || m.periodKey)}</td>
-                      <td>${money(m.ingresos)}</td>
-                      <td>${money(m.gastos)}</td>
-                      <td>${money(m.neto)}</td>
-                      <td>${money(m.socios)}</td>
-                      <td>${money(m.proveedores)}</td>
-                      <td>${
-                        t0
-                          ? `${escapeHtml(t0.name)} (${money(t0.total)})`
-                          : "—"
-                      }</td>
-                    </tr>`;
-                  })
-                  .join("")
-              : `<tr><td colspan="7">Sin meses cargados.</td></tr>`
-          }
-        </tbody>
-      </table>
-      <p class="muted" style="margin-top:0.4rem">Meses en server: ${(
+    <section class="analysis-block">
+      <h3>Resumen ${escapeHtml(String(year))}</h3>
+      <p class="muted" style="margin:0 0 0.75rem">Solo este año · meses ${(
         analysis.monthsPresent || []
-      ).join(", ") || "ninguno"} · runs ${analysis.runsCount || 0}</p>
+      )
+        .map((m) => escapeHtml(m))
+        .join(", ")} · ${analysis.runsCount || 0} estado(s)</p>
+      <div class="analysis-grid">
+        <div class="analysis-card"><span>Ingresos</span><strong>${money(analysis.ingresos)}</strong></div>
+        <div class="analysis-card"><span>Gastos</span><strong>${money(analysis.gastos)}</strong></div>
+        <div class="analysis-card"><span>Neto</span><strong>${money(analysis.neto)}</strong></div>
+        <div class="analysis-card"><span>A socios</span><strong>${money(analysis.sociosTotal)}</strong></div>
+        <div class="analysis-card"><span>A proveedores</span><strong>${money(analysis.proveedoresTotal)}</strong></div>
+        <div class="analysis-card"><span>Concentración top1 / top3 / top5</span><strong>${pct(c.top1Share)} / ${pct(c.top3Share)} / ${pct(c.top5Share)}</strong></div>
+      </div>
+      ${
+        top1
+          ? `<p class="analysis-insight"><strong>Negociación:</strong> ${escapeHtml(
+              top1.name
+            )} concentra el ${pct(
+              top1.shareOfProviders
+            )} del gasto a proveedores (${money(
+              top1.total
+            )} en ${top1.payments} pago(s)).</p>`
+          : ""
+      }
+    </section>
+
+    <div class="analysis-two-col">
+      <section class="analysis-block">
+        <h3>Top proveedores ${escapeHtml(String(year))}</h3>
+        <div class="table-wrap">
+          <table class="analysis-table">
+            <thead><tr><th>#</th><th>Proveedor</th><th>Gasto</th><th>%</th><th>Pagos</th></tr></thead>
+            <tbody>
+              ${
+                allProv.length
+                  ? allProv
+                      .map(
+                        (p, i) =>
+                          `<tr${i < 5 ? ' style="font-weight:600"' : ""}>
+                            <td>${i + 1}</td>
+                            <td>${escapeHtml(p.name)}</td>
+                            <td>${money(p.total)}</td>
+                            <td>${pct(p.shareOfProviders)}</td>
+                            <td>${p.payments}</td>
+                          </tr>`
+                      )
+                      .join("")
+                  : `<tr><td colspan="5">Sin proveedores en ${escapeHtml(
+                      String(year)
+                    )}.</td></tr>`
+              }
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="analysis-block">
+        <h3>Socios (traspasos)</h3>
+        <div class="table-wrap">
+          <table class="analysis-table">
+            <thead><tr><th>Socio</th><th>Total</th><th>Pagos</th></tr></thead>
+            <tbody>
+              ${
+                socios.length
+                  ? socios
+                      .map(
+                        (p) =>
+                          `<tr>
+                            <td>${escapeHtml(p.name)}</td>
+                            <td>${money(p.total)}</td>
+                            <td>${p.payments}</td>
+                          </tr>`
+                      )
+                      .join("")
+                  : `<tr><td colspan="3">Sin traspasos a socios.</td></tr>`
+              }
+            </tbody>
+          </table>
+        </div>
+        <h3 style="margin-top:1.25rem">Gasto por categoría</h3>
+        <div class="table-wrap">
+          <table class="analysis-table">
+            <thead><tr><th>Categoría</th><th>Total</th></tr></thead>
+            <tbody>
+              ${
+                cats.length
+                  ? cats
+                      .map(
+                        (row) =>
+                          `<tr>
+                            <td>${escapeHtml(catLabel(row.id))}</td>
+                            <td>${money(row.total)}</td>
+                          </tr>`
+                      )
+                      .join("")
+                  : `<tr><td colspan="2">Sin datos.</td></tr>`
+              }
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
+
+    <section class="analysis-block">
+      <h3>Mensual ${escapeHtml(String(year))}</h3>
+      <div class="table-wrap">
+        <table class="analysis-table">
+          <thead>
+            <tr>
+              <th>Mes</th><th>Ingresos</th><th>Gastos</th><th>Neto</th>
+              <th>Socios</th><th>Proveedores</th><th>Ads</th><th>Apps</th>
+              <th>Comisiones</th><th>Cuadra</th><th>Top proveedor</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${months
+              .map((m) => {
+                const t0 = (m.topProveedores || [])[0];
+                return `<tr>
+                  <td>${escapeHtml(m.periodLabel || m.periodKey)}</td>
+                  <td>${money(m.ingresos)}</td>
+                  <td>${money(m.gastos)}</td>
+                  <td>${money(m.neto)}</td>
+                  <td>${money(m.socios)}</td>
+                  <td>${money(m.proveedores)}</td>
+                  <td>${money(m.ads)}</td>
+                  <td>${money(m.apps)}</td>
+                  <td>${money(m.comisiones)}</td>
+                  <td>${
+                    m.cuadra === true ? "SI" : m.cuadra === false ? "NO" : "—"
+                  }</td>
+                  <td>${
+                    t0
+                      ? `${escapeHtml(t0.name)} (${money(t0.total)})`
+                      : "—"
+                  }</td>
+                </tr>`;
+              })
+              .join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="analysis-block">
+      <h3>Top proveedores por mes</h3>
+      <div class="analysis-month-cards">
+        ${months
+          .map((m) => {
+            const list = m.topProveedores || [];
+            return `<article class="analysis-month-card">
+              <h4>${escapeHtml(m.periodLabel || m.periodKey)}</h4>
+              <div class="muted">Ingresos ${money(m.ingresos)} · Gastos ${money(
+              m.gastos
+            )} · Neto ${money(m.neto)}</div>
+              <div class="muted">Socios ${money(m.socios)} · Proveedores ${money(
+              m.proveedores
+            )}</div>
+              <ul>
+                ${
+                  list.length
+                    ? list
+                        .map(
+                          (p, i) =>
+                            `<li><strong>${i + 1}.</strong> ${escapeHtml(
+                              p.name
+                            )} — ${money(p.total)} (${p.payments})</li>`
+                        )
+                        .join("")
+                    : "<li>Sin proveedores con nombre este mes.</li>"
+                }
+              </ul>
+            </article>`;
+          })
+          .join("")}
+      </div>
+    </section>
   `;
+}
+
+function showView(view) {
+  const name = view === "analisis" ? "analisis" : "estados";
+  document.querySelectorAll(".subnav-item").forEach((btn) => {
+    btn.classList.toggle("is-active", btn.getAttribute("data-view") === name);
+  });
+  document.querySelectorAll("[data-view-pane]").forEach((pane) => {
+    const on = pane.getAttribute("data-view-pane") === name;
+    pane.hidden = !on;
+    pane.classList.toggle("is-active", on);
+  });
+  if (name === "analisis") {
+    refreshAnalysis();
+    try {
+      history.replaceState(null, "", "#analisis");
+    } catch (_) {}
+  } else {
+    try {
+      history.replaceState(null, "", "#estados");
+    } catch (_) {}
+  }
 }
 
 async function refreshAnalysis() {
@@ -947,52 +1078,11 @@ async function refreshAnalysis() {
 }
 
 async function init() {
-  // Botones deben funcionar aunque falle alguna API
-  document.getElementById("addCategory")?.addEventListener("click", () => {
-    addCategory("gasto");
+  document.querySelectorAll(".subnav-item").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      showView(btn.getAttribute("data-view"));
+    });
   });
-  document.getElementById("addIncomeCategory")?.addEventListener("click", () => {
-    addCategory("ingreso");
-  });
-  document.getElementById("btnClosePdf")?.addEventListener("click", () => {
-    const box = document.getElementById("pdfViewer");
-    const frame = document.getElementById("pdfFrame");
-    if (frame) frame.src = "about:blank";
-    if (box) box.hidden = true;
-  });
-
-  try {
-    const catData = await api("/api/pnl/categories");
-    categories = catData.categories || [];
-  } catch (e) {
-    console.error(e);
-    setCatStatus("No pude cargar categorías: " + e.message, true);
-    categories = [
-      { id: "ingreso", label: "Ingreso", kind: "ingreso" },
-      { id: "otro", label: "Otro", kind: "neutro" },
-      { id: "revisar", label: "Revisar", kind: "neutro" },
-    ];
-  }
-  renderCategories();
-
-  try {
-    const rulesData = await api("/api/pnl/rules");
-    rules = rulesData.rules || [];
-  } catch (e) {
-    console.error(e);
-    rules = [];
-  }
-  renderRules();
-
-  try {
-    const runs = await api("/api/pnl/runs");
-    runsCache = runs.runs || [];
-    if (runsCache[0]) renderRun(runsCache[0]);
-  } catch (e) {
-    console.error(e);
-  }
-  await refreshLibrary();
-  await refreshAnalysis();
 
   document.getElementById("analysisYearSelect")?.addEventListener("change", (ev) => {
     const sel = ev.target;
@@ -1033,6 +1123,56 @@ async function init() {
       if (btn) btn.disabled = false;
     }
   });
+
+  document.getElementById("addCategory")?.addEventListener("click", () => {
+    addCategory("gasto");
+  });
+  document.getElementById("addIncomeCategory")?.addEventListener("click", () => {
+    addCategory("ingreso");
+  });
+  document.getElementById("btnClosePdf")?.addEventListener("click", () => {
+    const box = document.getElementById("pdfViewer");
+    const frame = document.getElementById("pdfFrame");
+    if (frame) frame.src = "about:blank";
+    if (box) box.hidden = true;
+  });
+
+  try {
+    const catData = await api("/api/pnl/categories");
+    categories = catData.categories || [];
+  } catch (e) {
+    console.error(e);
+    setCatStatus("No pude cargar categorías: " + e.message, true);
+    categories = [
+      { id: "ingreso", label: "Ingreso", kind: "ingreso" },
+      { id: "otro", label: "Otro", kind: "neutro" },
+      { id: "revisar", label: "Revisar", kind: "neutro" },
+      { id: "socio", label: "Socio", kind: "neutro" },
+      { id: "proveedor", label: "Proveedor", kind: "gasto" },
+    ];
+  }
+  renderCategories();
+
+  try {
+    const rulesData = await api("/api/pnl/rules");
+    rules = rulesData.rules || [];
+  } catch (e) {
+    console.error(e);
+    rules = [];
+  }
+  renderRules();
+
+  try {
+    const runs = await api("/api/pnl/runs");
+    runsCache = runs.runs || [];
+    if (runsCache[0]) renderRun(runsCache[0]);
+  } catch (e) {
+    console.error(e);
+  }
+  await refreshLibrary();
+
+  const hash = (location.hash || "").replace("#", "");
+  showView(hash === "analisis" ? "analisis" : "estados");
 
   document.getElementById("addRule").onclick = () => {
     rules.push({

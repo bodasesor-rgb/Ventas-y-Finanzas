@@ -5,26 +5,36 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <title>Bodasesor — P&L Banco</title>
-  <link rel="stylesheet" href="/pnl/styles.css?v=20260718a" />
+  <link rel="stylesheet" href="/pnl/styles.css?v=20260718g" />
 </head>
 <body>
   <div class="version-banner" id="versionBanner">
-    UI v2026-07-18f — Eliminar PDF · Análisis por año (2025 ≠ 2026)
+    UI v2026-07-18g — Submenú · Análisis anual completo
   </div>
 
   <header class="top">
     <div>
       <p class="brand">Bodasesor / Capybara</p>
       <h1>P&L desde estados de cuenta</h1>
-      <p class="sub">Traspasos: Luis Alejandro Sanchez Campbell y Alejandro Zorrilla Elorza = socios; el resto = proveedores. Top de gasto para negociar.</p>
+      <p class="sub">Traspasos: socios Luis Alejandro Sanchez Campbell y Alejandro Zorrilla Elorza; el resto = proveedores.</p>
     </div>
     <div class="top-links">
-      <span class="version-pill">v2026-07-18f</span>
+      <span class="version-pill">v2026-07-18g</span>
       <a class="link" href="/health">API health</a>
     </div>
   </header>
 
-  <main class="grid">
+  <nav class="subnav" id="subnav" aria-label="Secciones P&L">
+    <button type="button" class="subnav-item is-active" data-view="estados">
+      Estados de cuenta
+    </button>
+    <button type="button" class="subnav-item" data-view="analisis">
+      Análisis anual
+    </button>
+  </nav>
+
+  <!-- ========== Vista: Estados ========== -->
+  <main class="grid view-pane is-active" id="view-estados" data-view-pane="estados">
     <section class="panel">
       <h2>1. Subir estado de cuenta (PDF)</h2>
       <form id="uploadForm">
@@ -53,7 +63,7 @@
 
     <section class="panel wide">
       <h2>3. Estados guardados por mes</h2>
-      <p class="muted">Un PDF por mes. Copia durable en Drive (carpeta <code>Bodasesor Estados de Cuenta</code>). Si Drive falla por permiso: Apps Script → <code>authorizeDrive_</code> → Ejecutar → Nueva versión del /exec. Luego vuelve a subir el PDF.</p>
+      <p class="muted">Un PDF por mes. Copia durable en Drive (carpeta <code>Bodasesor Estados de Cuenta</code>). Botón <strong>Eliminar PDF</strong> borra del panel.</p>
       <button type="button" id="restoreDriveBtn" class="secondary">Restaurar desde Drive</button>
       <p id="restoreDriveStatus" class="muted"></p>
       <div id="library" class="library"></div>
@@ -67,22 +77,7 @@
     </section>
 
     <section class="panel wide">
-      <h2>4. Análisis anual / proveedores</h2>
-      <p class="muted">Un año a la vez: elige el año y solo se suman los meses de ese año (2025 no entra en 2026). Envía a la pestaña <code>Analisis YYYY</code> correspondiente.</p>
-      <div class="send-sheet-bar analysis-year-bar">
-        <label class="year-label">
-          Año
-          <select id="analysisYearSelect"></select>
-        </label>
-        <button type="button" id="refreshAnalysisBtn" class="secondary">Actualizar análisis</button>
-        <button type="button" id="sendAnalysisBtn" class="btn-big">Enviar Análisis al Sheet</button>
-      </div>
-      <p id="analysisStatus" class="muted"></p>
-      <div id="analysisPanel" class="analysis-panel"></div>
-    </section>
-
-    <section class="panel wide">
-      <h2>5. Pagos frecuentes (reglas)</h2>
+      <h2>4. Pagos frecuentes (reglas)</h2>
       <p class="muted">Si el texto del movimiento contiene el “match”, se asigna la categoría. Sin IA.</p>
       <div class="table-wrap">
         <table id="rulesTable">
@@ -104,7 +99,7 @@
     </section>
 
     <section class="panel wide">
-      <h2>6. Resultado del PDF seleccionado</h2>
+      <h2>5. Resultado del PDF seleccionado</h2>
       <p id="currentRunMeta" class="muted"></p>
       <div id="totalsBar" class="totals-bar" hidden>
         <div class="total-card income-total">
@@ -128,7 +123,7 @@
         <button type="button" id="sendToSheetBtn" class="btn-big">Enviar al P&amp;L (Sheet)</button>
         <p id="sendToSheetStatus" class="muted"></p>
       </div>
-      <p class="muted">Edita monto o descripción si algo se ve raro (usa $ al escribir, ej. <code>-1,500.00</code>). Enter/Tab guarda. La columna <strong>Revisar</strong> = “este movimiento hay que checarlo”.</p>
+      <p class="muted">Edita monto o descripción si algo se ve raro. La columna <strong>Revisar</strong> = checar el movimiento.</p>
       <div id="summary" class="summary"></div>
       <div class="table-wrap">
         <table id="linesTable">
@@ -149,6 +144,28 @@
     </section>
   </main>
 
-  <script src="/pnl/app.js?v=20260718f"></script>
+  <!-- ========== Vista: Análisis anual ========== -->
+  <main class="view-pane view-analisis" id="view-analisis" data-view-pane="analisis" hidden>
+    <section class="panel wide analysis-hero">
+      <div class="analysis-hero-top">
+        <div>
+          <h2>Análisis anual</h2>
+          <p class="muted">Todo el año elegido: entradas, gastos, socios, proveedores, concentración y ranking. 2025 y 2026 no se mezclan.</p>
+        </div>
+        <div class="send-sheet-bar analysis-year-bar">
+          <label class="year-label">
+            Año
+            <select id="analysisYearSelect"></select>
+          </label>
+          <button type="button" id="refreshAnalysisBtn" class="secondary">Actualizar</button>
+          <button type="button" id="sendAnalysisBtn" class="btn-big">Enviar al Sheet</button>
+        </div>
+      </div>
+      <p id="analysisStatus" class="muted"></p>
+    </section>
+    <div id="analysisPanel" class="analysis-panel analysis-full"></div>
+  </main>
+
+  <script src="/pnl/app.js?v=20260718g"></script>
 </body>
 </html>

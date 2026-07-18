@@ -70,7 +70,103 @@ body {
   justify-content: space-between;
   align-items: flex-start;
   gap: 1rem;
-  padding: 1.5rem 1.75rem 0.5rem;
+  padding: 1.25rem 1.75rem 0.35rem;
+}
+
+.subnav {
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.35rem 1.75rem 0.85rem;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 253, 248, 0.65);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  backdrop-filter: blur(6px);
+}
+.subnav-item {
+  margin: 0 !important;
+  background: transparent !important;
+  color: var(--muted) !important;
+  border: 1px solid transparent !important;
+  border-radius: 8px !important;
+  padding: 0.55rem 1rem !important;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+.subnav-item:hover {
+  background: #efe8da !important;
+  color: var(--ink) !important;
+  filter: none;
+}
+.subnav-item.is-active {
+  background: #0f6b5c !important;
+  color: #fff !important;
+  border-color: #0f6b5c !important;
+}
+.view-pane[hidden] { display: none !important; }
+.view-analisis {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem 1.75rem 2.5rem;
+}
+.analysis-hero-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.analysis-hero h2 { margin-bottom: 0.35rem; }
+.analysis-full {
+  display: grid;
+  gap: 1rem;
+}
+.analysis-block {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1rem 1.1rem 1.15rem;
+}
+.analysis-block h3 {
+  margin: 0 0 0.65rem;
+  font-size: 1rem;
+}
+.analysis-insight {
+  margin: 0.5rem 0 0;
+  padding: 0.65rem 0.8rem;
+  background: #f3ebe0;
+  border-left: 3px solid #9a4d1c;
+  font-size: 0.92rem;
+}
+.analysis-month-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.75rem;
+}
+.analysis-month-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.75rem 0.85rem;
+  background: linear-gradient(165deg, #fffdf8, #f4efe4);
+}
+.analysis-month-card h4 {
+  margin: 0 0 0.45rem;
+  font-size: 0.95rem;
+}
+.analysis-month-card ul {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.88rem;
+}
+.analysis-two-col {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 1rem;
+}
+@media (max-width: 900px) {
+  .analysis-two-col { grid-template-columns: 1fr; }
+  .subnav { padding-left: 1rem; padding-right: 1rem; overflow-x: auto; }
 }
 .brand {
   margin: 0;
