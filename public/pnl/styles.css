@@ -322,6 +322,22 @@ input.desc-edit:focus {
 }
 .total-card.ok-match { box-shadow: inset 0 0 0 2px #1a8f55; }
 .total-card.bad-match { box-shadow: inset 0 0 0 2px #c2410c; }
+.send-sheet-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  margin: 0.85rem 0 1rem;
+}
+.send-sheet-bar .btn-big {
+  margin: 0;
+}
+.send-sheet-bar .muted {
+  margin: 0;
+  flex: 1;
+  min-width: 12rem;
+}
+
 .reconcile-msg {
   padding: 0.55rem 0.75rem;
   border-radius: 8px;

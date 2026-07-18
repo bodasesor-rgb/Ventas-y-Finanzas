@@ -1,0 +1,80 @@
+import { postToAppsScript } from "../appsScriptClient";
+import { loadCategories } from "./store";
+import type { StatementRun } from "./types";
+
+const CATEGORY_COLS = [
+  "ads",
+  "apps",
+  "pass",
+  "comisiones",
+  "servicios",
+  "pago",
+  "transferencia_persona",
+  "evento",
+  "revisar",
+  "otro",
+  "ingreso",
+  "venta",
+] as const;
+
+export async function sendRunToBancoSheet(run: StatementRun): Promise<{
+  sheetName: string;
+  row?: number;
+  action?: string;
+  version?: string;
+}> {
+  const periodKey = run.periodKey || "";
+  if (!/^\d{4}-\d{2}$/.test(periodKey)) {
+    throw new Error("El estado no tiene mes válido (periodKey YYYY-MM)");
+  }
+  const year = Number(periodKey.slice(0, 4));
+  const month = Number(periodKey.slice(5, 7));
+  const totals = run.totals || { ingresos: 0, gastos: 0, neto: 0 };
+  const summary = run.summaryByCategory || {};
+  const cats = loadCategories();
+  const labelOf = (id: string) =>
+    cats.find((c) => c.id === id)?.label || id;
+
+  const byCategory = CATEGORY_COLS.map((id) => ({
+    id,
+    label: labelOf(id),
+    amount: Math.round((summary[id] || 0) * 100) / 100,
+  }));
+
+  // Resto de categorías no listadas
+  const known = new Set<string>(CATEGORY_COLS as unknown as string[]);
+  let otros = 0;
+  for (const [id, amt] of Object.entries(summary)) {
+    if (!known.has(id)) otros += amt;
+  }
+
+  const oficial = run.reconciliation?.oficial;
+  const result = await postToAppsScript({
+    action: "upsertBanco",
+    year,
+    month,
+    periodKey,
+    periodLabel: run.periodLabel || periodKey,
+    ingresos: totals.ingresos,
+    // Sheet: gastos como positivo (monto salido)
+    gastos: Math.abs(totals.gastos),
+    neto: totals.neto,
+    byCategory,
+    otros: Math.round(otros * 100) / 100,
+    depositosOficiales: oficial?.ingresosOficiales ?? oficial?.depositos ?? null,
+    retirosOficiales:
+      oficial?.gastosOficiales == null
+        ? null
+        : Math.abs(oficial.gastosOficiales),
+    cuadra: Boolean(run.reconciliation?.matchCompleto),
+    runId: run.id,
+    filename: run.storedName || run.filename || "",
+  });
+
+  return {
+    sheetName: result.sheetName || `Banco ${year}`,
+    row: result.row,
+    action: result.action,
+    version: result.version,
+  };
+}

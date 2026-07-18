@@ -261,11 +261,30 @@ export function saveRules(rules: RecurringRule[]): void {
   fs.writeFileSync(RULES_FILE, JSON.stringify(rules, null, 2), "utf8");
 }
 
+/** Deja un solo run por periodKey (el más reciente). */
+function dedupeRunsByPeriod(runs: StatementRun[]): StatementRun[] {
+  const seen = new Set<string>();
+  const out: StatementRun[] = [];
+  for (const run of runs) {
+    const key = run.periodKey || `id:${run.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(run);
+  }
+  return out;
+}
+
 export function loadRuns(): StatementRun[] {
   ensureDataDir();
   if (!fs.existsSync(RUNS_FILE)) return [];
   try {
-    return JSON.parse(fs.readFileSync(RUNS_FILE, "utf8")) as StatementRun[];
+    const raw = JSON.parse(fs.readFileSync(RUNS_FILE, "utf8")) as StatementRun[];
+    if (!Array.isArray(raw)) return [];
+    const deduped = dedupeRunsByPeriod(raw);
+    if (deduped.length !== raw.length) {
+      saveRuns(deduped);
+    }
+    return deduped;
   } catch {
     return [];
   }
@@ -281,4 +300,14 @@ export function addRun(run: StatementRun): void {
   runs.unshift(run);
   // conservar últimos 30
   saveRuns(runs.slice(0, 30));
+}
+
+/** Un run por mes: reemplaza el anterior del mismo periodKey. */
+export function upsertRunByPeriod(run: StatementRun): void {
+  const runs = loadRuns();
+  const key = run.periodKey;
+  const next = key
+    ? [run, ...runs.filter((r) => r.periodKey !== key)]
+    : [run, ...runs];
+  saveRuns(next.slice(0, 30));
 }

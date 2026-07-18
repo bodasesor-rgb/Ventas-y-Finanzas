@@ -1,28 +1,33 @@
 export interface AppsScriptWriteResult {
   ok: boolean;
   version?: string;
-  action?: "appended" | "updated";
+  action?: "appended" | "updated" | "moved" | string;
   row?: number;
   dealId?: string;
+  sheetName?: string;
   error?: string;
   raw?: string;
 }
 
-/**
- * Envía la fila al webhook de Google Apps Script.
- * El script en Sheets hace append o update por kommoDealId.
- */
-export async function writeFilaToAppsScript(
-  dealId: string,
-  values: string[],
-  sheetName = "Eventos 2026"
-): Promise<AppsScriptWriteResult> {
-  // Hostinger usa URL_BODASESOR_DIRECCION_SHEETS; APPS_SCRIPT_VENTAS_URL queda como alias
-  const url = (
+function appsScriptUrl(): string {
+  return (
     process.env.URL_BODASESOR_DIRECCION_SHEETS ||
     process.env.APPS_SCRIPT_VENTAS_URL ||
     ""
   ).trim();
+}
+
+export function getAppsScriptUrl(): string {
+  return appsScriptUrl();
+}
+
+/**
+ * POST genérico al Apps Script /exec (Eventos, Banco, etc.).
+ */
+export async function postToAppsScript(
+  payload: Record<string, unknown>
+): Promise<AppsScriptWriteResult> {
+  const url = appsScriptUrl();
   if (!url) {
     throw new Error(
       "Falta URL_BODASESOR_DIRECCION_SHEETS (URL /exec del Apps Script)"
@@ -30,14 +35,14 @@ export async function writeFilaToAppsScript(
   }
   if (!url.includes("script.google.com") || !url.includes("/exec")) {
     throw new Error(
-      "URL_BODASESOR_DIRECCION_SHEETS debe ser la URL de Apps Script que termina en /exec (no el link del Sheet ni el ID de implementación)"
+      "URL_BODASESOR_DIRECCION_SHEETS debe ser la URL de Apps Script que termina en /exec"
     );
   }
 
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ dealId, values, sheetName }),
+    body: JSON.stringify(payload),
     redirect: "follow",
   });
 
@@ -59,4 +64,15 @@ export async function writeFilaToAppsScript(
   }
 
   return { ...parsed, raw: text.slice(0, 500) };
+}
+
+/**
+ * Envía la fila al webhook de Google Apps Script (Eventos).
+ */
+export async function writeFilaToAppsScript(
+  dealId: string,
+  values: string[],
+  sheetName = "Eventos 2026"
+): Promise<AppsScriptWriteResult> {
+  return postToAppsScript({ dealId, values, sheetName });
 }

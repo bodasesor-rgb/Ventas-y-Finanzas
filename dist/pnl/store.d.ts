@@ -10,3 +10,5 @@ export declare function saveRules(rules: RecurringRule[]): void;
 export declare function loadRuns(): StatementRun[];
 export declare function saveRuns(runs: StatementRun[]): void;
 export declare function addRun(run: StatementRun): void;
+/** Un run por mes: reemplaza el anterior del mismo periodKey. */
+export declare function upsertRunByPeriod(run: StatementRun): void;

@@ -24,8 +24,8 @@ import {
   extractStatementOfficialTotals,
   reconcileTotals,
 } from "./statementSummary";
+import { sendRunToBancoSheet } from "./sendToSheet";
 import {
-  addRun,
   isIncomeCategory,
   loadCategories,
   loadRules,
@@ -34,6 +34,7 @@ import {
   saveRules,
   saveRuns,
   slugCategory,
+  upsertRunByPeriod,
 } from "./store";
 import type { CategoryDef, RecurringRule, StatementRun } from "./types";
 
@@ -260,8 +261,10 @@ pnlRouter.post(
       const saved = saveStatementPdf(req.file.path, period);
       const mid = Math.max(0, Math.floor(text.length / 2) - 400);
 
+      // Un solo estado por mes: reutilizar id si ya existía
+      const prev = loadRuns().find((r) => r.periodKey === period.key);
       const run: StatementRun = {
-        id: randomUUID(),
+        id: prev?.id || randomUUID(),
         filename: req.file.originalname,
         uploadedAt: new Date().toISOString(),
         periodKey: period.key,
@@ -279,8 +282,10 @@ pnlRouter.post(
         summaryByCategory,
         totals,
         reconciliation,
+        sentToSheetAt: prev?.sentToSheetAt,
+        sentToSheet: prev?.sentToSheet,
       };
-      addRun(run);
+      upsertRunByPeriod(run);
 
       res.json({
         ok: true,
@@ -354,6 +359,47 @@ pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
       reconciliation: run.reconciliation,
     },
   });
+});
+
+/** Envía totales del mes al Sheet (pestaña Banco YYYY + cols en P&L). */
+pnlRouter.post("/api/pnl/runs/:id/send-to-sheet", async (req, res) => {
+  const runs = loadRuns();
+  const idx = runs.findIndex((r) => r.id === req.params.id);
+  if (idx < 0) {
+    res.status(404).json({ ok: false, error: "Run no encontrado" });
+    return;
+  }
+  const run = runs[idx];
+  try {
+    const result = await sendRunToBancoSheet(run);
+    run.sentToSheetAt = new Date().toISOString();
+    run.sentToSheet = {
+      ok: true,
+      sheetName: result.sheetName,
+      row: result.row,
+      action: result.action,
+      version: result.version,
+    };
+    runs[idx] = run;
+    saveRuns(runs);
+    res.json({
+      ok: true,
+      message: `Enviado a ${result.sheetName} (fila ${result.row}, ${result.action}).`,
+      run: runPublic(run),
+      sheet: result,
+    });
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    run.sentToSheet = { ok: false, error };
+    runs[idx] = run;
+    saveRuns(runs);
+    res.status(502).json({
+      ok: false,
+      error,
+      hint:
+        "Si dice que falta action upsertBanco, pega Codigo.gs v7 en Apps Script y publica Nueva versión.",
+    });
+  }
 });
 
 pnlRouter.patch("/api/pnl/runs/:runId/lines/:lineId", (req, res) => {

@@ -1,21 +1,19 @@
 /**
  * ============================================================
  * Apps Script — Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-07-17-v6
+ * VERSION: 2026-07-18-v7
  * ============================================================
- * doPost  → append/update Eventos YYYY (Kommo)
- * doGet   → { version } para verificar que la App web está en v6
- * setupAll_ → EJECUTAR UNA VEZ desde el editor para enlazar
- *             fórmulas Eventos + tabla mensual + Metricas + P&L
+ * doPost  → Eventos YYYY (Kommo) | action=upsertBanco → Banco YYYY
+ * doGet   → { version }
+ * setupAll_ → fórmulas Eventos + Metricas + P&L
  *
- * REGLA DE FILA:
- *  - Si el Kommo Deal ID (col T) ya existe → UPDATE esa fila (no duplica)
- *  - Si es nuevo → va en (última fila con Cliente en col A) + 1
- *    Ejemplo: último cliente en fila 66 → nuevo en 67
- *  - NUNCA uses getLastRow() para insertar (pega hasta abajo)
+ * REGLA Eventos:
+ *  - Deal ID en col T → UPDATE; si no → última fila Cliente + 1
+ * Banco YYYY:
+ *  - Una fila por mes (periodKey); botón "Enviar al P&L" del panel
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-07-17-v6';
+var SCRIPT_VERSION = '2026-07-18-v7';
 var DEFAULT_SHEET_NAME = 'Eventos 2026';
 var DEAL_ID_COL = 20; // T
 var CLIENTE_COL = 1; // A
@@ -100,6 +98,154 @@ function doGet() {
   });
 }
 
+/**
+ * Upsert fila mensual del estado de cuenta banco → pestaña Banco YYYY
+ * y refleja Gastos/Ingresos banco en P&L YYYY (cols F/G).
+ */
+function upsertBanco_(data) {
+  var year = Number(data.year) || new Date().getFullYear();
+  var month = Number(data.month);
+  var periodKey = String(data.periodKey || '').trim();
+  if (!periodKey || !month || month < 1 || month > 12) {
+    return json_({
+      ok: false,
+      version: SCRIPT_VERSION,
+      error: 'upsertBanco: falta periodKey o month',
+    });
+  }
+
+  var sheetName = 'Banco ' + year;
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(sheetName);
+  var headers = [
+    'Mes',
+    'Periodo',
+    'Label',
+    'Ingresos banco',
+    'Gastos banco',
+    'Neto',
+    'Ads',
+    'Apps',
+    'Pass',
+    'Comisiones',
+    'Servicios',
+    'Pagos',
+    'Transferencias',
+    'Evento',
+    'Revisar',
+    'Otro',
+    'Ingreso cat',
+    'Venta cat',
+    'Otros cats',
+    'Depósitos oficial',
+    'Retiros oficial',
+    'Cuadra',
+    'Actualizado',
+    'RunId',
+    'Archivo',
+  ];
+
+  if (!sh) {
+    sh = ss.insertSheet(sheetName);
+    sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sh.setFrozenRows(1);
+  } else if (String(sh.getRange(1, 1).getValue()).trim() !== 'Mes') {
+    sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+  }
+
+  var by = {};
+  var cats = data.byCategory || [];
+  for (var i = 0; i < cats.length; i++) {
+    by[cats[i].id] = Number(cats[i].amount) || 0;
+  }
+
+  var rowVals = [
+    month,
+    periodKey,
+    String(data.periodLabel || periodKey),
+    Number(data.ingresos) || 0,
+    Number(data.gastos) || 0,
+    Number(data.neto) || 0,
+    by.ads || 0,
+    by.apps || 0,
+    by.pass || 0,
+    by.comisiones || 0,
+    by.servicios || 0,
+    by.pago || 0,
+    by.transferencia_persona || 0,
+    by.evento || 0,
+    by.revisar || 0,
+    by.otro || 0,
+    by.ingreso || 0,
+    by.venta || 0,
+    Number(data.otros) || 0,
+    data.depositosOficiales == null ? '' : Number(data.depositosOficiales),
+    data.retirosOficiales == null ? '' : Number(data.retirosOficiales),
+    data.cuadra ? 'SI' : 'NO',
+    new Date(),
+    String(data.runId || ''),
+    String(data.filename || ''),
+  ];
+
+  var lastRow = Math.max(sh.getLastRow(), 1);
+  var rowIndex = -1;
+  if (lastRow >= 2) {
+    var keys = sh.getRange(2, 2, lastRow, 2).getValues(); // col B Periodo
+    for (var r = 0; r < keys.length; r++) {
+      if (String(keys[r][0]).trim() === periodKey) {
+        rowIndex = r + 2;
+        break;
+      }
+    }
+  }
+
+  var action;
+  if (rowIndex === -1) {
+    rowIndex = sh.getLastRow() + 1;
+    if (rowIndex < 2) rowIndex = 2;
+    action = 'appended';
+  } else {
+    action = 'updated';
+  }
+
+  sh.getRange(rowIndex, 1, 1, rowVals.length).setValues([rowVals]);
+  sh.getRange(rowIndex, 4, 1, 16).setNumberFormat('$#,##0.00');
+
+  linkPnLBanco_(ss, year);
+
+  return json_({
+    ok: true,
+    version: SCRIPT_VERSION,
+    action: action,
+    row: rowIndex,
+    sheetName: sheetName,
+    periodKey: periodKey,
+  });
+}
+
+/** P&L YYYY cols F/G = Ingresos/Gastos banco del mes */
+function linkPnLBanco_(ss, year) {
+  var plName = 'P&L ' + year;
+  var bancoName = 'Banco ' + year;
+  var sh = ss.getSheetByName(plName);
+  if (!sh) return;
+  sh.getRange('F3').setValue('Ingresos banco');
+  sh.getRange('G3').setValue('Gastos banco');
+  for (var m = 1; m <= 12; m++) {
+    var r = 3 + m;
+    sh.getRange(r, 6).setFormula(
+      "=IFERROR(SUMIF('" + bancoName + "'!$A:$A,A" + r + ",'" + bancoName + "'!$D:$D),0)"
+    );
+    sh.getRange(r, 7).setFormula(
+      "=IFERROR(SUMIF('" + bancoName + "'!$A:$A,A" + r + ",'" + bancoName + "'!$E:$E),0)"
+    );
+  }
+  sh.getRange('F4:G15').setNumberFormat('$#,##0.00');
+  sh.getRange(16, 6).setFormula('=SUM(F4:F15)');
+  sh.getRange(16, 7).setFormula('=SUM(G4:G15)');
+  sh.getRange('F16:G16').setNumberFormat('$#,##0.00');
+}
+
 function doPost(e) {
   try {
     var raw = e && e.postData && e.postData.contents ? e.postData.contents : '';
@@ -112,12 +258,17 @@ function doPost(e) {
     }
 
     var data = JSON.parse(raw);
+
+    if (data && data.action === 'upsertBanco') {
+      return upsertBanco_(data);
+    }
+
     var values = data.values;
     if (!values || !Array.isArray(values)) {
       return json_({
         ok: false,
         version: SCRIPT_VERSION,
-        error: 'values no es array',
+        error: 'values no es array (¿falta republicar Apps Script v7?)',
         typeofValues: typeof values,
         rawPreview: String(raw).slice(0, 200),
       });

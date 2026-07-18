@@ -52,12 +52,30 @@ function computeTotals(lines) {
   };
 }
 
+function renderSendSheetStatus(run) {
+  const status = document.getElementById("sendToSheetStatus");
+  const btn = document.getElementById("sendToSheetBtn");
+  if (btn) btn.disabled = !run?.id;
+  if (!status) return;
+  if (run?.sentToSheet?.ok && run.sentToSheetAt) {
+    status.textContent = `En Sheet: ${run.sentToSheet.sheetName || "Banco"} · fila ${
+      run.sentToSheet.row || "?"
+    } · ${fmtDate(run.sentToSheetAt)}`;
+  } else if (run?.sentToSheet?.ok === false) {
+    status.textContent = "Último envío falló: " + (run.sentToSheet.error || "");
+  } else {
+    status.textContent =
+      "Cuando cuadre, envía el mes a la pestaña Banco del Sheet (también llena P&L cols F/G).";
+  }
+}
+
 function renderTotals(run) {
   const bar = document.getElementById("totalsBar");
   if (!bar) return;
   const t = run.totals || computeTotals(run.lines);
   const rec = run.reconciliation;
   bar.hidden = false;
+  renderSendSheetStatus(run);
   const ing = document.getElementById("totalIngresos");
   const gas = document.getElementById("totalGastos");
   const net = document.getElementById("totalNeto");
@@ -377,6 +395,7 @@ function renderLibrary(months) {
                 <span>${when} · ${count} movs · ${escapeHtml(r.filename || "")}</span>
               </div>
               <button type="button" data-act="open">Abrir movimientos</button>
+              <button type="button" data-act="send">Enviar al P&amp;L</button>
               ${
                 hasPdf
                   ? `<button type="button" class="secondary" data-act="pdf">Ver PDF</button>
@@ -415,6 +434,23 @@ function renderLibrary(months) {
     });
     el.querySelector('[data-act="pdf"]')?.addEventListener("click", () => {
       openPdfViewer(runId, el.querySelector("strong")?.textContent || "PDF");
+    });
+    el.querySelector('[data-act="send"]')?.addEventListener("click", async () => {
+      const btn = el.querySelector('[data-act="send"]');
+      if (btn) btn.setAttribute("disabled", "true");
+      try {
+        const data = await api(
+          `/api/pnl/runs/${encodeURIComponent(runId)}/send-to-sheet`,
+          { method: "POST" }
+        );
+        alert(data.message || "Enviado al Sheet");
+        if (data.run && currentRun?.id === runId) renderRun(data.run);
+        await refreshLibrary();
+      } catch (e) {
+        alert(e.message);
+      } finally {
+        if (btn) btn.removeAttribute("disabled");
+      }
     });
   });
 }
@@ -707,6 +743,7 @@ async function init() {
   const fileName = document.getElementById("fileName");
   const processBtn = document.getElementById("processBtn");
   const status = document.getElementById("uploadStatus");
+  let uploading = false;
 
   function isPdf(file) {
     if (!file) return false;
@@ -719,6 +756,8 @@ async function init() {
       status.textContent = "No hay PDF seleccionado.";
       return;
     }
+    if (uploading) return;
+    uploading = true;
     status.textContent = "Procesando PDF…";
     processBtn.disabled = true;
     processBtn.textContent = "Procesando…";
@@ -751,9 +790,37 @@ async function init() {
     } catch (e) {
       status.textContent = "Error: " + e.message;
     } finally {
+      uploading = false;
       processBtn.disabled = false;
       processBtn.textContent = "Procesar PDF";
     }
+  }
+
+  const sendBtn = document.getElementById("sendToSheetBtn");
+  if (sendBtn) {
+    sendBtn.onclick = async () => {
+      if (!currentRun?.id) {
+        const el = document.getElementById("sendToSheetStatus");
+        if (el) el.textContent = "Abre un estado de cuenta primero.";
+        return;
+      }
+      sendBtn.disabled = true;
+      const el = document.getElementById("sendToSheetStatus");
+      if (el) el.textContent = "Enviando al Sheet…";
+      try {
+        const data = await api(
+          `/api/pnl/runs/${encodeURIComponent(currentRun.id)}/send-to-sheet`,
+          { method: "POST" }
+        );
+        if (data.run) renderRun(data.run);
+        if (el) el.textContent = data.message || "Enviado.";
+        await refreshLibrary();
+      } catch (e) {
+        if (el) el.textContent = "Error: " + e.message;
+      } finally {
+        sendBtn.disabled = false;
+      }
+    };
   }
 
   function setFile(file, autoUpload) {

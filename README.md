@@ -39,8 +39,8 @@ Regla de filas v6:
 - **Poll cada 60s** (backup): si Kommo no manda el webhook, igual sincroniza deals con `closed_at` o status ganado (142)
 - Manual: `GET /api/ventas/poll-now` o `GET /api/ventas/sync/:dealId`
 
-## P&L PDF — alcance actual (MVP)
+## P&L PDF (banco)
 
-- Parse determinista (regex fecha+monto + keywords)
-- Reglas editables en UI (persistidas en `data/recurring-rules.json`)
-- **Aún no** escribe al Sheet P&L automáticamente (siguiente paso si el parse te sirve con tus PDFs reales)
+- UI: `/pnl/` — 1 PDF por mes (reemplaza si subes de nuevo el mismo mes)
+- Botón **Enviar al P&L (Sheet)** → pestaña `Banco YYYY` + cols F/G en `P&L YYYY`
+- Requiere Apps Script **v7** (`upsertBanco`) republicado en la misma URL `/exec`

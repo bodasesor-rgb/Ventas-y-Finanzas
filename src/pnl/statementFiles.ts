@@ -11,8 +11,8 @@ export function ensureStatementsRoot(): void {
 }
 
 /**
- * Guarda el PDF en data/statements/YYYY-MM/YYYY-MM_estado-cuenta.pdf
- * Si ya existe, agrega sufijo _2, _3…
+ * Guarda el PDF como data/statements/YYYY-MM/YYYY-MM_estado-cuenta.pdf
+ * Un solo archivo por mes: sobrescribe y borra variantes _2, _3…
  */
 export function saveStatementPdf(
   tempPath: string,
@@ -22,16 +22,28 @@ export function saveStatementPdf(
   const dir = path.join(STATEMENTS_ROOT, period.key);
   fs.mkdirSync(dir, { recursive: true });
 
-  let storedName = period.fileTitle;
-  let dest = path.join(dir, storedName);
-  let n = 2;
-  while (fs.existsSync(dest)) {
-    storedName = `${period.key}_estado-cuenta_${n}.pdf`;
-    dest = path.join(dir, storedName);
-    n += 1;
+  const storedName = period.fileTitle;
+  const dest = path.join(dir, storedName);
+  fs.copyFileSync(tempPath, dest);
+
+  try {
+    for (const f of fs.readdirSync(dir)) {
+      if (f === storedName) continue;
+      if (
+        f.startsWith(`${period.key}_estado-cuenta`) &&
+        f.toLowerCase().endsWith(".pdf")
+      ) {
+        try {
+          fs.unlinkSync(path.join(dir, f));
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  } catch {
+    /* ignore cleanup */
   }
 
-  fs.copyFileSync(tempPath, dest);
   try {
     fs.unlinkSync(tempPath);
   } catch {

@@ -1,25 +1,31 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.getAppsScriptUrl = getAppsScriptUrl;
+exports.postToAppsScript = postToAppsScript;
 exports.writeFilaToAppsScript = writeFilaToAppsScript;
-/**
- * Envía la fila al webhook de Google Apps Script.
- * El script en Sheets hace append o update por kommoDealId.
- */
-async function writeFilaToAppsScript(dealId, values, sheetName = "Eventos 2026") {
-    // Hostinger usa URL_BODASESOR_DIRECCION_SHEETS; APPS_SCRIPT_VENTAS_URL queda como alias
-    const url = (process.env.URL_BODASESOR_DIRECCION_SHEETS ||
+function appsScriptUrl() {
+    return (process.env.URL_BODASESOR_DIRECCION_SHEETS ||
         process.env.APPS_SCRIPT_VENTAS_URL ||
         "").trim();
+}
+function getAppsScriptUrl() {
+    return appsScriptUrl();
+}
+/**
+ * POST genérico al Apps Script /exec (Eventos, Banco, etc.).
+ */
+async function postToAppsScript(payload) {
+    const url = appsScriptUrl();
     if (!url) {
         throw new Error("Falta URL_BODASESOR_DIRECCION_SHEETS (URL /exec del Apps Script)");
     }
     if (!url.includes("script.google.com") || !url.includes("/exec")) {
-        throw new Error("URL_BODASESOR_DIRECCION_SHEETS debe ser la URL de Apps Script que termina en /exec (no el link del Sheet ni el ID de implementación)");
+        throw new Error("URL_BODASESOR_DIRECCION_SHEETS debe ser la URL de Apps Script que termina en /exec");
     }
     const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dealId, values, sheetName }),
+        body: JSON.stringify(payload),
         redirect: "follow",
     });
     const text = await res.text();
@@ -35,5 +41,11 @@ async function writeFilaToAppsScript(dealId, values, sheetName = "Eventos 2026")
             `Apps Script error HTTP ${res.status}: ${text.slice(0, 300)}`);
     }
     return { ...parsed, raw: text.slice(0, 500) };
+}
+/**
+ * Envía la fila al webhook de Google Apps Script (Eventos).
+ */
+async function writeFilaToAppsScript(dealId, values, sheetName = "Eventos 2026") {
+    return postToAppsScript({ dealId, values, sheetName });
 }
 //# sourceMappingURL=appsScriptClient.js.map

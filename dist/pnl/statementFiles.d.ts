@@ -2,8 +2,8 @@ import type { StatementPeriod } from "./period";
 export declare const STATEMENTS_ROOT: string;
 export declare function ensureStatementsRoot(): void;
 /**
- * Guarda el PDF en data/statements/YYYY-MM/YYYY-MM_estado-cuenta.pdf
- * Si ya existe, agrega sufijo _2, _3…
+ * Guarda el PDF como data/statements/YYYY-MM/YYYY-MM_estado-cuenta.pdf
+ * Un solo archivo por mes: sobrescribe y borra variantes _2, _3…
  */
 export declare function saveStatementPdf(tempPath: string, period: StatementPeriod): {
     storedPath: string;

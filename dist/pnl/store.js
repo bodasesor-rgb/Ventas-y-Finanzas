@@ -14,6 +14,7 @@ exports.saveRules = saveRules;
 exports.loadRuns = loadRuns;
 exports.saveRuns = saveRuns;
 exports.addRun = addRun;
+exports.upsertRunByPeriod = upsertRunByPeriod;
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const categoryColors_1 = require("./categoryColors");
@@ -264,12 +265,32 @@ function saveRules(rules) {
     ensureDataDir();
     fs_1.default.writeFileSync(RULES_FILE, JSON.stringify(rules, null, 2), "utf8");
 }
+/** Deja un solo run por periodKey (el más reciente). */
+function dedupeRunsByPeriod(runs) {
+    const seen = new Set();
+    const out = [];
+    for (const run of runs) {
+        const key = run.periodKey || `id:${run.id}`;
+        if (seen.has(key))
+            continue;
+        seen.add(key);
+        out.push(run);
+    }
+    return out;
+}
 function loadRuns() {
     ensureDataDir();
     if (!fs_1.default.existsSync(RUNS_FILE))
         return [];
     try {
-        return JSON.parse(fs_1.default.readFileSync(RUNS_FILE, "utf8"));
+        const raw = JSON.parse(fs_1.default.readFileSync(RUNS_FILE, "utf8"));
+        if (!Array.isArray(raw))
+            return [];
+        const deduped = dedupeRunsByPeriod(raw);
+        if (deduped.length !== raw.length) {
+            saveRuns(deduped);
+        }
+        return deduped;
     }
     catch {
         return [];
@@ -284,5 +305,14 @@ function addRun(run) {
     runs.unshift(run);
     // conservar últimos 30
     saveRuns(runs.slice(0, 30));
+}
+/** Un run por mes: reemplaza el anterior del mismo periodKey. */
+function upsertRunByPeriod(run) {
+    const runs = loadRuns();
+    const key = run.periodKey;
+    const next = key
+        ? [run, ...runs.filter((r) => r.periodKey !== key)]
+        : [run, ...runs];
+    saveRuns(next.slice(0, 30));
 }
 //# sourceMappingURL=store.js.map

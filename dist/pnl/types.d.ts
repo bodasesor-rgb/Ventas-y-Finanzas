@@ -85,4 +85,14 @@ export interface StatementRun {
         matchCompleto: boolean;
         tolerancia: number;
     };
+    /** Última vez que se envió al Sheet (Banco / P&L) */
+    sentToSheetAt?: string;
+    sentToSheet?: {
+        ok: boolean;
+        sheetName?: string;
+        row?: number;
+        action?: string;
+        version?: string;
+        error?: string;
+    };
 }
