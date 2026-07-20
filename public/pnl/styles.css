@@ -29,6 +29,22 @@ body {
   padding: 0.55rem 1rem;
   letter-spacing: 0.01em;
 }
+.script-status-banner {
+  background: #7a2e0b;
+  color: #fff;
+  text-align: center;
+  font-weight: 600;
+  font-size: 0.88rem;
+  padding: 0.65rem 1rem;
+  line-height: 1.35;
+}
+.script-status-banner.is-ok {
+  background: #0b4f6b;
+}
+.script-status-banner a {
+  color: #fff;
+  text-decoration: underline;
+}
 .version-pill {
   display: inline-block;
   background: #0b6b3a;

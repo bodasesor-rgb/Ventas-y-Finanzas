@@ -9,6 +9,7 @@ export interface AppsScriptWriteResult {
   erMonthCol?: string;
   pnlSheet?: string;
   pnlMonthCol?: string;
+  message?: string;
   error?: string;
   raw?: string;
   /** Archive / Drive */

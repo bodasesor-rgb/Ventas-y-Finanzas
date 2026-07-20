@@ -5,12 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <title>Bodasesor — P&L Banco</title>
-  <link rel="stylesheet" href="/pnl/styles.css?v=20260718g" />
+  <link rel="stylesheet" href="/pnl/styles.css?v=20260720a" />
 </head>
 <body>
   <div class="version-banner" id="versionBanner">
-    UI v2026-07-18g — Submenú · Análisis anual completo
+    UI v2026-07-20a — Estado de Resultados en Sheet
   </div>
+  <div class="script-status-banner" id="scriptStatusBanner" hidden></div>
 
   <header class="top">
     <div>
@@ -19,7 +20,7 @@
       <p class="sub">Traspasos: socios Luis Alejandro Sanchez Campbell y Alejandro Zorrilla Elorza; el resto = proveedores.</p>
     </div>
     <div class="top-links">
-      <span class="version-pill">v2026-07-18g</span>
+      <span class="version-pill">v2026-07-20a</span>
       <a class="link" href="/health">API health</a>
     </div>
   </header>
@@ -120,8 +121,12 @@
       </div>
       <p id="reconcileMsg" class="reconcile-msg" hidden></p>
       <div class="send-sheet-bar">
+        <button type="button" id="setupErBtn" class="btn-big secondary">
+          Crear pestaña Estado de Resultados
+        </button>
         <button type="button" id="sendToSheetBtn" class="btn-big">Enviar a Estado de Resultados</button>
         <p id="sendToSheetStatus" class="muted"></p>
+        <p id="setupErStatus" class="muted"></p>
       </div>
       <p class="muted">Edita monto o descripción si algo se ve raro. La columna <strong>Revisar</strong> = checar el movimiento.</p>
       <div id="summary" class="summary"></div>

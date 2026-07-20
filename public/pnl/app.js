@@ -1079,7 +1079,38 @@ async function refreshAnalysis() {
   }
 }
 
+async function refreshAppsScriptStatus() {
+  const banner = document.getElementById("scriptStatusBanner");
+  if (!banner) return null;
+  try {
+    const data = await api("/api/pnl/apps-script-status");
+    banner.hidden = false;
+    if (data.needsPublish) {
+      banner.classList.remove("is-ok");
+      banner.innerHTML =
+        `<strong>Apps Script ${data.version || "?"} — falta publicar v18.</strong> ` +
+        `Por eso no aparece la pestaña Estado de Resultados. ` +
+        `Pega <a href="https://raw.githubusercontent.com/bodasesor-rgb/Ventas-y-Finanzas/main/apps-script/Codigo.gs" target="_blank" rel="noopener">Codigo.gs</a>, ` +
+        `Guarda → Implementar → Nueva versión (misma URL), luego pulsa «Crear pestaña Estado de Resultados».`;
+    } else {
+      banner.classList.add("is-ok");
+      banner.textContent =
+        data.message ||
+        `Apps Script ${data.version}: listo · ${data.erSheet || "Estado de Resultados"}`;
+    }
+    return data;
+  } catch (e) {
+    banner.hidden = false;
+    banner.classList.remove("is-ok");
+    banner.textContent =
+      "No pude leer Apps Script: " + (e.message || e);
+    return null;
+  }
+}
+
 async function init() {
+  await refreshAppsScriptStatus();
+
   document.querySelectorAll(".subnav-item").forEach((btn) => {
     btn.addEventListener("click", () => {
       showView(btn.getAttribute("data-view"));
@@ -1303,6 +1334,33 @@ async function init() {
         if (el) el.textContent = "Error: " + e.message;
       } finally {
         restoreBtn.disabled = false;
+      }
+    };
+  }
+
+  const setupErBtn = document.getElementById("setupErBtn");
+  if (setupErBtn) {
+    setupErBtn.onclick = async () => {
+      const el = document.getElementById("setupErStatus");
+      setupErBtn.disabled = true;
+      if (el) el.textContent = "Creando pestaña en el Sheet…";
+      try {
+        const data = await api("/api/pnl/setup-estado-resultados", {
+          method: "POST",
+        });
+        if (el) {
+          el.textContent =
+            data.message ||
+            `OK → ${data.erSheet || "Estado de Resultados"} · v${
+              data.version || "?"
+            }. Ábrela abajo en el Sheet.`;
+        }
+        await refreshAppsScriptStatus();
+      } catch (e) {
+        if (el) el.textContent = "Error: " + e.message;
+        await refreshAppsScriptStatus();
+      } finally {
+        setupErBtn.disabled = false;
       }
     };
   }

@@ -19,6 +19,8 @@ const statementSummary_1 = require("./statementSummary");
 const driveArchive_1 = require("./driveArchive");
 const counterparties_1 = require("./counterparties");
 const providerAnalysis_1 = require("./providerAnalysis");
+const appsScriptClient_1 = require("../appsScriptClient");
+const appsScriptClient_2 = require("../appsScriptClient");
 const sendToSheet_1 = require("./sendToSheet");
 const store_1 = require("./store");
 const uploadDir = path_1.default.join(process.cwd(), "uploads");
@@ -418,6 +420,87 @@ exports.pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
             reconciliation: run.reconciliation,
         },
     });
+});
+/** Ping Apps Script: versión publicada + si ya conoce Estado de Resultados. */
+exports.pnlRouter.get("/api/pnl/apps-script-status", async (_req, res) => {
+    const url = (0, appsScriptClient_2.getAppsScriptUrl)();
+    if (!url) {
+        res.status(503).json({
+            ok: false,
+            error: "Falta URL Apps Script en el servidor",
+        });
+        return;
+    }
+    try {
+        const r = await fetch(url, { redirect: "follow" });
+        const text = await r.text();
+        let data = {};
+        try {
+            data = JSON.parse(text);
+        }
+        catch {
+            res.status(502).json({
+                ok: false,
+                error: "Apps Script no devolvió JSON",
+                rawPreview: text.slice(0, 200),
+            });
+            return;
+        }
+        const version = String(data.version || "");
+        const sheets = Array.isArray(data.sheets) ? data.sheets : [];
+        const hasErFlag = Boolean(data.hasEstadoResultados);
+        const hasErSheet = sheets.some((s) => String(s).startsWith("Estado de Resultados"));
+        const needsPublish = !hasErFlag && !/v1[89]|v2\d/.test(version) && !hasErSheet;
+        res.json({
+            ok: true,
+            version,
+            erSheet: data.erSheet || "Estado de Resultados 2026",
+            hasEstadoResultados: hasErFlag || hasErSheet,
+            needsPublish,
+            sheets,
+            message: needsPublish
+                ? `Apps Script sigue en ${version || "?"}. Hay que pegar Codigo.gs v18 y publicar Nueva versión para que exista la pestaña Estado de Resultados.`
+                : `Apps Script ${version}: listo para Estado de Resultados.`,
+        });
+    }
+    catch (err) {
+        res.status(502).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+});
+/** Crea/regenera la pestaña Estado de Resultados en el Sheet (vía Apps Script). */
+exports.pnlRouter.post("/api/pnl/setup-estado-resultados", async (_req, res) => {
+    try {
+        const result = await (0, appsScriptClient_1.postToAppsScript)({
+            action: "setupEstadoResultados",
+        });
+        if (!result.ok) {
+            res.status(502).json({
+                ok: false,
+                error: result.error || "Apps Script rechazó setupEstadoResultados",
+                version: result.version,
+                hint: "Pega Codigo.gs v18 en Apps Script → Guardar → Implementar → Nueva versión. Luego reintenta.",
+            });
+            return;
+        }
+        res.json({
+            ok: true,
+            version: result.version,
+            erSheet: result.erSheet || "Estado de Resultados 2026",
+            message: result.message ||
+                `Pestaña lista: ${result.erSheet || "Estado de Resultados 2026"}`,
+        });
+    }
+    catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        res.status(502).json({
+            ok: false,
+            error,
+            hint: "Si el /exec aún es v16, pega Codigo.gs v18, publica Nueva versión, y vuelve a pulsar.",
+        });
+    }
 });
 /** Envía totales del mes al Sheet (Banco + Estado de Resultados por columna). */
 exports.pnlRouter.post("/api/pnl/runs/:id/send-to-sheet", async (req, res) => {

@@ -123,6 +123,8 @@ function doGet() {
     ok: true,
     version: SCRIPT_VERSION,
     ping: true,
+    erSheet: ER_SHEET,
+    hasEstadoResultados: true,
     sheets: [
       EVENTOS_SHEET,
       METRICAS_SHEET,
@@ -956,7 +958,27 @@ function doPost(e) {
     }
     if (data && data.action === 'setupAll') {
       setupAllSilent_();
-      return json_({ ok: true, version: SCRIPT_VERSION, action: 'setupAll' });
+      return json_({
+        ok: true,
+        version: SCRIPT_VERSION,
+        action: 'setupAll',
+        erSheet: ER_SHEET,
+      });
+    }
+    if (data && data.action === 'setupEstadoResultados') {
+      var ssEr = SpreadsheetApp.getActiveSpreadsheet();
+      ensureBancoSheet_(ssEr);
+      setupEstadoResultados_(ssEr);
+      return json_({
+        ok: true,
+        version: SCRIPT_VERSION,
+        action: 'setupEstadoResultados',
+        erSheet: ER_SHEET,
+        message:
+          'Pestaña creada: ' +
+          ER_SHEET +
+          '. Ábrela en el Sheet (abajo, entre las pestañas).',
+      });
     }
 
     var values = data.values;
