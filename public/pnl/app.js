@@ -1245,7 +1245,7 @@ async function refreshAppsScriptStatus() {
   const erLive = document.getElementById("erLiveStatus");
   const erName = document.getElementById("erSheetName");
   const build = (await loadUiBuildInfo()) || {
-    uiVersion: "2026-07-20b",
+    uiVersion: "2026-07-20d",
     modifiedAt: null,
   };
   const checkedAt = new Date().toISOString();
