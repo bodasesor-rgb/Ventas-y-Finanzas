@@ -557,11 +557,16 @@ pnlRouter.post("/api/pnl/setup-estado-resultados", async (_req, res) => {
     });
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
+    const looksOld =
+      /values no es array|v16|action/i.test(error) ||
+      /setupEstadoResultados/i.test(error);
     res.status(502).json({
       ok: false,
-      error,
+      error: looksOld
+        ? "Apps Script aún no es v18 (sigue sin conocer setupEstadoResultados)."
+        : error,
       hint:
-        "Si el /exec aún es v16, pega Codigo.gs v18, publica Nueva versión, y vuelve a pulsar.",
+        "Pega Codigo.gs v18 → Guardar → Implementar → Nueva versión (misma URL /exec). Luego vuelve a pulsar Crear pestaña.",
     });
   }
 });

@@ -1198,11 +1198,6 @@ async function init() {
     refreshAppsScriptStatus();
   });
 
-  const hash = (location.hash || "").replace(/^#/, "");
-  if (hash === "analisis" || hash === "estado-resultados") {
-    showView(hash);
-  }
-
   document.getElementById("analysisYearSelect")?.addEventListener("change", (ev) => {
     const sel = ev.target;
     sel.dataset.userPicked = "1";
@@ -1290,41 +1285,61 @@ async function init() {
   }
   await refreshLibrary();
 
-  const hash = (location.hash || "").replace("#", "");
-  showView(hash === "analisis" ? "analisis" : "estados");
+  const startHash = (location.hash || "").replace(/^#/, "");
+  if (
+    startHash === "analisis" ||
+    startHash === "estado-resultados" ||
+    startHash === "estados"
+  ) {
+    showView(startHash);
+  } else {
+    showView("estados");
+  }
 
-  document.getElementById("addRule").onclick = () => {
-    rules.push({
-      id: "new-" + Date.now(),
-      match: "",
-      label: "",
-      category: categories[0]?.id || "otro",
-      frecuente: true,
-    });
-    renderRules();
-  };
-
-  document.getElementById("saveRules").onclick = async () => {
-    try {
-      const saved = await api("/api/pnl/rules", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rules }),
+  const addRuleBtn = document.getElementById("addRule");
+  if (addRuleBtn) {
+    addRuleBtn.onclick = () => {
+      rules.push({
+        id: "new-" + Date.now(),
+        match: "",
+        label: "",
+        category: categories[0]?.id || "otro",
+        frecuente: true,
       });
-      rules = saved.rules;
       renderRules();
-      document.getElementById("rulesStatus").textContent = "Reglas guardadas.";
-    } catch (e) {
-      document.getElementById("rulesStatus").textContent = e.message;
-    }
-  };
+    };
+  }
+
+  const saveRulesBtn = document.getElementById("saveRules");
+  if (saveRulesBtn) {
+    saveRulesBtn.onclick = async () => {
+      try {
+        const saved = await api("/api/pnl/rules", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rules }),
+        });
+        rules = saved.rules;
+        renderRules();
+        const rs = document.getElementById("rulesStatus");
+        if (rs) rs.textContent = "Reglas guardadas.";
+      } catch (e) {
+        const rs = document.getElementById("rulesStatus");
+        if (rs) rs.textContent = e.message;
+      }
+    };
+  }
 
   const dropZone = document.getElementById("dropZone");
   const fileInput = document.getElementById("file");
   const fileName = document.getElementById("fileName");
   const processBtn = document.getElementById("processBtn");
   const status = document.getElementById("uploadStatus");
+  const uploadForm = document.getElementById("uploadForm");
   let uploading = false;
+  if (!dropZone || !fileInput || !processBtn || !status || !uploadForm) {
+    console.warn("[pnl] faltan controles de upload; se omiten handlers de PDF");
+  } else {
 
   function isPdf(file) {
     if (!file) return false;
@@ -1542,7 +1557,7 @@ async function init() {
     await uploadFile(file);
   });
 
-  document.getElementById("uploadForm").addEventListener("submit", async (ev) => {
+  uploadForm.addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const file = selectedFile || (fileInput.files && fileInput.files[0]);
     await uploadFile(file);
@@ -1582,6 +1597,7 @@ async function init() {
       }
     };
   }
+  } // end upload controls
 }
 
 init().catch((e) => {
