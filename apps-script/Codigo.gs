@@ -1,36 +1,36 @@
 /**
  * ============================================================
  * Apps Script — Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-07-20-v21
+ * VERSION: 2026-07-20-v22
  * ============================================================
  * PEGAR TODO ESTE ARCHIVO (borrar lo anterior → pegar → Guardar)
  *
  * Luego:
  *   1) authorizeDrive_ → ▶ Ejecutar (Drive)
  *   2) restoreEstadoResultados_ → ▶ Crea pestaña Estado de Resultados
- *      (NO toca Metricas A:L)
- *   3) restoreMetricasSemanal_ → ▶ Adjunta resumen semanal en Metricas
- *      (solo columnas N+; NO borra tu diseño A:L)
+ *   3) restoreMetricasSemanal_ → ▶ Duplica Metricas a «Metricas YYYY Auto»
+ *      y pone ahí el resumen semanal (la Metricas original NO se toca)
  *   4) Implementar → Nueva versión → misma URL /exec
  *
- * REGLA v21:
- *   - Lo que se VE en Sheet = Estado de Resultados YYYY (por mes)
- *   - Banco YYYY queda oculto (solo respaldo técnico del PDF)
- *   - Respuestas incluyen spreadsheetUrl para abrir el Sheet correcto
- *   - Metricas A:L NUNCA se toca / nunca clear del dashboard
- *   - Resumen SEMANAL Eventos se adjunta en Metricas (zona N+)
+ * REGLA v22:
+ *   - Metricas YYYY (original) NUNCA se modifica
+ *   - Todo lo nuevo va a Metricas YYYY Auto (copia de prueba)
+ *   - Cuando confirmes que funciona, renombras / migrás a ese espacio
+ *   - Banco YYYY queda oculto (respaldo técnico del PDF)
  *
  * doPost: Eventos | upsertEstadoResultados | upsertBanco | upsertAnalisis | archive
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-07-20-v21';
+var SCRIPT_VERSION = '2026-07-20-v22';
 var METRICAS_MARKER = 'BOT_METRICAS_V14';
-var METRICAS_SEMANAL_MARKER = 'BOT_METRICAS_SEMANAL_V21';
+var METRICAS_SEMANAL_MARKER = 'BOT_METRICAS_SEMANAL_V22';
 var PNL_MARKER = 'BOT_PNL_MESES_V17';
 var ER_MARKER = 'BOT_ESTADO_RESULTADOS_V20';
 var YEAR = 2026;
 var EVENTOS_SHEET = 'Eventos ' + YEAR;
 var METRICAS_SHEET = 'Metricas ' + YEAR;
+/** Copia de prueba: aquí vive el semanal. La original no se toca. */
+var METRICAS_AUTO_SHEET = 'Metricas ' + YEAR + ' Auto';
 var PL_SHEET = 'P&L ' + YEAR;
 var ER_SHEET = 'Estado de Resultados ' + YEAR;
 var BANCO_SHEET = 'Banco ' + YEAR;
@@ -156,6 +156,7 @@ function doGet() {
     sheets: [
       EVENTOS_SHEET,
       METRICAS_SHEET,
+      METRICAS_AUTO_SHEET,
       ER_SHEET,
       PL_SHEET,
       BANCO_SHEET,
@@ -1242,8 +1243,10 @@ function setupAll_() {
     '✓ ' +
     ARCHIVE_SHEET +
     ' + Drive\n\n' +
-    'Metricas A:L NO se tocó.\n' +
-    'Semanal Metricas: restoreMetricasSemanal_\n' +
+    'Metricas original NO se tocó.\n' +
+    'Copia + semanal: restoreMetricasSemanal_ → «' +
+    METRICAS_AUTO_SHEET +
+    '»\n' +
     'ER: restoreEstadoResultados_\n\n' +
     'Siguiente: Nueva versión → Implementar';
   try {
@@ -1270,20 +1273,23 @@ function setupAllSilent_() {
   ensureAnalisisSheet_(ss, YEAR);
 }
 
-/** Si falta tabla/bloque semanal, lo crea. No reescribe si ya está. */
+/**
+ * Si falta tabla semanal en Eventos o la pestaña Auto, la prepara.
+ * Nunca escribe en Metricas original.
+ */
 function ensureWeeklyPipeline_(ss) {
   ss = ss || SpreadsheetApp.getActiveSpreadsheet();
   var eventos = ensureEventosSheet_(ss);
   if (String(eventos.getRange('AD3').getValue()).trim() !== 'Semana') {
     setupWeeklyTable_(eventos);
   }
-  var metricas = ss.getSheetByName(METRICAS_SHEET);
-  if (!metricas) {
+  var auto = ss.getSheetByName(METRICAS_AUTO_SHEET);
+  if (!auto) {
     ensureMetricasSemanal_(ss);
     return;
   }
-  var col = metricasSemanalAnchorCol_(metricas);
-  var marker = String(metricas.getRange(2, col).getValue());
+  var col = metricasSemanalAnchorCol_(auto);
+  var marker = String(auto.getRange(2, col).getValue());
   if (marker.indexOf('BOT_METRICAS_SEMANAL') === -1) {
     ensureMetricasSemanal_(ss);
   }
@@ -1395,9 +1401,37 @@ function setupWeeklyTable_(sheet) {
 }
 
 /**
- * Ancla del bloque semanal en Metricas.
- * Preferimos columna N; si N está ocupada sin nuestro marker → AA.
- * NUNCA usa A:L (dashboard del usuario).
+ * Duplica Metricas YYYY → Metricas YYYY Auto (si Auto aún no existe).
+ * La pestaña original NO se modifica.
+ */
+function ensureMetricasAutoSheet_(ss) {
+  ss = ss || SpreadsheetApp.getActiveSpreadsheet();
+  var auto = ss.getSheetByName(METRICAS_AUTO_SHEET);
+  if (auto) {
+    return { sheet: auto, duplicated: false, createdBlank: false };
+  }
+
+  var src = ss.getSheetByName(METRICAS_SHEET);
+  if (src) {
+    auto = src.copyTo(ss);
+    auto.setName(METRICAS_AUTO_SHEET);
+    try {
+      ss.setActiveSheet(auto);
+      ss.moveActiveSheet(src.getIndex() + 1);
+    } catch (moveErr) {
+      Logger.log('moveActiveSheet: ' + moveErr);
+    }
+    return { sheet: auto, duplicated: true, createdBlank: false };
+  }
+
+  // Sin original: crea Auto vacía (luego se le pone el semanal)
+  auto = ss.insertSheet(METRICAS_AUTO_SHEET);
+  return { sheet: auto, duplicated: false, createdBlank: true };
+}
+
+/**
+ * Ancla del bloque semanal en la pestaña Auto.
+ * Preferimos columna N; si N está ocupada sin marker → AA.
  */
 function metricasSemanalAnchorCol_(sh) {
   var n2 = String(sh.getRange(2, 14).getValue()); // N2
@@ -1409,29 +1443,27 @@ function metricasSemanalAnchorCol_(sh) {
 }
 
 /**
- * Adjunta en Metricas YYYY el resumen SEMANAL de Eventos.
- * Solo escribe la zona N:U (o AA:AH). NO clear de A:L ni del resto.
+ * Escribe el resumen SEMANAL en Metricas YYYY Auto (copia).
+ * Nunca escribe en Metricas YYYY original.
  */
 function ensureMetricasSemanal_(ss) {
   ss = ss || SpreadsheetApp.getActiveSpreadsheet();
   var eventos = ss.getSheetByName(EVENTOS_SHEET);
   if (!eventos) return { ok: false, error: 'Falta ' + EVENTOS_SHEET };
 
-  // Asegura fórmulas U + tabla semanal fuente en Eventos
   ensureEventosSheet_(ss);
   setupEventosRowFormulas_(eventos);
   setupWeeklyTable_(eventos);
 
-  var sh = ss.getSheetByName(METRICAS_SHEET);
-  if (!sh) sh = ss.insertSheet(METRICAS_SHEET);
-
+  var dup = ensureMetricasAutoSheet_(ss);
+  var sh = dup.sheet;
   var col0 = metricasSemanalAnchorCol_(sh); // 14=N o 27=AA
-  var rows = MAX_WEEKS + 4; // título + marker + header + 53 + total
-  // Limpia SOLO la zona gestionada del bloque semanal
+  var rows = MAX_WEEKS + 4;
+
   sh.getRange(1, col0, rows, col0 + 7).clearContent();
 
   sh.getRange(1, col0).setValue(
-    'RESUMEN SEMANAL — Eventos ' + YEAR
+    'RESUMEN SEMANAL — Eventos ' + YEAR + ' (pestaña de prueba)'
   );
   sh.getRange(1, col0).setFontWeight('bold').setFontSize(13);
   sh.getRange(2, col0).setValue(
@@ -1439,7 +1471,9 @@ function ensureMetricasSemanal_(ss) {
   );
   sh.getRange(2, col0).setFontColor('#666666');
   sh.getRange(2, col0 + 1).setValue(
-    'Por Fecha de cierre (semana inicia lunes). Tu dashboard A:L no se toca.'
+    'Copia de «' +
+      METRICAS_SHEET +
+      '». Por Fecha de cierre (semana inicia lunes). La original no se toca.'
   );
 
   sh.getRange(3, col0, 1, 8).setValues([
@@ -1458,28 +1492,28 @@ function ensureMetricasSemanal_(ss) {
 
   for (var w = 1; w <= MAX_WEEKS; w++) {
     var r = 3 + w; // 4..56
-    var src = 3 + w; // Eventos fila 4 = semana 1
+    var srcRow = 3 + w; // Eventos fila 4 = semana 1
     sh.getRange(r, col0).setValue(w);
     sh.getRange(r, col0 + 1).setFormula(
-      "='" + EVENTOS_SHEET + "'!AE" + src
+      "='" + EVENTOS_SHEET + "'!AE" + srcRow
     );
     sh.getRange(r, col0 + 2).setFormula(
-      "='" + EVENTOS_SHEET + "'!AF" + src
+      "='" + EVENTOS_SHEET + "'!AF" + srcRow
     );
     sh.getRange(r, col0 + 3).setFormula(
-      "='" + EVENTOS_SHEET + "'!AG" + src
+      "='" + EVENTOS_SHEET + "'!AG" + srcRow
     );
     sh.getRange(r, col0 + 4).setFormula(
-      "='" + EVENTOS_SHEET + "'!AH" + src
+      "='" + EVENTOS_SHEET + "'!AH" + srcRow
     );
     sh.getRange(r, col0 + 5).setFormula(
-      "='" + EVENTOS_SHEET + "'!AI" + src
+      "='" + EVENTOS_SHEET + "'!AI" + srcRow
     );
     sh.getRange(r, col0 + 6).setFormula(
-      "='" + EVENTOS_SHEET + "'!AJ" + src
+      "='" + EVENTOS_SHEET + "'!AJ" + srcRow
     );
     sh.getRange(r, col0 + 7).setFormula(
-      "='" + EVENTOS_SHEET + "'!AK" + src
+      "='" + EVENTOS_SHEET + "'!AK" + srcRow
     );
   }
 
@@ -1513,27 +1547,39 @@ function ensureMetricasSemanal_(ss) {
     sh.setColumnWidth(col0 + c, c === 0 ? 90 : 110);
   }
 
+  try {
+    sh.activate();
+  } catch (actErr) {}
+
   return {
     ok: true,
-    sheet: METRICAS_SHEET,
+    sheet: METRICAS_AUTO_SHEET,
+    originalUntouched: METRICAS_SHEET,
+    duplicated: dup.duplicated,
+    createdBlank: dup.createdBlank,
     anchorCol: columnToLetter_(col0),
     weeks: MAX_WEEKS,
   };
 }
 
 /**
- * EJECUTAR UNA VEZ: adjunta resumen semanal en Metricas.
- * No borra tu diseño en A:L.
+ * EJECUTAR UNA VEZ:
+ * 1) Duplica Metricas YYYY → Metricas YYYY Auto
+ * 2) Pone el resumen semanal en la copia
+ * La pestaña original queda intacta.
  */
 function restoreMetricasSemanal_() {
   var result = ensureMetricasSemanal_();
   var msg = result.ok
-    ? 'Metricas semanal OK — ' +
+    ? 'Metricas Auto OK — ' +
       SCRIPT_VERSION +
       '\n\n' +
-      '✓ Bloque en ' +
-      METRICAS_SHEET +
-      ' columna ' +
+      (result.duplicated
+        ? '✓ Se duplicó «' + METRICAS_SHEET + '» → «' + METRICAS_AUTO_SHEET + '»\n'
+        : result.createdBlank
+          ? '✓ Se creó «' + METRICAS_AUTO_SHEET + '» (no había original)\n'
+          : '✓ Usando pestaña existente «' + METRICAS_AUTO_SHEET + '»\n') +
+      '✓ Resumen semanal en columna ' +
       result.anchorCol +
       '+\n' +
       '✓ Semanas 1–' +
@@ -1541,7 +1587,10 @@ function restoreMetricasSemanal_() {
       ' ← ' +
       EVENTOS_SHEET +
       '\n' +
-      '✓ Dashboard A:L intacto\n\n' +
+      '✓ «' +
+      METRICAS_SHEET +
+      '» original NO se modificó\n\n' +
+      'Revisa la pestaña Auto. Si te late, después migrás todo ahí.\n' +
       'Siguiente: Nueva versión → Implementar'
     : 'Error: ' + (result.error || 'desconocido');
   try {
