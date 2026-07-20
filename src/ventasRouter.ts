@@ -153,11 +153,11 @@ ventasRouter.get("/api/ventas/poll", (_req, res) => {
   res.status(200).json({ ok: true, poll: getPollStatus() });
 });
 
-/** Fuerza una pasada del poller ahora. */
+/** Fuerza una pasada del poller ahora (destraba candado si estaba stuck). */
 ventasRouter.post("/api/ventas/poll", async (_req, res) => {
   try {
-    const result = await pollClosedDealsOnce(40);
-    res.status(200).json({ ok: true, result });
+    const result = await pollClosedDealsOnce(40, { force: true });
+    res.status(200).json({ ok: true, result, poll: getPollStatus() });
   } catch (err) {
     res.status(500).json({
       ok: false,
@@ -168,8 +168,8 @@ ventasRouter.post("/api/ventas/poll", async (_req, res) => {
 
 ventasRouter.get("/api/ventas/poll-now", async (_req, res) => {
   try {
-    const result = await pollClosedDealsOnce(40);
-    res.status(200).json({ ok: true, result });
+    const result = await pollClosedDealsOnce(40, { force: true });
+    res.status(200).json({ ok: true, result, poll: getPollStatus() });
   } catch (err) {
     res.status(500).json({
       ok: false,

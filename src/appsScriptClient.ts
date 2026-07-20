@@ -46,7 +46,8 @@ export function getAppsScriptUrl(): string {
  * POST genérico al Apps Script /exec (Eventos, Banco, etc.).
  */
 export async function postToAppsScript(
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  opts?: { timeoutMs?: number }
 ): Promise<AppsScriptWriteResult> {
   const url = appsScriptUrl();
   if (!url) {
@@ -60,12 +61,29 @@ export async function postToAppsScript(
     );
   }
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    redirect: "follow",
-  });
+  const timeoutMs = opts?.timeoutMs ?? 45_000;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      redirect: "follow",
+      signal: ac.signal,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(
+        `Apps Script timeout (${timeoutMs}ms) — el /exec no respondió a tiempo`
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 
   const text = await res.text();
   let parsed: AppsScriptWriteResult;
