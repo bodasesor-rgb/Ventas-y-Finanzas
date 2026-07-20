@@ -5,6 +5,10 @@ export interface AppsScriptWriteResult {
   row?: number;
   dealId?: string;
   sheetName?: string;
+  erSheet?: string;
+  erMonthCol?: string;
+  pnlSheet?: string;
+  pnlMonthCol?: string;
   error?: string;
   raw?: string;
   /** Archive / Drive */

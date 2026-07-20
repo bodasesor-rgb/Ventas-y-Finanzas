@@ -65,11 +65,31 @@ async function sendRunToBancoSheet(run) {
         runId: run.id,
         filename: run.storedName || run.filename || "",
     });
+    const erSheet = result.erSheet || `Estado de Resultados ${year}`;
+    const erCol = result.erMonthCol || "";
+    const monthNames = [
+        "enero",
+        "febrero",
+        "marzo",
+        "abril",
+        "mayo",
+        "junio",
+        "julio",
+        "agosto",
+        "septiembre",
+        "octubre",
+        "noviembre",
+        "diciembre",
+    ];
+    const monthLabel = monthNames[month - 1] || String(month);
     return {
         sheetName: result.sheetName || `Banco ${year}`,
+        erSheet,
+        erMonthCol: erCol,
         row: result.row,
         action: result.action,
         version: result.version,
+        message: `OK → ${erSheet} (columna ${monthLabel}${erCol ? ` / ${erCol}` : ""}) · Banco fila ${result.row || "?"} · v${result.version || "?"}`,
     };
 }
 /** Escribe pestaña Análisis YYYY con ranking proveedores + mensual/anual. */

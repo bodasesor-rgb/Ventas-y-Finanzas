@@ -478,7 +478,7 @@ pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
   });
 });
 
-/** Envía totales del mes al Sheet (pestaña Banco YYYY + cols en P&L). */
+/** Envía totales del mes al Sheet (Banco + Estado de Resultados por columna). */
 pnlRouter.post("/api/pnl/runs/:id/send-to-sheet", async (req, res) => {
   const runs = loadRuns();
   const idx = runs.findIndex((r) => r.id === req.params.id);
@@ -486,7 +486,7 @@ pnlRouter.post("/api/pnl/runs/:id/send-to-sheet", async (req, res) => {
     res.status(404).json({
       ok: false,
       error: "Run no encontrado",
-      hint: "Sube de nuevo el PDF y luego pulsa Enviar al P&L.",
+      hint: "Sube de nuevo el PDF y luego pulsa Enviar a Estado de Resultados.",
     });
     return;
   }
@@ -496,7 +496,7 @@ pnlRouter.post("/api/pnl/runs/:id/send-to-sheet", async (req, res) => {
     run.sentToSheetAt = new Date().toISOString();
     run.sentToSheet = {
       ok: true,
-      sheetName: result.sheetName,
+      sheetName: result.erSheet || result.sheetName,
       row: result.row,
       action: result.action,
       version: result.version,
@@ -518,9 +518,11 @@ pnlRouter.post("/api/pnl/runs/:id/send-to-sheet", async (req, res) => {
 
     res.json({
       ok: true,
-      message: `Enviado a ${result.sheetName} (fila ${result.row}, ${result.action})${
-        analysisSheet ? ` · ${analysisSheet.sheetName} actualizado` : ""
-      }.`,
+      message:
+        result.message ||
+        `Enviado a ${result.erSheet || result.sheetName} (fila Banco ${result.row})${
+          analysisSheet ? ` · ${analysisSheet.sheetName}` : ""
+        }.`,
       run: runPublic(run),
       sheet: result,
       analysisSheet,
@@ -534,7 +536,7 @@ pnlRouter.post("/api/pnl/runs/:id/send-to-sheet", async (req, res) => {
       ok: false,
       error,
       hint:
-        "Si falta upsertBanco/upsertAnalisis, pega Codigo.gs v12 en Apps Script y publica Nueva versión.",
+        "Si falta el Estado de Resultados, pega Codigo.gs v18 en Apps Script, ejecuta restoreEstadoResultados_ y publica Nueva versión.",
     });
   }
 });

@@ -96,14 +96,16 @@ function renderSendSheetStatus(run) {
   if (btn) btn.disabled = !run?.id;
   if (!status) return;
   if (run?.sentToSheet?.ok && run.sentToSheetAt) {
-    status.textContent = `En Sheet: ${run.sentToSheet.sheetName || "Banco"} · fila ${
-      run.sentToSheet.row || "?"
-    } · ${fmtDate(run.sentToSheetAt)}`;
+    status.textContent = `En Sheet: ${
+      run.sentToSheet.sheetName || "Estado de Resultados"
+    } · Banco fila ${run.sentToSheet.row || "?"} · ${fmtDate(
+      run.sentToSheetAt
+    )}`;
   } else if (run?.sentToSheet?.ok === false) {
     status.textContent = "Último envío falló: " + (run.sentToSheet.error || "");
   } else {
     status.textContent =
-      "Cuando cuadre, envía el mes a la pestaña Banco del Sheet (también llena P&L cols F/G).";
+      "Cuando cuadre, envía el mes a Estado de Resultados (columnas enero…diciembre) + Banco.";
   }
 }
 

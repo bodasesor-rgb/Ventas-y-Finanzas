@@ -1,30 +1,35 @@
 /**
  * ============================================================
  * Apps Script — Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-07-20-v17
+ * VERSION: 2026-07-20-v18
  * ============================================================
  * PEGAR TODO ESTE ARCHIVO (borrar lo anterior → pegar → Guardar)
  *
  * Luego:
  *   1) authorizeDrive_ → ▶ Ejecutar (Drive)
- *   2) restorePnLBanco_ → ▶ Arma columnas ene–dic (NO toca Metricas)
+ *   2) restoreEstadoResultados_ → ▶ Crea pestaña Estado de Resultados
+ *      (NO toca Metricas)
  *   3) Implementar → Nueva versión → misma URL /exec
  *
- * REGLA v17:
- *   - "Enviar al P&L" escribe Banco YYYY + pega resultados en la
- *     columna del mes en P&L YYYY (ene=B … dic=M)
+ * REGLA v18:
+ *   - Banco YYYY = detalle del estado de cuenta (1 fila/mes)
+ *   - Estado de Resultados YYYY = pestaña nueva con el ER por mes
+ *     (ingresos, egresos, gastos por categoría, utilidad, capital)
+ *   - "Enviar al P&L" escribe Banco + pega la columna del mes en el ER
  *   - Metricas NUNCA se toca
  *
  * doPost: Eventos | upsertBanco | upsertAnalisis | archive Drive
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-07-20-v17';
+var SCRIPT_VERSION = '2026-07-20-v18';
 var METRICAS_MARKER = 'BOT_METRICAS_V14';
 var PNL_MARKER = 'BOT_PNL_MESES_V17';
+var ER_MARKER = 'BOT_ESTADO_RESULTADOS_V18';
 var YEAR = 2026;
 var EVENTOS_SHEET = 'Eventos ' + YEAR;
 var METRICAS_SHEET = 'Metricas ' + YEAR;
 var PL_SHEET = 'P&L ' + YEAR;
+var ER_SHEET = 'Estado de Resultados ' + YEAR;
 var BANCO_SHEET = 'Banco ' + YEAR;
 var ANALISIS_SHEET = 'Analisis ' + YEAR;
 var ARCHIVE_SHEET = 'Estados Archive';
@@ -121,6 +126,7 @@ function doGet() {
     sheets: [
       EVENTOS_SHEET,
       METRICAS_SHEET,
+      ER_SHEET,
       PL_SHEET,
       BANCO_SHEET,
       ANALISIS_SHEET,
@@ -296,16 +302,26 @@ function upsertBanco_(data) {
 
   sh.getRange(rowIndex, 1, 1, rowVals.length).setValues([rowVals]);
   sh.getRange(rowIndex, 4, 1, 18).setNumberFormat('$#,##0.00');
-  // Formato Socios / Proveedores (cols 26-27)
   sh.getRange(rowIndex, 26, 1, 2).setNumberFormat('$#,##0.00');
 
-  // Pega resultados en la columna del mes en P&L (sin tocar Metricas)
-  var pnlCol = pasteMonthToPnL_(ss, month, by, {
+  var totals = {
     ingresos: Number(data.ingresos) || 0,
     gastos: Number(data.gastos) || 0,
     neto: Number(data.neto) || 0,
     otros: Number(data.otros) || 0,
-  });
+    depositosOficiales:
+      data.depositosOficiales == null ? 0 : Number(data.depositosOficiales),
+    retirosOficiales:
+      data.retirosOficiales == null ? 0 : Number(data.retirosOficiales),
+  };
+
+  // Estado de Resultados: pega la columna del mes (sin tocar Metricas)
+  var erCol = pasteMonthToEstadoResultados_(ss, month, by, totals);
+  // Compat: también actualiza P&L YYYY si existe el layout viejo
+  var pnlCol = null;
+  try {
+    pnlCol = pasteMonthToPnL_(ss, month, by, totals);
+  } catch (err) {}
 
   return json_({
     ok: true,
@@ -313,10 +329,285 @@ function upsertBanco_(data) {
     action: action,
     row: rowIndex,
     sheetName: BANCO_SHEET,
+    erSheet: ER_SHEET,
+    erMonthCol: erCol,
     pnlSheet: PL_SHEET,
     pnlMonthCol: pnlCol,
     periodKey: periodKey,
   });
+}
+
+/* ===================== Estado de Resultados ===================== */
+
+/**
+ * Filas fijas del Estado de Resultados (no cambiar sin bump de ER_MARKER).
+ * Columna del mes: B=enero … M=diciembre, N=TOTAL.
+ */
+var ER_ROW = {
+  ingresosHeader: 6,
+  ingresosBanco: 7,
+  venta: 8,
+  ingreso: 9,
+  totalIngresos: 10,
+  egresoHeader: 12,
+  proveedor: 13,
+  evento: 14,
+  totalEgreso: 15,
+  utilidadBruta: 17,
+  margenBruto: 18,
+  gastosHeader: 20,
+  ads: 21,
+  apps: 22,
+  pass: 23,
+  comisiones: 24,
+  servicios: 25,
+  pago: 26,
+  transferencia: 27,
+  revisar: 28,
+  otro: 29,
+  otrosCats: 30,
+  totalGastos: 31,
+  utilidadNeta: 33,
+  margenNeto: 34,
+  capitalHeader: 36,
+  socios: 37,
+  netoBanco: 38,
+  depOficial: 39,
+  retOficial: 40,
+};
+
+function ensureEstadoResultadosLayout_(ss) {
+  var sh = ss.getSheetByName(ER_SHEET);
+  if (!sh) {
+    setupEstadoResultados_(ss);
+    return ss.getSheetByName(ER_SHEET);
+  }
+  var marker = String(sh.getRange('A2').getValue() || '');
+  if (marker.indexOf(ER_MARKER) === -1) {
+    setupEstadoResultados_(ss);
+  }
+  return ss.getSheetByName(ER_SHEET);
+}
+
+/**
+ * Pestaña Estado de Resultados YYYY — ER completo por mes.
+ * Cada categoría de la web tiene su fila; al Enviar se pega la columna del mes.
+ */
+function setupEstadoResultados_(ss) {
+  var sh = ss.getSheetByName(ER_SHEET);
+  if (!sh) sh = ss.insertSheet(ER_SHEET);
+  sh.getRange('A1:N45').clear();
+
+  var months = [
+    'enero',
+    'febrero',
+    'marzo',
+    'abril',
+    'mayo',
+    'junio',
+    'julio',
+    'agosto',
+    'septiembre',
+    'octubre',
+    'noviembre',
+    'diciembre',
+  ];
+
+  sh.getRange('A1').setValue('ESTADO DE RESULTADOS · ' + YEAR + ' · Bodasesor');
+  sh.getRange('A1').setFontWeight('bold').setFontSize(16);
+  sh.getRange('A2').setValue(ER_MARKER + ' · ' + SCRIPT_VERSION);
+  sh.getRange('A2').setFontColor('#666666');
+  sh.getRange('A3').setValue(
+    'Se llena al Enviar desde /pnl/. Banco = detalle del estado de cuenta. Esta pestaña = ER contable por mes. Metricas no se toca.'
+  );
+
+  sh.getRange(5, 1).setValue('Concepto').setFontWeight('bold');
+  for (var m = 1; m <= 12; m++) {
+    sh.getRange(5, m + 1).setValue(months[m - 1]).setFontWeight('bold');
+  }
+  sh.getRange(5, 14).setValue('TOTAL').setFontWeight('bold');
+  sh.getRange(5, 1, 1, 14).setBackground('#111111').setFontColor('#ffffff');
+
+  function section_(row, label, bg) {
+    sh.getRange(row, 1).setValue(label).setFontWeight('bold');
+    sh.getRange(row, 1, 1, 14).setBackground(bg);
+  }
+  function zeros_(row, label) {
+    sh.getRange(row, 1).setValue(label);
+    for (var c = 2; c <= 13; c++) sh.getRange(row, c).setValue(0);
+    sh.getRange(row, 14).setFormula('=SUM(B' + row + ':M' + row + ')');
+  }
+  function sumRow_(row, label, fromR, toR, bg) {
+    sh.getRange(row, 1).setValue(label).setFontWeight('bold');
+    for (var c = 2; c <= 14; c++) {
+      var L = columnToLetter_(c);
+      sh.getRange(row, c).setFormula('=SUM(' + L + fromR + ':' + L + toR + ')');
+    }
+    if (bg) sh.getRange(row, 1, 1, 14).setBackground(bg);
+  }
+  function diffRow_(row, label, a, b, bg) {
+    sh.getRange(row, 1).setValue(label).setFontWeight('bold');
+    for (var c = 2; c <= 14; c++) {
+      var L = columnToLetter_(c);
+      sh.getRange(row, c).setFormula('=' + L + a + '-' + L + b);
+    }
+    if (bg) sh.getRange(row, 1, 1, 14).setBackground(bg);
+  }
+  function marginRow_(row, label, numR, denR) {
+    sh.getRange(row, 1).setValue(label);
+    for (var c = 2; c <= 14; c++) {
+      var L = columnToLetter_(c);
+      sh.getRange(row, c).setFormula(
+        '=IF(' + L + denR + '=0,"",' + L + numR + '/' + L + denR + ')'
+      );
+    }
+    sh.getRange(row, 2, 1, 13).setNumberFormat('0.0%');
+    sh.getRange(row, 14).setNumberFormat('0.0%');
+  }
+  function totalColSum_(row) {
+    sh.getRange(row, 14).setFormula('=SUM(B' + row + ':M' + row + ')');
+  }
+
+  // INGRESOS
+  section_(ER_ROW.ingresosHeader, 'INGRESOS', '#d8f3dc');
+  zeros_(ER_ROW.ingresosBanco, 'Ingresos banco (abonos)');
+  zeros_(ER_ROW.venta, 'Venta / anticipo cliente');
+  zeros_(ER_ROW.ingreso, 'Otros ingresos');
+  // TOTAL = venta + otros ingresos (no suma ingresos banco para no duplicar)
+  sumRow_(ER_ROW.totalIngresos, 'TOTAL INGRESOS', ER_ROW.venta, ER_ROW.ingreso, '#b7e4c7');
+
+  // EGRESOS / COSTO
+  section_(ER_ROW.egresoHeader, 'EGRESOS / COSTO DIRECTO', '#fde2e1');
+  zeros_(ER_ROW.proveedor, 'Proveedores');
+  zeros_(ER_ROW.evento, 'Costo de evento');
+  sumRow_(ER_ROW.totalEgreso, 'TOTAL EGRESOS', ER_ROW.proveedor, ER_ROW.evento, '#f8b4b4');
+
+  diffRow_(ER_ROW.utilidadBruta, 'UTILIDAD BRUTA', ER_ROW.totalIngresos, ER_ROW.totalEgreso, '#fff3bf');
+  marginRow_(ER_ROW.margenBruto, 'Margen bruto %', ER_ROW.utilidadBruta, ER_ROW.totalIngresos);
+
+  // GASTOS OPERATIVOS (cada categoría de la web)
+  section_(ER_ROW.gastosHeader, 'GASTOS DE OPERACIÓN', '#e7f5ff');
+  zeros_(ER_ROW.ads, 'Marketing (Ads)');
+  zeros_(ER_ROW.apps, 'Apps / software');
+  zeros_(ER_ROW.pass, 'Peaje / Pass');
+  zeros_(ER_ROW.comisiones, 'Comisiones bancarias');
+  zeros_(ER_ROW.servicios, 'Servicios');
+  zeros_(ER_ROW.pago, 'RH / Pagos');
+  zeros_(ER_ROW.transferencia, 'Transferencias sin nombre');
+  zeros_(ER_ROW.revisar, 'Por revisar');
+  zeros_(ER_ROW.otro, 'Otro');
+  zeros_(ER_ROW.otrosCats, 'Otras categorías');
+  sumRow_(ER_ROW.totalGastos, 'TOTAL GASTOS', ER_ROW.ads, ER_ROW.otrosCats, '#a5d8ff');
+
+  diffRow_(ER_ROW.utilidadNeta, 'UTILIDAD NETA', ER_ROW.utilidadBruta, ER_ROW.totalGastos, '#d0bfff');
+  marginRow_(ER_ROW.margenNeto, 'Margen neto %', ER_ROW.utilidadNeta, ER_ROW.totalIngresos);
+
+  // CAPITAL / BANCO
+  section_(ER_ROW.capitalHeader, 'CAPITAL Y BANCO', '#f3f0ff');
+  zeros_(ER_ROW.socios, 'Socios (capital)');
+  zeros_(ER_ROW.netoBanco, 'Neto banco del mes');
+  zeros_(ER_ROW.depOficial, 'Depósitos oficiales (PDF)');
+  zeros_(ER_ROW.retOficial, 'Retiros oficiales (PDF)');
+  totalColSum_(ER_ROW.socios);
+  totalColSum_(ER_ROW.netoBanco);
+  totalColSum_(ER_ROW.depOficial);
+  totalColSum_(ER_ROW.retOficial);
+  // Reponer formato tras totalColSum en filas que zeros_ puso 0 en N
+  sh.getRange(ER_ROW.socios, 1, 1, 14).setBackground('#f3f0ff');
+  sh.getRange(ER_ROW.netoBanco, 1, 1, 14).setBackground('#f3f0ff');
+  sh.getRange(ER_ROW.depOficial, 1, 1, 14).setBackground('#f3f0ff');
+  sh.getRange(ER_ROW.retOficial, 1, 1, 14).setBackground('#f3f0ff');
+
+  sh.getRange(42, 1).setValue(
+    'Flujo: PDF → /pnl/ → Enviar → Banco (fila del mes) + esta pestaña (columna del mes). ' +
+      'Regenerar: restoreEstadoResultados_. Metricas intacta.'
+  );
+  sh.getRange(42, 1).setFontColor('#555555');
+
+  sh.getRange('B7:N10').setNumberFormat('$#,##0.00');
+  sh.getRange('B13:N15').setNumberFormat('$#,##0.00');
+  sh.getRange('B17:N17').setNumberFormat('$#,##0.00');
+  sh.getRange('B21:N31').setNumberFormat('$#,##0.00');
+  sh.getRange('B33:N33').setNumberFormat('$#,##0.00');
+  sh.getRange('B37:N40').setNumberFormat('$#,##0.00');
+
+  sh.setColumnWidth(1, 220);
+  for (var w = 2; w <= 14; w++) sh.setColumnWidth(w, 88);
+  sh.setFrozenRows(5);
+  sh.setFrozenColumns(1);
+
+  // Traer al frente
+  try {
+    sh.activate();
+  } catch (e) {}
+}
+
+/**
+ * Pega en Estado de Resultados los montos del mes (columna B…M).
+ */
+function pasteMonthToEstadoResultados_(ss, month, by, totals) {
+  var sh = ensureEstadoResultadosLayout_(ss);
+  var col = Number(month) + 1;
+  if (col < 2 || col > 13) return null;
+
+  function abs_(n) {
+    return Math.abs(Number(n) || 0);
+  }
+  function money_(row, value) {
+    sh.getRange(row, col).setValue(Number(value) || 0);
+    sh.getRange(row, col).setNumberFormat('$#,##0.00');
+  }
+
+  var venta = Number(by.venta) || 0;
+  var ingreso = Number(by.ingreso) || 0;
+  if (venta === 0 && ingreso === 0 && (totals.ingresos || 0) > 0) {
+    ingreso = totals.ingresos;
+  }
+
+  money_(ER_ROW.ingresosBanco, totals.ingresos || 0);
+  money_(ER_ROW.venta, venta);
+  money_(ER_ROW.ingreso, ingreso);
+
+  money_(ER_ROW.proveedor, abs_(by.proveedor));
+  money_(ER_ROW.evento, abs_(by.evento));
+
+  money_(ER_ROW.ads, abs_(by.ads));
+  money_(ER_ROW.apps, abs_(by.apps));
+  money_(ER_ROW.pass, abs_(by.pass));
+  money_(ER_ROW.comisiones, abs_(by.comisiones));
+  money_(ER_ROW.servicios, abs_(by.servicios));
+  money_(ER_ROW.pago, abs_(by.pago));
+  money_(ER_ROW.transferencia, abs_(by.transferencia_persona));
+  money_(ER_ROW.revisar, abs_(by.revisar));
+  money_(ER_ROW.otro, abs_(by.otro));
+  money_(ER_ROW.otrosCats, abs_(totals.otros));
+
+  money_(ER_ROW.socios, abs_(by.socio));
+  money_(ER_ROW.netoBanco, Number(totals.neto) || 0);
+  money_(ER_ROW.depOficial, abs_(totals.depositosOficiales));
+  money_(ER_ROW.retOficial, abs_(totals.retirosOficiales));
+
+  return columnToLetter_(col);
+}
+
+/** Regenera SOLO Estado de Resultados. NO toca Metricas. */
+function restoreEstadoResultados_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  ensureBancoSheet_(ss);
+  setupEstadoResultados_(ss);
+  var msg =
+    'Estado de Resultados listo — ' +
+    SCRIPT_VERSION +
+    '\n\nPestaña: ' +
+    ER_SHEET +
+    '\nColumnas: enero…diciembre.\n' +
+    'Al Enviar desde /pnl/ se pega la columna del mes.\n' +
+    'Metricas NO se modificó.';
+  try {
+    SpreadsheetApp.getUi().alert(msg);
+  } catch (err) {
+    Logger.log(msg);
+  }
 }
 
 /**
@@ -673,7 +964,7 @@ function doPost(e) {
       return json_({
         ok: false,
         version: SCRIPT_VERSION,
-        error: 'values no es array (¿Apps Script v17 publicado?)',
+        error: 'values no es array (¿Apps Script v18 publicado?)',
         typeofValues: typeof values,
         rawPreview: String(raw).slice(0, 200),
       });
@@ -789,16 +1080,16 @@ function setupAll_() {
     EVENTOS_SHEET +
     ' (fórmulas M/N/O + tabla W:AB)\n' +
     '✓ ' +
+    ER_SHEET +
+    ' (estado de resultados por mes)\n' +
+    '✓ ' +
     BANCO_SHEET +
     ' (estados de cuenta, 1 fila/mes)\n' +
-    '✓ ' +
-    PL_SHEET +
-    ' (resumen Ingreso/Egreso/Gastos por mes)\n' +
     '✓ ' +
     ARCHIVE_SHEET +
     ' + Drive\n\n' +
     'Metricas NO se tocó.\n' +
-    'P&L: restorePnLBanco_\n\n' +
+    'ER: restoreEstadoResultados_\n\n' +
     'Siguiente: Nueva versión → Implementar';
   try {
     SpreadsheetApp.getUi().alert(msg);
@@ -817,7 +1108,8 @@ function setupAllSilent_() {
   try {
     getArchiveFolder_();
   } catch (err) {}
-  // Solo P&L de banco — NUNCA Metricas
+  // Estado de Resultados + P&L — NUNCA Metricas
+  setupEstadoResultados_(ss);
   setupPnL_(ss);
   ensureAnalisisSheet_(ss, YEAR);
 }
@@ -1252,38 +1544,24 @@ function setupPnL_(ss) {
   sh.setFrozenColumns(1);
 }
 
-/** Regenera SOLO P&L banco (por mes). NO toca Metricas. */
+/** Regenera Estado de Resultados + P&L layout. NO toca Metricas. */
 function restorePnLBanco_() {
+  restoreEstadoResultados_();
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  ensureBancoSheet_(ss);
   setupPnL_(ss);
-  var msg =
-    'P&L con columnas por mes listo — ' +
-    SCRIPT_VERSION +
-    '\n\n' +
-    PL_SHEET +
-    ': B=enero … M=diciembre.\n' +
-    'Al Enviar al P&L se pegan los resultados en esa columna.\n' +
-    'Metricas NO se modificó.';
-  try {
-    SpreadsheetApp.getUi().alert(msg);
-  } catch (err) {
-    Logger.log(msg);
-  }
 }
 
 /**
  * Ya NO reescribe Metricas (para no pisar tu dashboard).
- * Solo regenera el P&L de estados de cuenta.
+ * Solo regenera Estado de Resultados (+ P&L layout).
  */
 function restoreMetricasPnL_() {
   var msg =
-    'v15: esta función YA NO reescribe Metricas.\n\n' +
-    'Solo regenera el P&L de banco (' +
-    PL_SHEET +
-    ').\n' +
-    'Tu hoja Metricas se deja como está.\n\n' +
-    'Preferido: ejecuta restorePnLBanco_';
+    'v18: esta función YA NO reescribe Metricas.\n\n' +
+    'Regenera: ' +
+    ER_SHEET +
+    ' (+ P&L).\n' +
+    'Preferido: restoreEstadoResultados_';
   try {
     SpreadsheetApp.getUi().alert(msg);
   } catch (err) {

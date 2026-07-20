@@ -1,30 +1,27 @@
-# Enlace Sheet (Eventos · Banco · P&L · Metricas)
+# Estado de Resultados (Sheet)
 
-## Cómo aplicar (v17)
+## v18 — pestaña nueva
 
-1. Pega `apps-script/Codigo.gs` (VERSION `2026-07-20-v17`).
-2. Guarda.
-3. **`restorePnLBanco_`** → ▶ Ejecutar (arma columnas ene–dic; **no toca Metricas**).
-4. Implementar → Nueva versión → misma URL `/exec`.
-5. Confirma en `/exec` que `version` sea `2026-07-20-v17`.
-6. En `/pnl/`: **Enviar al P&L** → pega resultados en la columna del mes.
+Además de **Banco YYYY** (detalle del estado de cuenta), el bot crea:
 
-## Qué hace "Enviar al P&L"
+**`Estado de Resultados YYYY`**
 
-1. Escribe/actualiza 1 fila en **Banco YYYY**
-2. Pega montos en **P&L YYYY**, columna del mes (`B`=enero … `M`=diciembre)
+Columnas: Concepto | enero … diciembre | TOTAL
 
-| Fila P&L | Dato pegado |
-|----------|-------------|
-| Venta / anticipo | cat `venta` |
-| Ingreso | cat `ingreso` (o total abonos si no hay desglose) |
-| Proveedores | `proveedor` |
-| Costo de evento | `evento` |
-| Marketing | `ads` |
-| RH | `pago` |
-| Programas | `apps` + `pass` |
-| Otros | comisiones, servicios, transf, revisar, otro… |
-| Banco | neto del mes |
-| CAPITAL | socios |
+Bloques:
+- INGRESOS (venta, otros ingresos, total)
+- EGRESOS / COSTO (proveedores, costo evento)
+- UTILIDAD BRUTA + margen %
+- GASTOS DE OPERACIÓN (ads, apps, pass, comisiones, servicios, RH, transf, revisar, otro…)
+- UTILIDAD NETA + margen %
+- CAPITAL Y BANCO (socios, neto, depósitos/retiros oficiales)
 
-TOTAL / Ingreso Bruto / Margen / Ingreso Neto = fórmulas. Metricas no se toca.
+## Cómo publicar
+
+1. Pegar `apps-script/Codigo.gs` (`2026-07-20-v18`)
+2. Ejecutar **`restoreEstadoResultados_`**
+3. Implementar → Nueva versión → misma `/exec`
+4. Confirmar `"version":"2026-07-20-v18"`
+5. En `/pnl/` → **Enviar a Estado de Resultados**
+
+Metricas no se toca.

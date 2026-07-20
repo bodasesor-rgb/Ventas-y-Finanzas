@@ -22,9 +22,12 @@ const CATEGORY_COLS = [
 
 export async function sendRunToBancoSheet(run: StatementRun): Promise<{
   sheetName: string;
+  erSheet?: string;
+  erMonthCol?: string;
   row?: number;
   action?: string;
   version?: string;
+  message?: string;
 }> {
   const periodKey = run.periodKey || "";
   if (!/^\d{4}-\d{2}$/.test(periodKey)) {
@@ -74,11 +77,35 @@ export async function sendRunToBancoSheet(run: StatementRun): Promise<{
     filename: run.storedName || run.filename || "",
   });
 
+  const erSheet =
+    result.erSheet || `Estado de Resultados ${year}`;
+  const erCol = result.erMonthCol || "";
+  const monthNames = [
+    "enero",
+    "febrero",
+    "marzo",
+    "abril",
+    "mayo",
+    "junio",
+    "julio",
+    "agosto",
+    "septiembre",
+    "octubre",
+    "noviembre",
+    "diciembre",
+  ];
+  const monthLabel = monthNames[month - 1] || String(month);
+
   return {
     sheetName: result.sheetName || `Banco ${year}`,
+    erSheet,
+    erMonthCol: erCol,
     row: result.row,
     action: result.action,
     version: result.version,
+    message: `OK → ${erSheet} (columna ${monthLabel}${
+      erCol ? ` / ${erCol}` : ""
+    }) · Banco fila ${result.row || "?"} · v${result.version || "?"}`,
   };
 }
 
