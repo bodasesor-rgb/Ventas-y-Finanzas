@@ -6,6 +6,8 @@ let runsCache = [];
 /** Año seleccionado para el análisis (nunca mezcla años). */
 let selectedAnalysisYear = null;
 let analysisYears = [];
+/** Año del Estado de Resultados en página. */
+let selectedErYear = null;
 
 function isRunMissingError(msg) {
   return /run no encontrado/i.test(String(msg || ""));
@@ -1030,6 +1032,7 @@ function showView(view) {
   if (name === "analisis") {
     refreshAnalysis();
   } else if (name === "estado-resultados") {
+    refreshEstadoResultados();
     refreshAppsScriptStatus();
   }
   try {
@@ -1079,6 +1082,120 @@ function paintMetaTopLeft({ uiVersion, uiModifiedAt, scriptVersion, checkedAt })
     dLine.textContent = `Modificado UI: ${fmtMexicoDateTime(
       uiModifiedAt
     )} (hora México)  ·  Revisado: ${fmtMexicoDateTime(checkedAt)}`;
+  }
+}
+
+function moneyOrDash(v) {
+  if (v == null || Number.isNaN(Number(v))) return "—";
+  return money(Number(v));
+}
+
+function pctOrDash(v) {
+  if (v == null || Number.isNaN(Number(v))) return "—";
+  return (Number(v) * 100).toFixed(1) + "%";
+}
+
+function syncErYearSelect(years, year) {
+  const sel = document.getElementById("erYearSelect");
+  if (!sel) return;
+  const list = years && years.length ? years : [year || new Date().getFullYear()];
+  sel.innerHTML = list
+    .map((y) => `<option value="${y}">${y}</option>`)
+    .join("");
+  const pick = year && list.includes(year) ? year : list[list.length - 1];
+  selectedErYear = pick;
+  sel.value = String(pick);
+}
+
+function renderEstadoResultados(er) {
+  const wrap = document.getElementById("erTableWrap");
+  if (!wrap || !er) return;
+  const months = er.months || [];
+  const present = new Set(
+    (er.monthsPresent || []).map((k) => Number(String(k).slice(5, 7)))
+  );
+  const head = [
+    `<th class="er-corner">Concepto</th>`,
+    ...months.map(
+      (m, i) =>
+        `<th class="er-num${present.has(i + 1) ? " er-month-has" : ""}">${m}</th>`
+    ),
+    `<th class="er-total-col">TOTAL</th>`,
+  ].join("");
+
+  const body = (er.rows || [])
+    .map((row) => {
+      const cls = [
+        `er-${row.kind || "line"}`,
+        row.tone ? `er-tone-${row.tone}` : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      if (row.kind === "section") {
+        return `<tr class="${cls}"><td class="er-label" colspan="${
+          months.length + 2
+        }">${row.label}</td></tr>`;
+      }
+      const cells = (row.months || [])
+        .map((v) => {
+          if (row.kind === "margin") {
+            return `<td class="er-num${v == null ? " er-empty" : ""}">${pctOrDash(
+              v
+            )}</td>`;
+          }
+          const n = v == null ? null : Number(v);
+          const extra =
+            n == null ? " er-empty" : n < 0 ? " er-neg" : n > 0 ? " er-pos" : "";
+          return `<td class="er-num${extra}">${moneyOrDash(v)}</td>`;
+        })
+        .join("");
+      const tot =
+        row.kind === "margin"
+          ? pctOrDash(row.total)
+          : moneyOrDash(row.total);
+      const totCls =
+        row.kind === "margin"
+          ? "er-num"
+          : row.total == null
+            ? "er-num er-empty"
+            : Number(row.total) < 0
+              ? "er-num er-neg"
+              : Number(row.total) > 0
+                ? "er-num er-pos"
+                : "er-num";
+      return `<tr class="${cls}"><td class="er-label">${row.label}</td>${cells}<td class="${totCls}">${tot}</td></tr>`;
+    })
+    .join("");
+
+  wrap.innerHTML = `<table class="er-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+async function refreshEstadoResultados() {
+  const el = document.getElementById("erTableStatus");
+  const sel = document.getElementById("erYearSelect");
+  try {
+    let year = selectedErYear;
+    if (sel?.value) year = Number(sel.value);
+    if (currentRun?.periodKey && !sel?.dataset.userPicked) {
+      const fromRun = Number(String(currentRun.periodKey).slice(0, 4));
+      if (Number.isFinite(fromRun)) year = fromRun;
+    }
+    const q = year ? `?year=${encodeURIComponent(year)}` : "";
+    const data = await api(`/api/pnl/estado-resultados${q}`);
+    syncErYearSelect(data.years || [], data.year || year);
+    renderEstadoResultados(data.estadoResultados);
+    if (el) {
+      const er = data.estadoResultados;
+      el.textContent = data.emptyYear
+        ? `Año ${data.year}: sin PDFs aún. Sube estados en la pestaña «Estados de cuenta».`
+        : `OK · ${data.year} · ${er?.runsCount || 0} estado(s) · meses ${
+            (er?.monthsPresent || []).join(", ") || "—"
+          }`;
+    }
+    return data;
+  } catch (e) {
+    if (el) el.textContent = "Error: " + e.message;
+    return null;
   }
 }
 
@@ -1196,6 +1313,27 @@ async function init() {
 
   document.getElementById("refreshErStatusBtn")?.addEventListener("click", () => {
     refreshAppsScriptStatus();
+  });
+  document.getElementById("refreshErTableBtn")?.addEventListener("click", () => {
+    refreshEstadoResultados();
+  });
+  document.getElementById("erYearSelect")?.addEventListener("change", (ev) => {
+    const sel = ev.target;
+    sel.dataset.userPicked = "1";
+    selectedErYear = Number(sel.value);
+    refreshEstadoResultados();
+  });
+  document.getElementById("sendToSheetFromErBtn")?.addEventListener("click", () => {
+    showView("estados");
+    const el = document.getElementById("sendToSheetStatus");
+    if (el) {
+      el.textContent =
+        "Abre un mes en Estados de cuenta y pulsa «Enviar a Estado de Resultados».";
+    }
+    document.getElementById("sendToSheetBtn")?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
   });
 
   document.getElementById("analysisYearSelect")?.addEventListener("change", (ev) => {

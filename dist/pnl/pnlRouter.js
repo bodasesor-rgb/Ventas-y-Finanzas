@@ -21,6 +21,7 @@ const counterparties_1 = require("./counterparties");
 const providerAnalysis_1 = require("./providerAnalysis");
 const appsScriptClient_1 = require("../appsScriptClient");
 const appsScriptClient_2 = require("../appsScriptClient");
+const estadoResultados_1 = require("./estadoResultados");
 const sendToSheet_1 = require("./sendToSheet");
 const store_1 = require("./store");
 const uploadDir = path_1.default.join(process.cwd(), "uploads");
@@ -419,6 +420,23 @@ exports.pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
             totals: run.totals,
             reconciliation: run.reconciliation,
         },
+    });
+});
+/** Estado de Resultados en página (matriz mes × concepto) desde PDFs cargados. */
+exports.pnlRouter.get("/api/pnl/estado-resultados", (req, res) => {
+    const runs = (0, store_1.loadRuns)();
+    const years = yearsFromRuns();
+    const requested = Number(req.query.year);
+    const year = Number.isFinite(requested)
+        ? requested
+        : years[years.length - 1] || new Date().getFullYear();
+    const er = (0, estadoResultados_1.buildEstadoResultados)(runs, year);
+    res.json({
+        ok: true,
+        years,
+        year,
+        estadoResultados: er,
+        emptyYear: er.monthsPresent.length === 0,
     });
 });
 /** Ping Apps Script: versión publicada + si ya conoce Estado de Resultados. */

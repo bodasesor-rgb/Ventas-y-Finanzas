@@ -32,6 +32,7 @@ import { applyCounterpartyCategories } from "./counterparties";
 import { buildYearAnalysis } from "./providerAnalysis";
 import { postToAppsScript } from "../appsScriptClient";
 import { getAppsScriptUrl } from "../appsScriptClient";
+import { buildEstadoResultados } from "./estadoResultados";
 import { sendRunToBancoSheet, sendYearAnalysisToSheet } from "./sendToSheet";
 import {
   deleteRunById,
@@ -477,6 +478,24 @@ pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
       totals: run.totals,
       reconciliation: run.reconciliation,
     },
+  });
+});
+
+/** Estado de Resultados en página (matriz mes × concepto) desde PDFs cargados. */
+pnlRouter.get("/api/pnl/estado-resultados", (req, res) => {
+  const runs = loadRuns();
+  const years = yearsFromRuns();
+  const requested = Number(req.query.year);
+  const year = Number.isFinite(requested)
+    ? requested
+    : years[years.length - 1] || new Date().getFullYear();
+  const er = buildEstadoResultados(runs, year);
+  res.json({
+    ok: true,
+    years,
+    year,
+    estadoResultados: er,
+    emptyYear: er.monthsPresent.length === 0,
   });
 });
 
