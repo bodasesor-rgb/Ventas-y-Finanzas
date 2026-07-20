@@ -5,11 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <title>Bodasesor — P&L Banco</title>
-  <link rel="stylesheet" href="/pnl/styles.css?v=20260720a" />
+  <link rel="stylesheet" href="/pnl/styles.css?v=20260720b" />
 </head>
 <body>
-  <div class="version-banner" id="versionBanner">
-    UI v2026-07-20a — Estado de Resultados en Sheet
+  <!-- Lo más arriba a la izquierda: versión que corre + fecha/hora de modificación -->
+  <div class="meta-top-left" id="metaTopLeft">
+    <p class="meta-line" id="metaVersionLine">Cargando versión…</p>
+    <p class="meta-line meta-line-sub" id="metaDateLine">—</p>
   </div>
   <div class="script-status-banner" id="scriptStatusBanner" hidden></div>
 
@@ -20,7 +22,6 @@
       <p class="sub">Traspasos: socios Luis Alejandro Sanchez Campbell y Alejandro Zorrilla Elorza; el resto = proveedores.</p>
     </div>
     <div class="top-links">
-      <span class="version-pill">v2026-07-20a</span>
       <a class="link" href="/health">API health</a>
     </div>
   </header>
@@ -28,6 +29,9 @@
   <nav class="subnav" id="subnav" aria-label="Secciones P&L">
     <button type="button" class="subnav-item is-active" data-view="estados">
       Estados de cuenta
+    </button>
+    <button type="button" class="subnav-item" data-view="estado-resultados">
+      Estado de Resultados
     </button>
     <button type="button" class="subnav-item" data-view="analisis">
       Análisis anual
@@ -121,12 +125,8 @@
       </div>
       <p id="reconcileMsg" class="reconcile-msg" hidden></p>
       <div class="send-sheet-bar">
-        <button type="button" id="setupErBtn" class="btn-big secondary">
-          Crear pestaña Estado de Resultados
-        </button>
         <button type="button" id="sendToSheetBtn" class="btn-big">Enviar a Estado de Resultados</button>
         <p id="sendToSheetStatus" class="muted"></p>
-        <p id="setupErStatus" class="muted"></p>
       </div>
       <p class="muted">Edita monto o descripción si algo se ve raro. La columna <strong>Revisar</strong> = checar el movimiento.</p>
       <div id="summary" class="summary"></div>
@@ -146,6 +146,39 @@
       </div>
       <h3 style="margin-top:1rem;font-size:0.95rem;">Texto extraído (muestra)</h3>
       <pre id="textPreview" class="text-preview"></pre>
+    </section>
+  </main>
+
+  <!-- ========== Vista: Estado de Resultados ========== -->
+  <main class="view-pane" id="view-estado-resultados" data-view-pane="estado-resultados" hidden>
+    <section class="panel wide er-hero">
+      <h2>Estado de Resultados (Google Sheet)</h2>
+      <p class="muted">
+        Pestaña <strong id="erSheetName">Estado de Resultados 2026</strong> en el Sheet:
+        columnas enero…diciembre con ingresos, egresos, gastos por categoría, utilidad y capital.
+      </p>
+      <div class="er-status-box" id="erStatusBox">
+        <p id="erLiveStatus">Revisando Apps Script…</p>
+      </div>
+      <div class="send-sheet-bar">
+        <button type="button" id="setupErBtn" class="btn-big">
+          Crear / refrescar pestaña en el Sheet
+        </button>
+        <button type="button" id="refreshErStatusBtn" class="secondary">
+          Revisar versión otra vez
+        </button>
+      </div>
+      <p id="setupErStatus" class="muted"></p>
+      <ol class="er-steps">
+        <li>Si arriba dice que falta v18: pega Codigo.gs en Apps Script y publica <strong>Nueva versión</strong>.</li>
+        <li>Pulsa <strong>Crear / refrescar pestaña</strong>.</li>
+        <li>En el Sheet, abajo, abre la pestaña <strong>Estado de Resultados 2026</strong>.</li>
+        <li>Desde «Estados de cuenta», procesa el PDF y pulsa <strong>Enviar a Estado de Resultados</strong>.</li>
+      </ol>
+      <p class="muted">
+        Código:
+        <a href="https://raw.githubusercontent.com/bodasesor-rgb/Ventas-y-Finanzas/main/apps-script/Codigo.gs" target="_blank" rel="noopener">Codigo.gs (raw)</a>
+      </p>
     </section>
   </main>
 
@@ -171,6 +204,6 @@
     <div id="analysisPanel" class="analysis-panel analysis-full"></div>
   </main>
 
-  <script src="/pnl/app.js?v=20260718g"></script>
+  <script src="/pnl/app.js?v=20260720b"></script>
 </body>
 </html>

@@ -1017,7 +1017,8 @@ function renderAnalysis(analysis) {
 }
 
 function showView(view) {
-  const name = view === "analisis" ? "analisis" : "estados";
+  const allowed = ["estados", "estado-resultados", "analisis"];
+  const name = allowed.includes(view) ? view : "estados";
   document.querySelectorAll(".subnav-item").forEach((btn) => {
     btn.classList.toggle("is-active", btn.getAttribute("data-view") === name);
   });
@@ -1028,13 +1029,56 @@ function showView(view) {
   });
   if (name === "analisis") {
     refreshAnalysis();
-    try {
-      history.replaceState(null, "", "#analisis");
-    } catch (_) {}
-  } else {
-    try {
-      history.replaceState(null, "", "#estados");
-    } catch (_) {}
+  } else if (name === "estado-resultados") {
+    refreshAppsScriptStatus();
+  }
+  try {
+    history.replaceState(null, "", "#" + name);
+  } catch (_) {}
+}
+
+function fmtMexicoDateTime(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  try {
+    return new Intl.DateTimeFormat("es-MX", {
+      timeZone: "America/Mexico_City",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).format(d);
+  } catch (_) {
+    return d.toISOString();
+  }
+}
+
+async function loadUiBuildInfo() {
+  try {
+    const res = await fetch("/pnl/build-info.json?_=" + Date.now());
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (_) {
+    return null;
+  }
+}
+
+function paintMetaTopLeft({ uiVersion, uiModifiedAt, scriptVersion, checkedAt }) {
+  const vLine = document.getElementById("metaVersionLine");
+  const dLine = document.getElementById("metaDateLine");
+  if (vLine) {
+    vLine.textContent = `Script ${scriptVersion || "?"}  ·  UI ${
+      uiVersion || "?"
+    }`;
+  }
+  if (dLine) {
+    dLine.textContent = `Modificado UI: ${fmtMexicoDateTime(
+      uiModifiedAt
+    )} (hora México)  ·  Revisado: ${fmtMexicoDateTime(checkedAt)}`;
   }
 }
 
@@ -1081,29 +1125,62 @@ async function refreshAnalysis() {
 
 async function refreshAppsScriptStatus() {
   const banner = document.getElementById("scriptStatusBanner");
-  if (!banner) return null;
+  const erLive = document.getElementById("erLiveStatus");
+  const erName = document.getElementById("erSheetName");
+  const build = (await loadUiBuildInfo()) || {
+    uiVersion: "2026-07-20b",
+    modifiedAt: null,
+  };
+  const checkedAt = new Date().toISOString();
   try {
     const data = await api("/api/pnl/apps-script-status");
-    banner.hidden = false;
-    if (data.needsPublish) {
-      banner.classList.remove("is-ok");
-      banner.innerHTML =
-        `<strong>Apps Script ${data.version || "?"} — falta publicar v18.</strong> ` +
-        `Por eso no aparece la pestaña Estado de Resultados. ` +
-        `Pega <a href="https://raw.githubusercontent.com/bodasesor-rgb/Ventas-y-Finanzas/main/apps-script/Codigo.gs" target="_blank" rel="noopener">Codigo.gs</a>, ` +
-        `Guarda → Implementar → Nueva versión (misma URL), luego pulsa «Crear pestaña Estado de Resultados».`;
-    } else {
-      banner.classList.add("is-ok");
-      banner.textContent =
-        data.message ||
-        `Apps Script ${data.version}: listo · ${data.erSheet || "Estado de Resultados"}`;
+    paintMetaTopLeft({
+      uiVersion: build.uiVersion,
+      uiModifiedAt: build.modifiedAt,
+      scriptVersion: data.version,
+      checkedAt,
+    });
+    if (erName && data.erSheet) erName.textContent = data.erSheet;
+    if (banner) {
+      banner.hidden = false;
+      if (data.needsPublish) {
+        banner.classList.remove("is-ok");
+        banner.innerHTML =
+          `<strong>Apps Script ${data.version || "?"} — falta publicar v18.</strong> ` +
+          `Sin eso no existe la pestaña en el Sheet. ` +
+          `Pega <a href="https://raw.githubusercontent.com/bodasesor-rgb/Ventas-y-Finanzas/main/apps-script/Codigo.gs" target="_blank" rel="noopener">Codigo.gs</a> → Guardar → Implementar → Nueva versión.`;
+      } else {
+        banner.classList.add("is-ok");
+        banner.textContent =
+          data.message ||
+          `Apps Script ${data.version}: listo · ${
+            data.erSheet || "Estado de Resultados"
+          }`;
+      }
+    }
+    if (erLive) {
+      erLive.textContent = data.needsPublish
+        ? `Aún no: el /exec corre ${data.version}. Publica v18 para crear «${
+            data.erSheet || "Estado de Resultados 2026"
+          }».`
+        : `Listo: ${data.version}. Puedes crear/refrescar la pestaña «${
+            data.erSheet || "Estado de Resultados 2026"
+          }» en el Sheet.`;
     }
     return data;
   } catch (e) {
-    banner.hidden = false;
-    banner.classList.remove("is-ok");
-    banner.textContent =
-      "No pude leer Apps Script: " + (e.message || e);
+    paintMetaTopLeft({
+      uiVersion: build.uiVersion,
+      uiModifiedAt: build.modifiedAt,
+      scriptVersion: "error",
+      checkedAt,
+    });
+    if (banner) {
+      banner.hidden = false;
+      banner.classList.remove("is-ok");
+      banner.textContent = "No pude leer Apps Script: " + (e.message || e);
+    }
+    if (erLive) erLive.textContent = "Error al leer Apps Script: " + e.message;
     return null;
   }
 }
@@ -1116,6 +1193,15 @@ async function init() {
       showView(btn.getAttribute("data-view"));
     });
   });
+
+  document.getElementById("refreshErStatusBtn")?.addEventListener("click", () => {
+    refreshAppsScriptStatus();
+  });
+
+  const hash = (location.hash || "").replace(/^#/, "");
+  if (hash === "analisis" || hash === "estado-resultados") {
+    showView(hash);
+  }
 
   document.getElementById("analysisYearSelect")?.addEventListener("change", (ev) => {
     const sel = ev.target;
