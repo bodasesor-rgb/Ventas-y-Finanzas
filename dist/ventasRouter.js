@@ -4,6 +4,7 @@ exports.ventasRouter = void 0;
 const express_1 = require("express");
 const kommoApi_1 = require("./kommoApi");
 const mapDealToFila_1 = require("./mapDealToFila");
+const appsScriptClient_1 = require("./appsScriptClient");
 const pollClosedDeals_1 = require("./pollClosedDeals");
 const ventasSync_1 = require("./ventasSync");
 exports.ventasRouter = (0, express_1.Router)();
@@ -211,6 +212,65 @@ exports.ventasRouter.get("/api/ventas/recent", async (req, res) => {
         res.status(502).json({
             ok: false,
             error: err instanceof Error ? err.message : String(err),
+        });
+    }
+});
+/**
+ * Duplica Metricas → Metricas Auto + resumen semanal (vía Apps Script).
+ * La pestaña original no se toca.
+ */
+exports.ventasRouter.post("/api/ventas/setup-metricas-auto", async (_req, res) => {
+    try {
+        const result = await (0, appsScriptClient_1.postToAppsScript)({ action: "setupMetricasAuto" }, { timeoutMs: 90_000 });
+        if (!result.ok) {
+            res.status(502).json({
+                ok: false,
+                error: result.error || "Apps Script rechazó setupMetricasAuto",
+                version: result.version,
+                hint: "Pega Codigo.gs v23 → Guardar → Implementar → Nueva versión. O en Apps Script ejecuta restoreMetricasSemanal_.",
+            });
+            return;
+        }
+        res.status(200).json({
+            ok: true,
+            version: result.version,
+            metricasAutoSheet: result.metricasAutoSheet ||
+                "Metricas 2026 Auto",
+            spreadsheetName: result.spreadsheetName,
+            spreadsheetUrl: result.spreadsheetUrl,
+            existingSheets: result.existingSheets,
+            message: result.message ||
+                "Pestaña Metricas Auto lista. Refresca el Sheet.",
+        });
+    }
+    catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        res.status(502).json({
+            ok: false,
+            error,
+            hint: "Si el script aún es v22: en Apps Script elige restoreMetricasSemanal_ → ▶ Ejecutar. O pega v23 e Implementa.",
+        });
+    }
+});
+exports.ventasRouter.get("/api/ventas/setup-metricas-auto", async (_req, res) => {
+    try {
+        const result = await (0, appsScriptClient_1.postToAppsScript)({ action: "setupMetricasAuto" }, { timeoutMs: 90_000 });
+        res.status(result.ok ? 200 : 502).json({
+            ok: Boolean(result.ok),
+            version: result.version,
+            metricasAutoSheet: result.metricasAutoSheet ||
+                "Metricas 2026 Auto",
+            spreadsheetUrl: result.spreadsheetUrl,
+            existingSheets: result.existingSheets,
+            message: result.message,
+            error: result.error,
+        });
+    }
+    catch (err) {
+        res.status(502).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+            hint: "En Apps Script ejecuta restoreMetricasSemanal_ → ▶ Ejecutar",
         });
     }
 });

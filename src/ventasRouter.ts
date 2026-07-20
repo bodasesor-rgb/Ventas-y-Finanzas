@@ -6,6 +6,7 @@ import {
 } from "./kommoApi";
 import { mapDealToFilaVentas } from "./mapDealToFila";
 import type { KommoWebhookBody } from "./types";
+import { postToAppsScript } from "./appsScriptClient";
 import {
   getPollStatus,
   pollClosedDealsOnce,
@@ -239,6 +240,76 @@ ventasRouter.get("/api/ventas/recent", async (req, res) => {
     res.status(502).json({
       ok: false,
       error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+/**
+ * Duplica Metricas → Metricas Auto + resumen semanal (vía Apps Script).
+ * La pestaña original no se toca.
+ */
+ventasRouter.post("/api/ventas/setup-metricas-auto", async (_req, res) => {
+  try {
+    const result = await postToAppsScript(
+      { action: "setupMetricasAuto" },
+      { timeoutMs: 90_000 }
+    );
+    if (!result.ok) {
+      res.status(502).json({
+        ok: false,
+        error: result.error || "Apps Script rechazó setupMetricasAuto",
+        version: result.version,
+        hint:
+          "Pega Codigo.gs v23 → Guardar → Implementar → Nueva versión. O en Apps Script ejecuta restoreMetricasSemanal_.",
+      });
+      return;
+    }
+    res.status(200).json({
+      ok: true,
+      version: result.version,
+      metricasAutoSheet:
+        (result as { metricasAutoSheet?: string }).metricasAutoSheet ||
+        "Metricas 2026 Auto",
+      spreadsheetName: result.spreadsheetName,
+      spreadsheetUrl: result.spreadsheetUrl,
+      existingSheets: result.existingSheets,
+      message:
+        result.message ||
+        "Pestaña Metricas Auto lista. Refresca el Sheet.",
+    });
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    res.status(502).json({
+      ok: false,
+      error,
+      hint:
+        "Si el script aún es v22: en Apps Script elige restoreMetricasSemanal_ → ▶ Ejecutar. O pega v23 e Implementa.",
+    });
+  }
+});
+
+ventasRouter.get("/api/ventas/setup-metricas-auto", async (_req, res) => {
+  try {
+    const result = await postToAppsScript(
+      { action: "setupMetricasAuto" },
+      { timeoutMs: 90_000 }
+    );
+    res.status(result.ok ? 200 : 502).json({
+      ok: Boolean(result.ok),
+      version: result.version,
+      metricasAutoSheet:
+        (result as { metricasAutoSheet?: string }).metricasAutoSheet ||
+        "Metricas 2026 Auto",
+      spreadsheetUrl: result.spreadsheetUrl,
+      existingSheets: result.existingSheets,
+      message: result.message,
+      error: result.error,
+    });
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+      hint: "En Apps Script ejecuta restoreMetricasSemanal_ → ▶ Ejecutar",
     });
   }
 });

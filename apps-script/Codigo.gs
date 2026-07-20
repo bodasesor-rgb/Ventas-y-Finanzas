@@ -1,29 +1,27 @@
 /**
  * ============================================================
  * Apps Script — Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-07-20-v22
+ * VERSION: 2026-07-20-v23
  * ============================================================
  * PEGAR TODO ESTE ARCHIVO (borrar lo anterior → pegar → Guardar)
  *
  * Luego:
- *   1) authorizeDrive_ → ▶ Ejecutar (Drive)
- *   2) restoreEstadoResultados_ → ▶ Crea pestaña Estado de Resultados
- *   3) restoreMetricasSemanal_ → ▶ Duplica Metricas a «Metricas YYYY Auto»
- *      y pone ahí el resumen semanal (la Metricas original NO se toca)
- *   4) Implementar → Nueva versión → misma URL /exec
+ *   1) authorizeDrive_ → ▶ Ejecutar (Drive)  [si aún no]
+ *   2) restoreMetricasSemanal_ → ▶ Ejecutar
+ *      (o desde Hostinger: POST /api/ventas/setup-metricas-auto)
+ *   3) Implementar → Nueva versión → misma URL /exec
  *
- * REGLA v22:
+ * REGLA v23:
  *   - Metricas YYYY (original) NUNCA se modifica
  *   - Todo lo nuevo va a Metricas YYYY Auto (copia de prueba)
- *   - Cuando confirmes que funciona, renombras / migrás a ese espacio
- *   - Banco YYYY queda oculto (respaldo técnico del PDF)
+ *   - action doPost: setupMetricasAuto
  *
- * doPost: Eventos | upsertEstadoResultados | upsertBanco | upsertAnalisis | archive
+ * doPost: Eventos | upsertEstadoResultados | upsertBanco | setupMetricasAuto | archive
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-07-20-v22';
+var SCRIPT_VERSION = '2026-07-20-v23';
 var METRICAS_MARKER = 'BOT_METRICAS_V14';
-var METRICAS_SEMANAL_MARKER = 'BOT_METRICAS_SEMANAL_V22';
+var METRICAS_SEMANAL_MARKER = 'BOT_METRICAS_SEMANAL_V23';
 var PNL_MARKER = 'BOT_PNL_MESES_V17';
 var ER_MARKER = 'BOT_ESTADO_RESULTADOS_V20';
 var YEAR = 2026;
@@ -1104,6 +1102,35 @@ function doPost(e) {
           '»: ' +
           ER_SHEET +
           '. Ábrela abajo o con el link del Sheet.',
+      });
+    }
+    if (data && data.action === 'setupMetricasAuto') {
+      var resultAuto = ensureMetricasSemanal_();
+      var infoAuto = spreadsheetInfo_();
+      return json_({
+        ok: Boolean(resultAuto && resultAuto.ok),
+        version: SCRIPT_VERSION,
+        action: 'setupMetricasAuto',
+        metricasAutoSheet: METRICAS_AUTO_SHEET,
+        metricasOriginal: METRICAS_SHEET,
+        duplicated: resultAuto && resultAuto.duplicated,
+        anchorCol: resultAuto && resultAuto.anchorCol,
+        weeks: resultAuto && resultAuto.weeks,
+        error: resultAuto && resultAuto.error,
+        spreadsheetId: infoAuto.spreadsheetId,
+        spreadsheetName: infoAuto.spreadsheetName,
+        spreadsheetUrl: infoAuto.spreadsheetUrl,
+        existingSheets: infoAuto.existingSheets,
+        message: resultAuto && resultAuto.ok
+          ? 'Lista «' +
+            METRICAS_AUTO_SHEET +
+            '» en «' +
+            infoAuto.spreadsheetName +
+            '». La original «' +
+            METRICAS_SHEET +
+            '» no se tocó.'
+          : 'No se pudo crear Metricas Auto: ' +
+            ((resultAuto && resultAuto.error) || 'error'),
       });
     }
 
