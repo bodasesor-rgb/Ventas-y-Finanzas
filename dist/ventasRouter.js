@@ -126,12 +126,15 @@ exports.ventasRouter.get("/api/ventas/poll", (_req, res) => {
     res.status(200).json({ ok: true, poll: (0, pollClosedDeals_1.getPollStatus)() });
 });
 /**
- * Pasada del poller: destraba candado si hace falta, pero solo sube deals
- * nuevos (nunca reescribe los ya sincronizados).
+ * Pasada del poller: destraba candado si hace falta.
+ * Solo el cierre más reciente en la ventana; no re-sube históricos.
  */
 exports.ventasRouter.post("/api/ventas/poll", async (_req, res) => {
     try {
-        const result = await (0, pollClosedDeals_1.pollClosedDealsOnce)(40, { force: true });
+        const result = await (0, pollClosedDeals_1.pollClosedDealsOnce)(40, {
+            force: true,
+            onlyLatestMissing: true,
+        });
         res.status(200).json({ ok: true, result, poll: (0, pollClosedDeals_1.getPollStatus)() });
     }
     catch (err) {
@@ -143,7 +146,10 @@ exports.ventasRouter.post("/api/ventas/poll", async (_req, res) => {
 });
 exports.ventasRouter.get("/api/ventas/poll-now", async (_req, res) => {
     try {
-        const result = await (0, pollClosedDeals_1.pollClosedDealsOnce)(40, { force: true });
+        const result = await (0, pollClosedDeals_1.pollClosedDealsOnce)(40, {
+            force: true,
+            onlyLatestMissing: true,
+        });
         res.status(200).json({ ok: true, result, poll: (0, pollClosedDeals_1.getPollStatus)() });
     }
     catch (err) {
