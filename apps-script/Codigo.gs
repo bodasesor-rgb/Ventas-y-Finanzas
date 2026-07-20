@@ -1,27 +1,26 @@
 /**
  * ============================================================
  * Apps Script — Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-07-18-v16
+ * VERSION: 2026-07-20-v17
  * ============================================================
  * PEGAR TODO ESTE ARCHIVO (borrar lo anterior → pegar → Guardar)
  *
  * Luego:
  *   1) authorizeDrive_ → ▶ Ejecutar (Drive)
- *   2) restorePnLBanco_ → ▶ Regenera P&L resumen (NO toca Metricas)
+ *   2) restorePnLBanco_ → ▶ Arma columnas ene–dic (NO toca Metricas)
  *   3) Implementar → Nueva versión → misma URL /exec
  *
- * REGLA v16:
- *   - "Enviar al P&L" solo escribe Banco YYYY (1 fila/mes)
- *   - P&L YYYY = resumen Ingreso/Egreso/Gastos/Neto por mes
- *     (categorías de la web → bloques del P&L; no es un dump de Banco)
- *   - Metricas NUNCA se toca desde el bot
+ * REGLA v17:
+ *   - "Enviar al P&L" escribe Banco YYYY + pega resultados en la
+ *     columna del mes en P&L YYYY (ene=B … dic=M)
+ *   - Metricas NUNCA se toca
  *
  * doPost: Eventos | upsertBanco | upsertAnalisis | archive Drive
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-07-18-v16';
+var SCRIPT_VERSION = '2026-07-20-v17';
 var METRICAS_MARKER = 'BOT_METRICAS_V14';
-var PNL_MARKER = 'BOT_PNL_RESUMEN_V16';
+var PNL_MARKER = 'BOT_PNL_MESES_V17';
 var YEAR = 2026;
 var EVENTOS_SHEET = 'Eventos ' + YEAR;
 var METRICAS_SHEET = 'Metricas ' + YEAR;
@@ -300,8 +299,13 @@ function upsertBanco_(data) {
   // Formato Socios / Proveedores (cols 26-27)
   sh.getRange(rowIndex, 26, 1, 2).setNumberFormat('$#,##0.00');
 
-  // NO llamar setupMetricas_/setupPnL_ aquí: antes hacían clear() y
-  // borraban el ciclo anual del usuario. Las fórmulas SUMIF se actualizan solas.
+  // Pega resultados en la columna del mes en P&L (sin tocar Metricas)
+  var pnlCol = pasteMonthToPnL_(ss, month, by, {
+    ingresos: Number(data.ingresos) || 0,
+    gastos: Number(data.gastos) || 0,
+    neto: Number(data.neto) || 0,
+    otros: Number(data.otros) || 0,
+  });
 
   return json_({
     ok: true,
@@ -309,8 +313,81 @@ function upsertBanco_(data) {
     action: action,
     row: rowIndex,
     sheetName: BANCO_SHEET,
+    pnlSheet: PL_SHEET,
+    pnlMonthCol: pnlCol,
     periodKey: periodKey,
   });
+}
+
+/**
+ * Asegura layout P&L (columnas por mes). Solo regenera si falta el marcador v17.
+ * Nunca toca Metricas.
+ */
+function ensurePnLLayout_(ss) {
+  var sh = ss.getSheetByName(PL_SHEET);
+  if (!sh) {
+    setupPnL_(ss);
+    return ss.getSheetByName(PL_SHEET);
+  }
+  var marker = String(sh.getRange('A2').getValue() || '');
+  if (marker.indexOf(PNL_MARKER) === -1) {
+    setupPnL_(ss);
+  }
+  return ss.getSheetByName(PL_SHEET);
+}
+
+/**
+ * Pega en P&L los resultados del mes en su columna (B=ene … M=dic).
+ * Filas manuales (Intereses, Catering…, Impuestos) no se pisan.
+ * TOTAL / Bruto / Margen / Neto siguen siendo fórmulas.
+ */
+function pasteMonthToPnL_(ss, month, by, totals) {
+  var sh = ensurePnLLayout_(ss);
+  var col = Number(month) + 1; // mes 1 → col B (2)
+  if (col < 2 || col > 13) return null;
+
+  function abs_(n) {
+    return Math.abs(Number(n) || 0);
+  }
+  function money_(row, value) {
+    sh.getRange(row, col).setValue(Number(value) || 0);
+    sh.getRange(row, col).setNumberFormat('$#,##0.00');
+  }
+
+  var venta = Number(by.venta) || 0;
+  var ingreso = Number(by.ingreso) || 0;
+  // Si no hay desglose de cats de ingreso, usa total de abonos del estado
+  if (venta === 0 && ingreso === 0 && (totals.ingresos || 0) > 0) {
+    ingreso = totals.ingresos;
+  }
+
+  // Ingreso (no pisa Intereses ni líneas de negocio manuales)
+  money_(8, venta);
+  money_(9, ingreso);
+
+  // Egreso
+  money_(17, abs_(by.proveedor));
+  money_(18, abs_(by.evento));
+
+  // Gastos
+  money_(30, abs_(by.ads));
+  money_(31, abs_(by.pago));
+  money_(32, abs_(by.apps) + abs_(by.pass));
+  money_(
+    34,
+    abs_(by.comisiones) +
+      abs_(by.servicios) +
+      abs_(by.transferencia_persona) +
+      abs_(by.revisar) +
+      abs_(by.otro) +
+      abs_(totals.otros)
+  );
+
+  // Banco / CAPITAL
+  money_(40, Number(totals.neto) || 0);
+  money_(41, abs_(by.socio));
+
+  return columnToLetter_(col);
 }
 
 /* ===================== Drive archive (PDFs) ===================== */
@@ -596,7 +673,7 @@ function doPost(e) {
       return json_({
         ok: false,
         version: SCRIPT_VERSION,
-        error: 'values no es array (¿Apps Script v16 publicado?)',
+        error: 'values no es array (¿Apps Script v17 publicado?)',
         typeofValues: typeof values,
         rawPreview: String(raw).slice(0, 200),
       });
@@ -1013,18 +1090,17 @@ function setupMetricas_(ss) {
 }
 
 /**
- * P&L YYYY — resumen tipo:
- *   Ingreso → Egreso → Ingreso Bruto → Gastos → Ingreso Neto → Banco / CAPITAL
- * Columnas = meses. Datos = categorías de la web (Banco), no un dump de la hoja.
+ * P&L YYYY — columnas = meses (B=enero … M=diciembre, N=TOTAL).
+ * Al "Enviar al P&L" se PEGAN los resultados en la columna del mes.
+ * TOTAL / Ingreso Bruto / Margen / Ingreso Neto = fórmulas.
  * No toca Metricas.
  *
- * Mapeo web → bloque:
- *   Ingreso:   venta, ingreso (+ Intereses manual)
- *   Egreso:    proveedores, costo evento
- *   Gastos:    Marketing=ads, RH=pagos, Programas=apps+pass,
- *              Impuestos=manual/0, Otros=comisiones+servicios+otro+revisar+…
- *   Banco:     neto banco del mes
- *   CAPITAL:   socios
+ * Filas de datos (pegadas desde web):
+ *   Ingreso: venta (8), ingreso (9)
+ *   Egreso:  proveedores (17), costo evento (18)
+ *   Gastos:  Marketing/ads (30), RH/pagos (31), Programas (32), Otros (34)
+ *   Banco (40), CAPITAL/socios (41)
+ * Filas en 0 = manuales (Intereses, Catering…, Impuestos, Banquete…)
  */
 function setupPnL_(ss) {
   var sh = ss.getSheetByName(PL_SHEET);
@@ -1045,85 +1121,26 @@ function setupPnL_(ss) {
     'noviembre',
     'diciembre',
   ];
-  var ba = "'" + BANCO_SHEET + "'";
 
   sh.getRange('A1').setValue('P&L ' + YEAR + ' · Bodasesor');
   sh.getRange('A1').setFontWeight('bold').setFontSize(16);
   sh.getRange('A2').setValue(PNL_MARKER + ' · ' + SCRIPT_VERSION);
   sh.getRange('A2').setFontColor('#666666');
   sh.getRange('A3').setValue(
-    'Resumen mensual con datos de /pnl/ (Banco). ' +
-      'Ingreso/Egreso/Gastos mapeados desde categorías web. Metricas no se toca.'
+    'Columnas = meses. Al Enviar al P&L desde /pnl/ se pegan los resultados en esa columna. Metricas no se toca.'
   );
 
   // Fila 5: headers meses
-  sh.getRange(5, 1).setValue('');
+  sh.getRange(5, 1).setValue('Concepto');
   for (var m = 1; m <= 12; m++) {
     sh.getRange(5, m + 1).setValue(months[m - 1]).setFontWeight('bold');
   }
   sh.getRange(5, 14).setValue('TOTAL').setFontWeight('bold');
   sh.getRange(5, 1, 1, 14).setBackground('#1a1a1a').setFontColor('#ffffff');
 
-  /** Monto firmado tal cual (ingresos / neto). */
-  function sumif_(colLetter, monthNum) {
-    return (
-      '=IFERROR(SUMIF(' +
-      ba +
-      '!$A:$A,' +
-      monthNum +
-      ',' +
-      ba +
-      '!$' +
-      colLetter +
-      ':$' +
-      colLetter +
-      '),0)'
-    );
-  }
-
-  /** Gasto: valor absoluto (en Banco las cats suelen venir negativas). */
-  function absSumif_(colLetter, monthNum) {
-    return (
-      '=ABS(IFERROR(SUMIF(' +
-      ba +
-      '!$A:$A,' +
-      monthNum +
-      ',' +
-      ba +
-      '!$' +
-      colLetter +
-      ':$' +
-      colLetter +
-      '),0))'
-    );
-  }
-
   function sectionHeader_(row, label, bg) {
     sh.getRange(row, 1).setValue(label).setFontWeight('bold');
     sh.getRange(row, 1, 1, 14).setBackground(bg || '#e8e8e8');
-  }
-
-  function fillFromCol_(row, label, colLetter, asAbs) {
-    sh.getRange(row, 1).setValue(label);
-    for (var m = 1; m <= 12; m++) {
-      sh.getRange(row, m + 1).setFormula(
-        asAbs ? absSumif_(colLetter, m) : sumif_(colLetter, m)
-      );
-    }
-    sh.getRange(row, 14).setFormula('=SUM(B' + row + ':M' + row + ')');
-  }
-
-  /** Varias cols Banco sumadas en una fila (siempre abs). */
-  function fillFromCols_(row, label, colLetters) {
-    sh.getRange(row, 1).setValue(label);
-    for (var m = 1; m <= 12; m++) {
-      var parts = [];
-      for (var c = 0; c < colLetters.length; c++) {
-        parts.push(absSumif_(colLetters[c], m).replace(/^=/, ''));
-      }
-      sh.getRange(row, m + 1).setFormula('=' + parts.join('+'));
-    }
-    sh.getRange(row, 14).setFormula('=SUM(B' + row + ':M' + row + ')');
   }
 
   function fillZero_(row, label) {
@@ -1165,23 +1182,22 @@ function setupPnL_(ss) {
     sh.getRange(row, 14).setNumberFormat('0.0%');
   }
 
-  // —— INGRESO (web: venta + ingreso; Intereses manual) ——
+  // —— INGRESO ——
   sectionHeader_(6, 'Ingreso', '#d8f3dc');
-  fillZero_(7, 'Intereses'); // manual / aún no hay cat en web
-  fillFromCol_(8, 'Venta / anticipo', 'R', false);
-  fillFromCol_(9, 'Ingreso', 'Q', false);
-  // Desglose opcional por línea de negocio (manual; no viene del banco)
-  fillZero_(10, 'Catering');
+  fillZero_(7, 'Intereses'); // manual
+  fillZero_(8, 'Venta / anticipo'); // pegado desde web
+  fillZero_(9, 'Ingreso'); // pegado desde web
+  fillZero_(10, 'Catering'); // manual
   fillZero_(11, 'Mobiliario');
   fillZero_(12, 'Lugares');
   fillZero_(13, 'Shows');
   fillSumRows_(14, 'TOTAL', 7, 13, '#b7e4c7');
 
-  // —— EGRESO (web: proveedores + costo evento; resto manual) ——
+  // —— EGRESO ——
   sectionHeader_(16, 'Egreso', '#fde2e1');
-  fillFromCol_(17, 'Proveedores', 'AA', true);
-  fillFromCol_(18, 'Costo de evento', 'N', true);
-  fillZero_(19, 'Banquete');
+  fillZero_(17, 'Proveedores'); // pegado
+  fillZero_(18, 'Costo de evento'); // pegado
+  fillZero_(19, 'Banquete'); // manual
   fillZero_(20, 'Catering');
   fillZero_(21, 'Mobiliario');
   fillZero_(22, 'Lugares');
@@ -1192,13 +1208,13 @@ function setupPnL_(ss) {
   fillDiff_(26, 'Ingreso Bruto', 14, 24, '#fff3bf');
   fillMargin_(27, 'Margen', 26, 14);
 
-  // —— GASTOS operativos (web) ——
+  // —— GASTOS ——
   sectionHeader_(29, 'Gastos', '#e7f5ff');
-  fillFromCol_(30, 'Marketing', 'G', true); // ads
-  fillFromCol_(31, 'RH', 'L', true); // pagos / nómina vía pago
-  fillFromCols_(32, 'Programas', ['H', 'I']); // apps + pass
-  fillZero_(33, 'Impuestos'); // manual hasta tener col dedicada
-  fillFromCols_(34, 'Otros', ['J', 'K', 'M', 'O', 'P', 'S']); // comisiones, servicios, transf, revisar, otro, otros
+  fillZero_(30, 'Marketing'); // ads
+  fillZero_(31, 'RH'); // pagos
+  fillZero_(32, 'Programas'); // apps+pass
+  fillZero_(33, 'Impuestos'); // manual
+  fillZero_(34, 'Otros');
   fillSumRows_(35, 'TOTAL', 30, 34, '#a5d8ff');
 
   // —— Ingreso Neto / Margen ——
@@ -1206,20 +1222,20 @@ function setupPnL_(ss) {
   fillMargin_(38, 'Margen', 37, 14);
 
   // —— Banco / CAPITAL ——
-  fillFromCol_(40, 'Banco', 'F', false); // neto banco del mes
+  fillZero_(40, 'Banco');
   sh.getRange(40, 1, 1, 14).setBackground('#f3f0ff');
-  fillFromCol_(41, 'CAPITAL', 'Z', true); // socios
+  fillZero_(41, 'CAPITAL');
   sh.getRange(41, 1, 1, 14).setBackground('#f3f0ff');
+  sh.getRange(40, 14).setFormula('=SUM(B40:M40)');
+  sh.getRange(41, 14).setFormula('=SUM(B41:M41)');
 
-  // Inversión (manual, como tu hoja)
   sh.getRange(43, 1).setValue('Inversión');
   sh.getRange(43, 2).setValue(30000);
   sh.getRange(43, 2).setNumberFormat('$#,##0.00');
   sh.getRange(44, 1).setValue(
-    'Mapeo: Marketing←ads · RH←pagos · Programas←apps+pass · Egreso←proveedores+evento · ' +
-      'Ingreso←venta+ingreso · Banco←neto · CAPITAL←socios. ' +
-      'Filas en 0 son manuales (Intereses, líneas de negocio, Impuestos). ' +
-      'Regenerar: restorePnLBanco_. Metricas intacta.'
+    'Al Enviar al P&L se pega la columna del mes (B=enero…M=diciembre). ' +
+      'TOTAL/Bruto/Neto/Margen son fórmulas. Filas manuales no se pisan. ' +
+      'Regenerar layout: restorePnLBanco_. Metricas intacta.'
   );
   sh.getRange(44, 1).setFontColor('#666666');
 
@@ -1242,13 +1258,13 @@ function restorePnLBanco_() {
   ensureBancoSheet_(ss);
   setupPnL_(ss);
   var msg =
-    'P&L resumen regenerado — ' +
+    'P&L con columnas por mes listo — ' +
     SCRIPT_VERSION +
     '\n\n' +
     PL_SHEET +
-    ': Ingreso → Egreso → Gastos → Neto (datos web / ' +
-    BANCO_SHEET +
-    ').\nMetricas NO se modificó.';
+    ': B=enero … M=diciembre.\n' +
+    'Al Enviar al P&L se pegan los resultados en esa columna.\n' +
+    'Metricas NO se modificó.';
   try {
     SpreadsheetApp.getUi().alert(msg);
   } catch (err) {
