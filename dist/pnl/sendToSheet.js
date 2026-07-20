@@ -45,8 +45,8 @@ async function sendRunToBancoSheet(run) {
             otros += amt;
     }
     const oficial = run.reconciliation?.oficial;
-    const result = await (0, appsScriptClient_1.postToAppsScript)({
-        action: "upsertBanco",
+    const payload = {
+        action: "upsertEstadoResultados",
         year,
         month,
         periodKey,
@@ -64,8 +64,16 @@ async function sendRunToBancoSheet(run) {
         cuadra: Boolean(run.reconciliation?.matchCompleto),
         runId: run.id,
         filename: run.storedName || run.filename || "",
-    });
-    const erSheet = result.erSheet || `Estado de Resultados ${year}`;
+    };
+    let result;
+    try {
+        result = await (0, appsScriptClient_1.postToAppsScript)(payload);
+    }
+    catch (err) {
+        // Compat: Scripts viejos solo conocen upsertBanco
+        result = await (0, appsScriptClient_1.postToAppsScript)({ ...payload, action: "upsertBanco" });
+    }
+    const erSheet = result.erSheet || result.sheetName || `Estado de Resultados ${year}`;
     const erCol = result.erMonthCol || "";
     const monthNames = [
         "enero",
@@ -83,13 +91,13 @@ async function sendRunToBancoSheet(run) {
     ];
     const monthLabel = monthNames[month - 1] || String(month);
     return {
-        sheetName: result.sheetName || `Banco ${year}`,
+        sheetName: erSheet,
         erSheet,
         erMonthCol: erCol,
         row: result.row,
         action: result.action,
         version: result.version,
-        message: `OK → ${erSheet} (columna ${monthLabel}${erCol ? ` / ${erCol}` : ""}) · Banco fila ${result.row || "?"} · v${result.version || "?"}`,
+        message: `OK → ${erSheet} · columna ${monthLabel}${erCol ? ` (${erCol})` : ""} · v${result.version || "?"}`,
     };
 }
 /** Escribe pestaña Análisis YYYY con ranking proveedores + mensual/anual. */

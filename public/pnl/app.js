@@ -100,14 +100,12 @@ function renderSendSheetStatus(run) {
   if (run?.sentToSheet?.ok && run.sentToSheetAt) {
     status.textContent = `En Sheet: ${
       run.sentToSheet.sheetName || "Estado de Resultados"
-    } · Banco fila ${run.sentToSheet.row || "?"} · ${fmtDate(
-      run.sentToSheetAt
-    )}`;
+    } · ${fmtDate(run.sentToSheetAt)}`;
   } else if (run?.sentToSheet?.ok === false) {
     status.textContent = "Último envío falló: " + (run.sentToSheet.error || "");
   } else {
     status.textContent =
-      "Cuando cuadre, envía el mes a Estado de Resultados (columnas enero…diciembre) + Banco.";
+      "Cuando cuadre, envía el mes al Estado de Resultados del Sheet (no al estado de cuenta).";
   }
 }
 
@@ -1263,9 +1261,9 @@ async function refreshAppsScriptStatus() {
       if (data.needsPublish) {
         banner.classList.remove("is-ok");
         banner.innerHTML =
-          `<strong>Apps Script ${data.version || "?"} — falta publicar v18.</strong> ` +
-          `Sin eso no existe la pestaña en el Sheet. ` +
-          `Pega <a href="https://raw.githubusercontent.com/bodasesor-rgb/Ventas-y-Finanzas/main/apps-script/Codigo.gs" target="_blank" rel="noopener">Codigo.gs</a> → Guardar → Implementar → Nueva versión.`;
+          `<strong>Apps Script ${data.version || "?"} — falta publicar v19.</strong> ` +
+          `Sin v19 el Sheet sigue mostrando Banco (estado de cuenta). ` +
+          `Pega <a href="https://raw.githubusercontent.com/bodasesor-rgb/Ventas-y-Finanzas/main/apps-script/Codigo.gs" target="_blank" rel="noopener">Codigo.gs</a> → Guardar → Implementar → Nueva versión → restoreEstadoResultados_.`;
       } else {
         banner.classList.add("is-ok");
         banner.textContent =

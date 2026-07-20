@@ -1,7 +1,7 @@
 /**
  * ============================================================
  * Apps Script — Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-07-20-v18
+ * VERSION: 2026-07-20-v19
  * ============================================================
  * PEGAR TODO ESTE ARCHIVO (borrar lo anterior → pegar → Guardar)
  *
@@ -11,20 +11,19 @@
  *      (NO toca Metricas)
  *   3) Implementar → Nueva versión → misma URL /exec
  *
- * REGLA v18:
- *   - Banco YYYY = detalle del estado de cuenta (1 fila/mes)
- *   - Estado de Resultados YYYY = pestaña nueva con el ER por mes
- *     (ingresos, egresos, gastos por categoría, utilidad, capital)
- *   - "Enviar al P&L" escribe Banco + pega la columna del mes en el ER
+ * REGLA v19:
+ *   - Lo que se VE en Sheet = Estado de Resultados YYYY (por mes)
+ *   - Banco YYYY queda oculto (solo respaldo técnico del PDF)
+ *   - "Enviar" pega la columna del mes en el Estado de Resultados
  *   - Metricas NUNCA se toca
  *
- * doPost: Eventos | upsertBanco | upsertAnalisis | archive Drive
+ * doPost: Eventos | upsertEstadoResultados | upsertBanco | upsertAnalisis | archive
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-07-20-v18';
+var SCRIPT_VERSION = '2026-07-20-v19';
 var METRICAS_MARKER = 'BOT_METRICAS_V14';
 var PNL_MARKER = 'BOT_PNL_MESES_V17';
-var ER_MARKER = 'BOT_ESTADO_RESULTADOS_V18';
+var ER_MARKER = 'BOT_ESTADO_RESULTADOS_V19';
 var YEAR = 2026;
 var EVENTOS_SHEET = 'Eventos ' + YEAR;
 var METRICAS_SHEET = 'Metricas ' + YEAR;
@@ -317,65 +316,84 @@ function upsertBanco_(data) {
       data.retirosOficiales == null ? 0 : Number(data.retirosOficiales),
   };
 
-  // Estado de Resultados: pega la columna del mes (sin tocar Metricas)
+  // Destino visible: Estado de Resultados (no el estado de cuenta)
   var erCol = pasteMonthToEstadoResultados_(ss, month, by, totals);
-  // Compat: también actualiza P&L YYYY si existe el layout viejo
-  var pnlCol = null;
   try {
-    pnlCol = pasteMonthToPnL_(ss, month, by, totals);
-  } catch (err) {}
+    // Banco = respaldo técnico; no debe ser lo que veas al abrir el Sheet
+    sh.hideSheet();
+  } catch (hideErr) {}
+  try {
+    var erSh = ss.getSheetByName(ER_SHEET);
+    if (erSh) {
+      erSh.showSheet();
+      ss.setActiveSheet(erSh);
+      // Colocar ER cerca del frente (después de Eventos si existe)
+      var pos = 1;
+      var ev = ss.getSheetByName(EVENTOS_SHEET);
+      if (ev) pos = ev.getIndex() + 1;
+      ss.setActiveSheet(erSh);
+      ss.moveActiveSheet(pos);
+    }
+  } catch (actErr) {}
 
   return json_({
     ok: true,
     version: SCRIPT_VERSION,
     action: action,
     row: rowIndex,
-    sheetName: BANCO_SHEET,
+    sheetName: ER_SHEET,
     erSheet: ER_SHEET,
     erMonthCol: erCol,
-    pnlSheet: PL_SHEET,
-    pnlMonthCol: pnlCol,
+    bancoSheet: BANCO_SHEET,
+    bancoHidden: true,
     periodKey: periodKey,
+    message:
+      'Estado de Resultados actualizado (' +
+      erCol +
+      '). Banco queda oculto como respaldo.',
   });
 }
 
 /* ===================== Estado de Resultados ===================== */
 
 /**
- * Filas fijas del Estado de Resultados (no cambiar sin bump de ER_MARKER).
+ * Filas fijas del Estado de Resultados (igual que la web).
  * Columna del mes: B=enero … M=diciembre, N=TOTAL.
+ * No cambiar sin bump de ER_MARKER.
  */
 var ER_ROW = {
-  ingresosHeader: 6,
-  ingresosBanco: 7,
+  ingresoHeader: 6,
+  intereses: 7,
   venta: 8,
   ingreso: 9,
-  totalIngresos: 10,
-  egresoHeader: 12,
-  proveedor: 13,
-  evento: 14,
-  totalEgreso: 15,
-  utilidadBruta: 17,
-  margenBruto: 18,
-  gastosHeader: 20,
-  ads: 21,
-  apps: 22,
-  pass: 23,
-  comisiones: 24,
-  servicios: 25,
-  pago: 26,
-  transferencia: 27,
-  revisar: 28,
-  otro: 29,
-  otrosCats: 30,
-  totalGastos: 31,
-  utilidadNeta: 33,
-  margenNeto: 34,
-  capitalHeader: 36,
-  socios: 37,
-  netoBanco: 38,
-  depOficial: 39,
-  retOficial: 40,
+  cateringI: 10,
+  mobiliarioI: 11,
+  lugaresI: 12,
+  showsI: 13,
+  totalIngreso: 14,
+  egresoHeader: 16,
+  proveedor: 17,
+  evento: 18,
+  banquete: 19,
+  cateringE: 20,
+  mobiliarioE: 21,
+  lugaresE: 22,
+  showsE: 23,
+  totalEgreso: 24,
+  bruto: 26,
+  margenB: 27,
+  gastosHeader: 29,
+  marketing: 30,
+  rh: 31,
+  programas: 32,
+  impuestos: 33,
+  otros: 34,
+  totalGastos: 35,
+  neto: 37,
+  margenN: 38,
+  capitalHeader: 40,
+  banco: 41,
+  capital: 42,
 };
 
 function ensureEstadoResultadosLayout_(ss) {
@@ -392,8 +410,8 @@ function ensureEstadoResultadosLayout_(ss) {
 }
 
 /**
- * Pestaña Estado de Resultados YYYY — ER completo por mes.
- * Cada categoría de la web tiene su fila; al Enviar se pega la columna del mes.
+ * Pestaña Estado de Resultados YYYY — misma estructura que la web.
+ * Al Enviar se pega la columna del mes. Metricas no se toca.
  */
 function setupEstadoResultados_(ss) {
   var sh = ss.getSheetByName(ER_SHEET);
@@ -420,7 +438,8 @@ function setupEstadoResultados_(ss) {
   sh.getRange('A2').setValue(ER_MARKER + ' · ' + SCRIPT_VERSION);
   sh.getRange('A2').setFontColor('#666666');
   sh.getRange('A3').setValue(
-    'Se llena al Enviar desde /pnl/. Banco = detalle del estado de cuenta. Esta pestaña = ER contable por mes. Metricas no se toca.'
+    'Esta es la pestaña principal. Se llena desde /pnl/ → Enviar. ' +
+      'Banco queda oculto (respaldo). Metricas no se toca.'
   );
 
   sh.getRange(5, 1).setValue('Concepto').setFontWeight('bold');
@@ -428,14 +447,14 @@ function setupEstadoResultados_(ss) {
     sh.getRange(5, m + 1).setValue(months[m - 1]).setFontWeight('bold');
   }
   sh.getRange(5, 14).setValue('TOTAL').setFontWeight('bold');
-  sh.getRange(5, 1, 1, 14).setBackground('#111111').setFontColor('#ffffff');
+  sh.getRange(5, 1, 1, 14).setBackground('#12352e').setFontColor('#ffffff');
 
   function section_(row, label, bg) {
     sh.getRange(row, 1).setValue(label).setFontWeight('bold');
     sh.getRange(row, 1, 1, 14).setBackground(bg);
   }
   function zeros_(row, label) {
-    sh.getRange(row, 1).setValue(label);
+    sh.getRange(row, 1).setValue(label).setFontStyle('italic');
     for (var c = 2; c <= 13; c++) sh.getRange(row, c).setValue(0);
     sh.getRange(row, 14).setFormula('=SUM(B' + row + ':M' + row + ')');
   }
@@ -446,6 +465,16 @@ function setupEstadoResultados_(ss) {
       sh.getRange(row, c).setFormula('=SUM(' + L + fromR + ':' + L + toR + ')');
     }
     if (bg) sh.getRange(row, 1, 1, 14).setBackground(bg);
+    sh.getRange(row, 1, 1, 14).setBorder(
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      '#1c1914',
+      SpreadsheetApp.BorderStyle.SOLID_MEDIUM
+    );
   }
   function diffRow_(row, label, a, b, bg) {
     sh.getRange(row, 1).setValue(label).setFontWeight('bold');
@@ -456,7 +485,7 @@ function setupEstadoResultados_(ss) {
     if (bg) sh.getRange(row, 1, 1, 14).setBackground(bg);
   }
   function marginRow_(row, label, numR, denR) {
-    sh.getRange(row, 1).setValue(label);
+    sh.getRange(row, 1).setValue(label).setFontStyle('italic');
     for (var c = 2; c <= 14; c++) {
       var L = columnToLetter_(c);
       sh.getRange(row, c).setFormula(
@@ -466,80 +495,88 @@ function setupEstadoResultados_(ss) {
     sh.getRange(row, 2, 1, 13).setNumberFormat('0.0%');
     sh.getRange(row, 14).setNumberFormat('0.0%');
   }
-  function totalColSum_(row) {
-    sh.getRange(row, 14).setFormula('=SUM(B' + row + ':M' + row + ')');
-  }
 
-  // INGRESOS
-  section_(ER_ROW.ingresosHeader, 'INGRESOS', '#d8f3dc');
-  zeros_(ER_ROW.ingresosBanco, 'Ingresos banco (abonos)');
-  zeros_(ER_ROW.venta, 'Venta / anticipo cliente');
-  zeros_(ER_ROW.ingreso, 'Otros ingresos');
-  // TOTAL = venta + otros ingresos (no suma ingresos banco para no duplicar)
-  sumRow_(ER_ROW.totalIngresos, 'TOTAL INGRESOS', ER_ROW.venta, ER_ROW.ingreso, '#b7e4c7');
+  // —— Ingreso ——
+  section_(ER_ROW.ingresoHeader, 'Ingreso', '#d8f3dc');
+  zeros_(ER_ROW.intereses, 'Intereses');
+  zeros_(ER_ROW.venta, 'Venta / anticipo');
+  zeros_(ER_ROW.ingreso, 'Ingreso');
+  zeros_(ER_ROW.cateringI, 'Catering');
+  zeros_(ER_ROW.mobiliarioI, 'Mobiliario');
+  zeros_(ER_ROW.lugaresI, 'Lugares');
+  zeros_(ER_ROW.showsI, 'Shows');
+  sumRow_(
+    ER_ROW.totalIngreso,
+    'TOTAL',
+    ER_ROW.intereses,
+    ER_ROW.showsI,
+    '#b7e4c7'
+  );
 
-  // EGRESOS / COSTO
-  section_(ER_ROW.egresoHeader, 'EGRESOS / COSTO DIRECTO', '#fde2e1');
+  // —— Egreso ——
+  section_(ER_ROW.egresoHeader, 'Egreso', '#fde2e1');
   zeros_(ER_ROW.proveedor, 'Proveedores');
   zeros_(ER_ROW.evento, 'Costo de evento');
-  sumRow_(ER_ROW.totalEgreso, 'TOTAL EGRESOS', ER_ROW.proveedor, ER_ROW.evento, '#f8b4b4');
-
-  diffRow_(ER_ROW.utilidadBruta, 'UTILIDAD BRUTA', ER_ROW.totalIngresos, ER_ROW.totalEgreso, '#fff3bf');
-  marginRow_(ER_ROW.margenBruto, 'Margen bruto %', ER_ROW.utilidadBruta, ER_ROW.totalIngresos);
-
-  // GASTOS OPERATIVOS (cada categoría de la web)
-  section_(ER_ROW.gastosHeader, 'GASTOS DE OPERACIÓN', '#e7f5ff');
-  zeros_(ER_ROW.ads, 'Marketing (Ads)');
-  zeros_(ER_ROW.apps, 'Apps / software');
-  zeros_(ER_ROW.pass, 'Peaje / Pass');
-  zeros_(ER_ROW.comisiones, 'Comisiones bancarias');
-  zeros_(ER_ROW.servicios, 'Servicios');
-  zeros_(ER_ROW.pago, 'RH / Pagos');
-  zeros_(ER_ROW.transferencia, 'Transferencias sin nombre');
-  zeros_(ER_ROW.revisar, 'Por revisar');
-  zeros_(ER_ROW.otro, 'Otro');
-  zeros_(ER_ROW.otrosCats, 'Otras categorías');
-  sumRow_(ER_ROW.totalGastos, 'TOTAL GASTOS', ER_ROW.ads, ER_ROW.otrosCats, '#a5d8ff');
-
-  diffRow_(ER_ROW.utilidadNeta, 'UTILIDAD NETA', ER_ROW.utilidadBruta, ER_ROW.totalGastos, '#d0bfff');
-  marginRow_(ER_ROW.margenNeto, 'Margen neto %', ER_ROW.utilidadNeta, ER_ROW.totalIngresos);
-
-  // CAPITAL / BANCO
-  section_(ER_ROW.capitalHeader, 'CAPITAL Y BANCO', '#f3f0ff');
-  zeros_(ER_ROW.socios, 'Socios (capital)');
-  zeros_(ER_ROW.netoBanco, 'Neto banco del mes');
-  zeros_(ER_ROW.depOficial, 'Depósitos oficiales (PDF)');
-  zeros_(ER_ROW.retOficial, 'Retiros oficiales (PDF)');
-  totalColSum_(ER_ROW.socios);
-  totalColSum_(ER_ROW.netoBanco);
-  totalColSum_(ER_ROW.depOficial);
-  totalColSum_(ER_ROW.retOficial);
-  // Reponer formato tras totalColSum en filas que zeros_ puso 0 en N
-  sh.getRange(ER_ROW.socios, 1, 1, 14).setBackground('#f3f0ff');
-  sh.getRange(ER_ROW.netoBanco, 1, 1, 14).setBackground('#f3f0ff');
-  sh.getRange(ER_ROW.depOficial, 1, 1, 14).setBackground('#f3f0ff');
-  sh.getRange(ER_ROW.retOficial, 1, 1, 14).setBackground('#f3f0ff');
-
-  sh.getRange(42, 1).setValue(
-    'Flujo: PDF → /pnl/ → Enviar → Banco (fila del mes) + esta pestaña (columna del mes). ' +
-      'Regenerar: restoreEstadoResultados_. Metricas intacta.'
+  zeros_(ER_ROW.banquete, 'Banquete');
+  zeros_(ER_ROW.cateringE, 'Catering');
+  zeros_(ER_ROW.mobiliarioE, 'Mobiliario');
+  zeros_(ER_ROW.lugaresE, 'Lugares');
+  zeros_(ER_ROW.showsE, 'Shows');
+  sumRow_(
+    ER_ROW.totalEgreso,
+    'TOTAL',
+    ER_ROW.proveedor,
+    ER_ROW.showsE,
+    '#f8b4b4'
   );
-  sh.getRange(42, 1).setFontColor('#555555');
 
-  sh.getRange('B7:N10').setNumberFormat('$#,##0.00');
-  sh.getRange('B13:N15').setNumberFormat('$#,##0.00');
-  sh.getRange('B17:N17').setNumberFormat('$#,##0.00');
-  sh.getRange('B21:N31').setNumberFormat('$#,##0.00');
-  sh.getRange('B33:N33').setNumberFormat('$#,##0.00');
-  sh.getRange('B37:N40').setNumberFormat('$#,##0.00');
+  diffRow_(ER_ROW.bruto, 'Ingreso Bruto', ER_ROW.totalIngreso, ER_ROW.totalEgreso, '#fff3bf');
+  marginRow_(ER_ROW.margenB, 'Margen', ER_ROW.bruto, ER_ROW.totalIngreso);
 
-  sh.setColumnWidth(1, 220);
+  // —— Gastos ——
+  section_(ER_ROW.gastosHeader, 'Gastos', '#e7f5ff');
+  zeros_(ER_ROW.marketing, 'Marketing');
+  zeros_(ER_ROW.rh, 'RH');
+  zeros_(ER_ROW.programas, 'Programas');
+  zeros_(ER_ROW.impuestos, 'Impuestos');
+  zeros_(ER_ROW.otros, 'Otros');
+  sumRow_(
+    ER_ROW.totalGastos,
+    'TOTAL',
+    ER_ROW.marketing,
+    ER_ROW.otros,
+    '#a5d8ff'
+  );
+
+  diffRow_(ER_ROW.neto, 'Ingreso Neto', ER_ROW.bruto, ER_ROW.totalGastos, '#d0bfff');
+  marginRow_(ER_ROW.margenN, 'Margen', ER_ROW.neto, ER_ROW.totalIngreso);
+
+  section_(ER_ROW.capitalHeader, 'Banco / CAPITAL', '#f3f0ff');
+  zeros_(ER_ROW.banco, 'Banco');
+  zeros_(ER_ROW.capital, 'CAPITAL');
+  sh.getRange(ER_ROW.banco, 1, 1, 14).setBackground('#f3f0ff');
+  sh.getRange(ER_ROW.capital, 1, 1, 14).setBackground('#f3f0ff');
+
+  sh.getRange(44, 1).setValue(
+    'PDF → /pnl/ → Enviar → se pega la columna del mes aquí. ' +
+      'Regenerar layout: restoreEstadoResultados_. Metricas intacta.'
+  );
+  sh.getRange(44, 1).setFontColor('#555555');
+
+  sh.getRange('B7:N14').setNumberFormat('$#,##0.00');
+  sh.getRange('B17:N24').setNumberFormat('$#,##0.00');
+  sh.getRange('B26:N26').setNumberFormat('$#,##0.00');
+  sh.getRange('B30:N35').setNumberFormat('$#,##0.00');
+  sh.getRange('B37:N37').setNumberFormat('$#,##0.00');
+  sh.getRange('B41:N42').setNumberFormat('$#,##0.00');
+
+  sh.setColumnWidth(1, 180);
   for (var w = 2; w <= 14; w++) sh.setColumnWidth(w, 88);
   sh.setFrozenRows(5);
   sh.setFrozenColumns(1);
 
-  // Traer al frente
   try {
+    sh.showSheet();
     sh.activate();
   } catch (e) {}
 }
@@ -566,28 +603,44 @@ function pasteMonthToEstadoResultados_(ss, month, by, totals) {
     ingreso = totals.ingresos;
   }
 
-  money_(ER_ROW.ingresosBanco, totals.ingresos || 0);
+  money_(ER_ROW.intereses, abs_(by.intereses));
   money_(ER_ROW.venta, venta);
   money_(ER_ROW.ingreso, ingreso);
+  // Líneas de negocio: 0 (manual en Sheet si aplica)
+  money_(ER_ROW.cateringI, 0);
+  money_(ER_ROW.mobiliarioI, 0);
+  money_(ER_ROW.lugaresI, 0);
+  money_(ER_ROW.showsI, 0);
 
   money_(ER_ROW.proveedor, abs_(by.proveedor));
   money_(ER_ROW.evento, abs_(by.evento));
+  money_(ER_ROW.banquete, 0);
+  money_(ER_ROW.cateringE, 0);
+  money_(ER_ROW.mobiliarioE, 0);
+  money_(ER_ROW.lugaresE, 0);
+  money_(ER_ROW.showsE, 0);
 
-  money_(ER_ROW.ads, abs_(by.ads));
-  money_(ER_ROW.apps, abs_(by.apps));
-  money_(ER_ROW.pass, abs_(by.pass));
-  money_(ER_ROW.comisiones, abs_(by.comisiones));
-  money_(ER_ROW.servicios, abs_(by.servicios));
-  money_(ER_ROW.pago, abs_(by.pago));
-  money_(ER_ROW.transferencia, abs_(by.transferencia_persona));
-  money_(ER_ROW.revisar, abs_(by.revisar));
-  money_(ER_ROW.otro, abs_(by.otro));
-  money_(ER_ROW.otrosCats, abs_(totals.otros));
+  money_(ER_ROW.marketing, abs_(by.ads));
+  money_(ER_ROW.rh, abs_(by.pago) + abs_(by.nomina));
+  money_(ER_ROW.programas, abs_(by.apps) + abs_(by.pass));
+  money_(ER_ROW.impuestos, abs_(by.impuestos));
+  money_(
+    ER_ROW.otros,
+    abs_(by.comisiones) +
+      abs_(by.servicios) +
+      abs_(by.transferencia_persona) +
+      abs_(by.revisar) +
+      abs_(by.otro) +
+      abs_(totals.otros)
+  );
 
-  money_(ER_ROW.socios, abs_(by.socio));
-  money_(ER_ROW.netoBanco, Number(totals.neto) || 0);
-  money_(ER_ROW.depOficial, abs_(totals.depositosOficiales));
-  money_(ER_ROW.retOficial, abs_(totals.retirosOficiales));
+  money_(ER_ROW.banco, Number(totals.neto) || 0);
+  money_(ER_ROW.capital, abs_(by.socio));
+
+  try {
+    sh.showSheet();
+    sh.activate();
+  } catch (e) {}
 
   return columnToLetter_(col);
 }
@@ -595,14 +648,17 @@ function pasteMonthToEstadoResultados_(ss, month, by, totals) {
 /** Regenera SOLO Estado de Resultados. NO toca Metricas. */
 function restoreEstadoResultados_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  ensureBancoSheet_(ss);
+  var banco = ensureBancoSheet_(ss);
+  try {
+    banco.hideSheet();
+  } catch (e) {}
   setupEstadoResultados_(ss);
   var msg =
     'Estado de Resultados listo — ' +
     SCRIPT_VERSION +
-    '\n\nPestaña: ' +
+    '\n\nPestaña visible: ' +
     ER_SHEET +
-    '\nColumnas: enero…diciembre.\n' +
+    '\nBanco queda oculto (respaldo).\n' +
     'Al Enviar desde /pnl/ se pega la columna del mes.\n' +
     'Metricas NO se modificó.';
   try {
@@ -942,6 +998,9 @@ function doPost(e) {
 
     var data = JSON.parse(raw);
 
+    if (data && data.action === 'upsertEstadoResultados') {
+      return upsertBanco_(data); // mismo payload; destino visible = ER
+    }
     if (data && data.action === 'upsertBanco') return upsertBanco_(data);
     if (data && data.action === 'upsertAnalisis') return upsertAnalisis_(data);
     if (data && data.action === 'saveStatementArchive') {
@@ -986,7 +1045,7 @@ function doPost(e) {
       return json_({
         ok: false,
         version: SCRIPT_VERSION,
-        error: 'values no es array (¿Apps Script v18 publicado?)',
+        error: 'values no es array (¿Apps Script v19 publicado?)',
         typeofValues: typeof values,
         rawPreview: String(raw).slice(0, 200),
       });

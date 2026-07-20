@@ -648,7 +648,7 @@ pnlRouter.post("/api/pnl/runs/:id/send-to-sheet", async (req, res) => {
       ok: false,
       error,
       hint:
-        "Si falta el Estado de Resultados, pega Codigo.gs v18 en Apps Script, ejecuta restoreEstadoResultados_ y publica Nueva versión.",
+        "Pega Codigo.gs v19 en Apps Script, ejecuta restoreEstadoResultados_ y publica Nueva versión. El Sheet debe mostrar Estado de Resultados (Banco queda oculto).",
     });
   }
 });
