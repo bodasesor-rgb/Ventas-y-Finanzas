@@ -1,25 +1,31 @@
-# Estado de Resultados + Metricas semanal (Sheet)
+# Estado de Resultados + Metricas Auto (Sheet)
 
-## v21 — Resumen semanal en Metricas
+## v22 — Copia de Metricas + resumen semanal
 
-**Visible:** `Estado de Resultados YYYY` (por mes)  
-**Metricas:** tu dashboard en **A:L no se toca**. El bot adjunta un **resumen semanal** de Eventos a la derecha (columna **N+**, o **AA+** si N está ocupada).  
-**Oculto:** `Banco YYYY` (respaldo técnico del PDF)
+**Original:** `Metricas YYYY` — **nunca se modifica**  
+**Copia de prueba:** `Metricas YYYY Auto` — duplicado + resumen semanal de Eventos  
+**Visible ER:** `Estado de Resultados YYYY`  
+**Oculto:** `Banco YYYY`
 
-### Semanal (Eventos → Metricas)
+### Flujo
+
+1. Se duplica `Metricas 2026` → `Metricas 2026 Auto`
+2. En la **Auto** se escribe el bloque semanal (columna N+ o AA+)
+3. Cuando confirmes que funciona, migrás / renombras a ese espacio
+
+### Semanal (Eventos → Metricas Auto)
 
 | Origen | Qué |
 |--------|-----|
-| `Eventos YYYY` col **U** | `WEEKNUM(Fecha de cierre, 2)` (semana inicia lunes) |
-| `Eventos YYYY` **AD:AK** | Tabla semanal 1–53 (Pagado, Por pagar, Venta, Ganancia, #) |
-| `Metricas YYYY` **N+** | Bloque `RESUMEN SEMANAL` con fórmulas que leen AD:AK |
+| `Eventos YYYY` col **U** | `WEEKNUM(Fecha de cierre, 2)` |
+| `Eventos YYYY` **AD:AK** | Tabla semanal 1–53 |
+| `Metricas YYYY Auto` **N+** | Bloque `RESUMEN SEMANAL` |
 
 ## Cómo publicar
 
-1. Pegar `apps-script/Codigo.gs` (`2026-07-20-v21`)
-2. Ejecutar **`restoreMetricasSemanal_`** (adjunta semanal; no borra A:L)
-3. Si hace falta ER: **`restoreEstadoResultados_`**
-4. Implementar → Nueva versión → misma `/exec`
-5. Confirmar `"version":"2026-07-20-v21"`
+1. Pegar `apps-script/Codigo.gs` (`2026-07-20-v22`)
+2. Ejecutar **`restoreMetricasSemanal_`** (crea/actualiza la pestaña Auto)
+3. Implementar → Nueva versión → misma `/exec`
+4. Confirmar `"version":"2026-07-20-v22"`
 
-Metricas **A:L** no se regenera ni se limpia.
+`Metricas 2026` original queda intacta.
