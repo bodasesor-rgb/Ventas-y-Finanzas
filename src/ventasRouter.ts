@@ -9,6 +9,7 @@ import type { KommoWebhookBody } from "./types";
 import {
   getPollStatus,
   pollClosedDealsOnce,
+  syncLatestMissingClosedDeal,
 } from "./pollClosedDeals";
 import {
   getLastVentasSync,
@@ -153,7 +154,10 @@ ventasRouter.get("/api/ventas/poll", (_req, res) => {
   res.status(200).json({ ok: true, poll: getPollStatus() });
 });
 
-/** Fuerza una pasada del poller ahora (destraba candado si estaba stuck). */
+/**
+ * Pasada del poller: destraba candado si hace falta, pero solo sube deals
+ * nuevos (nunca reescribe los ya sincronizados).
+ */
 ventasRouter.post("/api/ventas/poll", async (_req, res) => {
   try {
     const result = await pollClosedDealsOnce(40, { force: true });
@@ -169,6 +173,34 @@ ventasRouter.post("/api/ventas/poll", async (_req, res) => {
 ventasRouter.get("/api/ventas/poll-now", async (_req, res) => {
   try {
     const result = await pollClosedDealsOnce(40, { force: true });
+    res.status(200).json({ ok: true, result, poll: getPollStatus() });
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+/**
+ * Solo el último cerrado que falte en el Sheet (no re-sube el resto).
+ * Usar cuando un cierre no llegó solo.
+ */
+ventasRouter.post("/api/ventas/sync-latest", async (_req, res) => {
+  try {
+    const result = await syncLatestMissingClosedDeal(40);
+    res.status(200).json({ ok: true, result, poll: getPollStatus() });
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+ventasRouter.get("/api/ventas/sync-latest", async (_req, res) => {
+  try {
+    const result = await syncLatestMissingClosedDeal(40);
     res.status(200).json({ ok: true, result, poll: getPollStatus() });
   } catch (err) {
     res.status(500).json({

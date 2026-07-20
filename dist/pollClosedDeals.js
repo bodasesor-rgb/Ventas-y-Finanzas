@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.isClosedWonLead = isClosedWonLead;
 exports.getPollStatus = getPollStatus;
 exports.pollClosedDealsOnce = pollClosedDealsOnce;
+exports.syncLatestMissingClosedDeal = syncLatestMissingClosedDeal;
 exports.startClosedDealsPoller = startClosedDealsPoller;
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
@@ -80,9 +81,20 @@ function releaseStuckLock_(force = false) {
     }
     return false;
 }
+function leadRecency_(lead) {
+    return lead.closed_at || lead.updated_at || 0;
+}
+function isAlreadySynced_(lead) {
+    const id = String(lead.id);
+    const updated = lead.updated_at || lead.closed_at || 0;
+    const prev = memoryState.syncedUpdatedAt[id] || 0;
+    return Boolean(prev && updated && prev >= updated);
+}
 /**
- * Busca deals cerrados recientes en Kommo y los escribe al Sheet.
- * Compensa webhooks de Kommo que no llegan / quedan desactivados.
+ * Busca deals cerrados recientes en Kommo y escribe al Sheet solo los que
+ * aún no están sincronizados (nunca re-sube los ya hechos).
+ * `force` solo destraba un candado stuck — no reescribe filas viejas.
+ * `onlyLatestMissing`: sube como máximo el cerrado más reciente que falte.
  */
 async function pollClosedDealsOnce(limit = 40, opts) {
     releaseStuckLock_(Boolean(opts?.force));
@@ -105,14 +117,15 @@ async function pollClosedDealsOnce(limit = 40, opts) {
     try {
         loadState();
         const leads = await (0, kommoApi_1.fetchRecentLeads)(limit);
-        const closed = leads.filter(isClosedWonLead);
+        const closed = leads
+            .filter(isClosedWonLead)
+            .sort((a, b) => leadRecency_(b) - leadRecency_(a)); // más reciente primero
         for (const lead of closed) {
             const id = String(lead.id);
             const updated = lead.updated_at || lead.closed_at || 0;
-            const prev = memoryState.syncedUpdatedAt[id] || 0;
-            if (!opts?.force && prev && updated && prev >= updated) {
+            if (isAlreadySynced_(lead)) {
                 skippedAlreadySynced++;
-                continue; // sin cambios desde el último sync
+                continue;
             }
             try {
                 const result = await (0, ventasSync_1.syncDealToSheet)(lead.id);
@@ -127,6 +140,9 @@ async function pollClosedDealsOnce(limit = 40, opts) {
             catch (err) {
                 errors.push(`${id}: ${err instanceof Error ? err.message : String(err)}`);
             }
+            // Recuperación: solo el último faltante, no todos los pendientes
+            if (opts?.onlyLatestMissing && synced.length > 0)
+                break;
         }
         memoryState.lastPollAt = new Date().toISOString();
         memoryState.lastResult = {
@@ -163,6 +179,13 @@ async function pollClosedDealsOnce(limit = 40, opts) {
         polling = false;
         pollingStartedAt = 0;
     }
+}
+/**
+ * Solo el deal cerrado más reciente que aún no está en el Sheet.
+ * Usar cuando el usuario dice "no se subió" — nunca re-sube el resto.
+ */
+async function syncLatestMissingClosedDeal(limit = 40) {
+    return pollClosedDealsOnce(limit, { force: true, onlyLatestMissing: true });
 }
 /** Arranca poll cada `intervalMs` (default 60s) + watchdog si se queda quieto. */
 function startClosedDealsPoller(intervalMs = 60_000) {
