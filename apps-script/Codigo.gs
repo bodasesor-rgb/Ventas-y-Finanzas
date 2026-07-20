@@ -1,7 +1,7 @@
 /**
  * ============================================================
  * Apps Script — Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-07-20-v19
+ * VERSION: 2026-07-20-v20
  * ============================================================
  * PEGAR TODO ESTE ARCHIVO (borrar lo anterior → pegar → Guardar)
  *
@@ -11,19 +11,19 @@
  *      (NO toca Metricas)
  *   3) Implementar → Nueva versión → misma URL /exec
  *
- * REGLA v19:
+ * REGLA v20:
  *   - Lo que se VE en Sheet = Estado de Resultados YYYY (por mes)
  *   - Banco YYYY queda oculto (solo respaldo técnico del PDF)
- *   - "Enviar" pega la columna del mes en el Estado de Resultados
+ *   - Respuestas incluyen spreadsheetUrl para abrir el Sheet correcto
  *   - Metricas NUNCA se toca
  *
  * doPost: Eventos | upsertEstadoResultados | upsertBanco | upsertAnalisis | archive
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-07-20-v19';
+var SCRIPT_VERSION = '2026-07-20-v20';
 var METRICAS_MARKER = 'BOT_METRICAS_V14';
 var PNL_MARKER = 'BOT_PNL_MESES_V17';
-var ER_MARKER = 'BOT_ESTADO_RESULTADOS_V19';
+var ER_MARKER = 'BOT_ESTADO_RESULTADOS_V20';
 var YEAR = 2026;
 var EVENTOS_SHEET = 'Eventos ' + YEAR;
 var METRICAS_SHEET = 'Metricas ' + YEAR;
@@ -117,13 +117,36 @@ function columnToLetter_(col) {
   return s;
 }
 
+/** Info del Spreadsheet al que está ligado este script. */
+function spreadsheetInfo_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var names = [];
+  var sheets = ss.getSheets();
+  for (var i = 0; i < sheets.length; i++) {
+    names.push(sheets[i].getName());
+  }
+  return {
+    spreadsheetId: ss.getId(),
+    spreadsheetName: ss.getName(),
+    spreadsheetUrl: ss.getUrl(),
+    existingSheets: names,
+    erExists: names.indexOf(ER_SHEET) !== -1,
+  };
+}
+
 function doGet() {
+  var info = spreadsheetInfo_();
   return json_({
     ok: true,
     version: SCRIPT_VERSION,
     ping: true,
     erSheet: ER_SHEET,
     hasEstadoResultados: true,
+    erExists: info.erExists,
+    spreadsheetId: info.spreadsheetId,
+    spreadsheetName: info.spreadsheetName,
+    spreadsheetUrl: info.spreadsheetUrl,
+    existingSheets: info.existingSheets,
     sheets: [
       EVENTOS_SHEET,
       METRICAS_SHEET,
@@ -322,20 +345,9 @@ function upsertBanco_(data) {
     // Banco = respaldo técnico; no debe ser lo que veas al abrir el Sheet
     sh.hideSheet();
   } catch (hideErr) {}
-  try {
-    var erSh = ss.getSheetByName(ER_SHEET);
-    if (erSh) {
-      erSh.showSheet();
-      ss.setActiveSheet(erSh);
-      // Colocar ER cerca del frente (después de Eventos si existe)
-      var pos = 1;
-      var ev = ss.getSheetByName(EVENTOS_SHEET);
-      if (ev) pos = ev.getIndex() + 1;
-      ss.setActiveSheet(erSh);
-      ss.moveActiveSheet(pos);
-    }
-  } catch (actErr) {}
+  bringEstadoResultadosFront_(ss);
 
+  var info = spreadsheetInfo_();
   return json_({
     ok: true,
     version: SCRIPT_VERSION,
@@ -344,14 +356,44 @@ function upsertBanco_(data) {
     sheetName: ER_SHEET,
     erSheet: ER_SHEET,
     erMonthCol: erCol,
+    erExists: info.erExists,
     bancoSheet: BANCO_SHEET,
     bancoHidden: true,
     periodKey: periodKey,
+    spreadsheetId: info.spreadsheetId,
+    spreadsheetName: info.spreadsheetName,
+    spreadsheetUrl: info.spreadsheetUrl,
+    existingSheets: info.existingSheets,
     message:
-      'Estado de Resultados actualizado (' +
+      'Enviado a Sheet «' +
+      info.spreadsheetName +
+      '» → pestaña ' +
+      ER_SHEET +
+      ' (col ' +
       erCol +
-      '). Banco queda oculto como respaldo.',
+      ').',
   });
+}
+
+/** Crea/muestra ER y la pone al frente (después de Eventos). */
+function bringEstadoResultadosFront_(ss) {
+  var erSh = ss.getSheetByName(ER_SHEET);
+  if (!erSh) {
+    setupEstadoResultados_(ss);
+    erSh = ss.getSheetByName(ER_SHEET);
+  }
+  if (!erSh) return null;
+  try {
+    erSh.showSheet();
+  } catch (e1) {}
+  try {
+    ss.setActiveSheet(erSh);
+    var pos = 1;
+    var ev = ss.getSheetByName(EVENTOS_SHEET);
+    if (ev) pos = Math.min(ev.getIndex() + 1, ss.getNumSheets());
+    ss.moveActiveSheet(pos);
+  } catch (e2) {}
+  return erSh;
 }
 
 /* ===================== Estado de Resultados ===================== */
@@ -1026,17 +1068,29 @@ function doPost(e) {
     }
     if (data && data.action === 'setupEstadoResultados') {
       var ssEr = SpreadsheetApp.getActiveSpreadsheet();
-      ensureBancoSheet_(ssEr);
+      var bancoSh = ensureBancoSheet_(ssEr);
+      try {
+        bancoSh.hideSheet();
+      } catch (eHide) {}
       setupEstadoResultados_(ssEr);
+      bringEstadoResultadosFront_(ssEr);
+      var infoEr = spreadsheetInfo_();
       return json_({
         ok: true,
         version: SCRIPT_VERSION,
         action: 'setupEstadoResultados',
         erSheet: ER_SHEET,
+        erExists: infoEr.erExists,
+        spreadsheetId: infoEr.spreadsheetId,
+        spreadsheetName: infoEr.spreadsheetName,
+        spreadsheetUrl: infoEr.spreadsheetUrl,
+        existingSheets: infoEr.existingSheets,
         message:
-          'Pestaña creada: ' +
+          'Pestaña creada en «' +
+          infoEr.spreadsheetName +
+          '»: ' +
           ER_SHEET +
-          '. Ábrela en el Sheet (abajo, entre las pestañas).',
+          '. Ábrela abajo o con el link del Sheet.',
       });
     }
 

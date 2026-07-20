@@ -4,6 +4,11 @@ export declare function sendRunToBancoSheet(run: StatementRun): Promise<{
     sheetName: string;
     erSheet?: string;
     erMonthCol?: string;
+    erExists?: boolean;
+    spreadsheetId?: string;
+    spreadsheetName?: string;
+    spreadsheetUrl?: string;
+    existingSheets?: string[];
     row?: number;
     action?: string;
     version?: string;

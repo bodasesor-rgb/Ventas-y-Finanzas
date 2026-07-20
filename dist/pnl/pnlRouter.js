@@ -465,20 +465,32 @@ exports.pnlRouter.get("/api/pnl/apps-script-status", async (_req, res) => {
             return;
         }
         const version = String(data.version || "");
-        const sheets = Array.isArray(data.sheets) ? data.sheets : [];
+        const sheets = Array.isArray(data.existingSheets)
+            ? data.existingSheets
+            : Array.isArray(data.sheets)
+                ? data.sheets
+                : [];
         const hasErFlag = Boolean(data.hasEstadoResultados);
-        const hasErSheet = sheets.some((s) => String(s).startsWith("Estado de Resultados"));
-        const needsPublish = !hasErFlag && !/v1[89]|v2\d/.test(version) && !hasErSheet;
+        const erExists = Boolean(data.erExists);
+        const hasErSheet = erExists ||
+            sheets.some((s) => String(s).startsWith("Estado de Resultados"));
+        const needsPublish = !/v2\d/.test(version) && !hasErFlag;
         res.json({
             ok: true,
             version,
             erSheet: data.erSheet || "Estado de Resultados 2026",
             hasEstadoResultados: hasErFlag || hasErSheet,
+            erExists: hasErSheet,
             needsPublish,
+            spreadsheetId: data.spreadsheetId,
+            spreadsheetName: data.spreadsheetName,
+            spreadsheetUrl: data.spreadsheetUrl,
             sheets,
             message: needsPublish
-                ? `Apps Script sigue en ${version || "?"}. Hay que pegar Codigo.gs v18 y publicar Nueva versión para que exista la pestaña Estado de Resultados.`
-                : `Apps Script ${version}: listo para Estado de Resultados.`,
+                ? `Apps Script sigue en ${version || "?"}. Pega Codigo.gs v20 y publica Nueva versión.`
+                : hasErSheet
+                    ? `Apps Script ${version}: listo · Sheet «${data.spreadsheetName || "?"}» tiene Estado de Resultados.`
+                    : `Apps Script ${version}: script OK, pero la pestaña aún no existe en «${data.spreadsheetName || "el Sheet"}». Pulsa Crear pestaña.`,
         });
     }
     catch (err) {
@@ -507,20 +519,25 @@ exports.pnlRouter.post("/api/pnl/setup-estado-resultados", async (_req, res) => 
             ok: true,
             version: result.version,
             erSheet: result.erSheet || "Estado de Resultados 2026",
+            erExists: result.erExists,
+            spreadsheetId: result.spreadsheetId,
+            spreadsheetName: result.spreadsheetName,
+            spreadsheetUrl: result.spreadsheetUrl,
+            existingSheets: result.existingSheets,
             message: result.message ||
                 `Pestaña lista: ${result.erSheet || "Estado de Resultados 2026"}`,
         });
     }
     catch (err) {
         const error = err instanceof Error ? err.message : String(err);
-        const looksOld = /values no es array|v16|action/i.test(error) ||
+        const looksOld = /values no es array|v16|v19|action/i.test(error) ||
             /setupEstadoResultados/i.test(error);
         res.status(502).json({
             ok: false,
             error: looksOld
-                ? "Apps Script aún no es v18 (sigue sin conocer setupEstadoResultados)."
+                ? "Apps Script aún no es v20 (falta setup con link del Sheet)."
                 : error,
-            hint: "Pega Codigo.gs v18 → Guardar → Implementar → Nueva versión (misma URL /exec). Luego vuelve a pulsar Crear pestaña.",
+            hint: "Pega Codigo.gs v20 → Guardar → Implementar → Nueva versión (misma URL /exec). Luego vuelve a pulsar Crear pestaña.",
         });
     }
 });
@@ -543,9 +560,15 @@ exports.pnlRouter.post("/api/pnl/runs/:id/send-to-sheet", async (req, res) => {
         run.sentToSheet = {
             ok: true,
             sheetName: result.erSheet || result.sheetName,
+            erSheet: result.erSheet || result.sheetName,
+            erMonthCol: result.erMonthCol,
+            periodLabel: run.periodLabel || run.periodKey,
+            spreadsheetName: result.spreadsheetName,
+            spreadsheetUrl: result.spreadsheetUrl,
             row: result.row,
             action: result.action,
             version: result.version,
+            message: result.message,
         };
         runs[idx] = run;
         (0, store_1.saveRuns)(runs);

@@ -92,15 +92,58 @@ function computeTotals(lines) {
   };
 }
 
+function paintSheetSentNote(run) {
+  const note = document.getElementById("sheetSentNote");
+  const title = document.getElementById("sheetSentTitle");
+  const detail = document.getElementById("sheetSentDetail");
+  const link = document.getElementById("sheetSentLink");
+  if (!note) return;
+  const sent = run?.sentToSheet;
+  if (sent?.ok && run.sentToSheetAt) {
+    note.hidden = false;
+    if (title) title.textContent = "✓ Enviado a Google Sheet";
+    const sheetName =
+      sent.spreadsheetName || "Sheet vinculado al Apps Script";
+    const tab = sent.erSheet || sent.sheetName || "Estado de Resultados 2026";
+    const period = sent.periodLabel || run.periodLabel || run.periodKey || "";
+    const col = sent.erMonthCol ? ` · columna ${sent.erMonthCol}` : "";
+    if (detail) {
+      detail.textContent =
+        (sent.message ||
+          `Se envió «${period}» a «${sheetName}» → pestaña ${tab}${col}.`) +
+        ` · ${fmtMexicoDateTime(run.sentToSheetAt)} (hora México)`;
+    }
+    if (link) {
+      if (sent.spreadsheetUrl) {
+        link.hidden = false;
+        link.href = sent.spreadsheetUrl;
+        link.textContent = "Abrir Google Sheet: " + sheetName;
+      } else {
+        link.hidden = true;
+      }
+    }
+  } else if (sent?.ok === false) {
+    note.hidden = false;
+    if (title) title.textContent = "✗ No se pudo enviar al Sheet";
+    if (detail) detail.textContent = sent.error || "Error desconocido";
+    if (link) link.hidden = true;
+  } else {
+    note.hidden = true;
+  }
+}
+
 function renderSendSheetStatus(run) {
   const status = document.getElementById("sendToSheetStatus");
   const btn = document.getElementById("sendToSheetBtn");
   if (btn) btn.disabled = !run?.id;
+  paintSheetSentNote(run);
   if (!status) return;
   if (run?.sentToSheet?.ok && run.sentToSheetAt) {
-    status.textContent = `En Sheet: ${
-      run.sentToSheet.sheetName || "Estado de Resultados"
-    } · ${fmtDate(run.sentToSheetAt)}`;
+    status.textContent = `Nota: enviado a Sheet «${
+      run.sentToSheet.spreadsheetName || "?"
+    }» → ${run.sentToSheet.erSheet || run.sentToSheet.sheetName || "ER"} · ${fmtDate(
+      run.sentToSheetAt
+    )}`;
   } else if (run?.sentToSheet?.ok === false) {
     status.textContent = "Último envío falló: " + (run.sentToSheet.error || "");
   } else {
@@ -1261,16 +1304,20 @@ async function refreshAppsScriptStatus() {
       if (data.needsPublish) {
         banner.classList.remove("is-ok");
         banner.innerHTML =
-          `<strong>Apps Script ${data.version || "?"} — falta publicar v19.</strong> ` +
-          `Sin v19 el Sheet sigue mostrando Banco (estado de cuenta). ` +
+          `<strong>Apps Script ${data.version || "?"} — falta publicar v20.</strong> ` +
           `Pega <a href="https://raw.githubusercontent.com/bodasesor-rgb/Ventas-y-Finanzas/main/apps-script/Codigo.gs" target="_blank" rel="noopener">Codigo.gs</a> → Guardar → Implementar → Nueva versión → restoreEstadoResultados_.`;
       } else {
         banner.classList.add("is-ok");
-        banner.textContent =
-          data.message ||
-          `Apps Script ${data.version}: listo · ${
-            data.erSheet || "Estado de Resultados"
-          }`;
+        const sheetBit = data.spreadsheetUrl
+          ? ` · Sheet: <a href="${data.spreadsheetUrl}" target="_blank" rel="noopener">${
+              data.spreadsheetName || "abrir"
+            }</a>`
+          : "";
+        const erBit = data.erExists
+          ? " · pestaña ER OK"
+          : " · pestaña ER aún no creada (pulsa Crear pestaña)";
+        banner.innerHTML =
+          (data.message || `Apps Script ${data.version}`) + sheetBit + erBit;
       }
     }
     if (erLive) {
@@ -1586,11 +1633,27 @@ async function init() {
           method: "POST",
         });
         if (el) {
+          const link = data.spreadsheetUrl
+            ? ` · Sheet: ${data.spreadsheetName || ""}`
+            : "";
           el.textContent =
-            data.message ||
-            `OK → ${data.erSheet || "Estado de Resultados"} · v${
-              data.version || "?"
-            }. Ábrela abajo en el Sheet.`;
+            (data.message ||
+              `OK → ${data.erSheet || "Estado de Resultados"} · v${
+                data.version || "?"
+              }`) + link;
+        }
+        if (data.spreadsheetUrl) {
+          paintSheetSentNote({
+            periodLabel: "",
+            sentToSheetAt: new Date().toISOString(),
+            sentToSheet: {
+              ok: true,
+              spreadsheetName: data.spreadsheetName,
+              spreadsheetUrl: data.spreadsheetUrl,
+              erSheet: data.erSheet,
+              message: data.message,
+            },
+          });
         }
         await refreshAppsScriptStatus();
       } catch (e) {
@@ -1622,11 +1685,33 @@ async function init() {
           `/api/pnl/runs/${encodeURIComponent(currentRun.id)}/send-to-sheet`,
           { method: "POST" }
         );
-        if (data.run) renderRun(data.run);
-        if (el) el.textContent = data.message || "Enviado.";
+        if (data.run) {
+          // Asegura campos del Sheet en el run para la nota
+          if (data.sheet && data.run.sentToSheet) {
+            data.run.sentToSheet = {
+              ...data.run.sentToSheet,
+              spreadsheetName:
+                data.sheet.spreadsheetName ||
+                data.run.sentToSheet.spreadsheetName,
+              spreadsheetUrl:
+                data.sheet.spreadsheetUrl || data.run.sentToSheet.spreadsheetUrl,
+              erMonthCol:
+                data.sheet.erMonthCol || data.run.sentToSheet.erMonthCol,
+              message: data.message || data.run.sentToSheet.message,
+            };
+          }
+          renderRun(data.run);
+        }
+        if (el) el.textContent = data.message || "Enviado a Sheet.";
+        paintSheetSentNote(data.run || currentRun);
         await refreshLibrary();
+        await refreshAppsScriptStatus();
       } catch (e) {
         if (el) el.textContent = "Error: " + e.message;
+        paintSheetSentNote({
+          sentToSheet: { ok: false, error: e.message },
+          sentToSheetAt: new Date().toISOString(),
+        });
       } finally {
         sendBtn.disabled = false;
       }

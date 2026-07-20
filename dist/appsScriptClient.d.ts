@@ -7,8 +7,13 @@ export interface AppsScriptWriteResult {
     sheetName?: string;
     erSheet?: string;
     erMonthCol?: string;
+    erExists?: boolean;
     pnlSheet?: string;
     pnlMonthCol?: string;
+    spreadsheetId?: string;
+    spreadsheetName?: string;
+    spreadsheetUrl?: string;
+    existingSheets?: string[];
     message?: string;
     error?: string;
     raw?: string;

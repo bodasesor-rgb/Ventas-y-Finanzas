@@ -90,14 +90,22 @@ async function sendRunToBancoSheet(run) {
         "diciembre",
     ];
     const monthLabel = monthNames[month - 1] || String(month);
+    const sheetTitle = result.spreadsheetName || "Google Sheet vinculado al Apps Script";
+    const msg = result.message ||
+        `Enviado a Sheet «${sheetTitle}» → ${erSheet} · ${monthLabel}${erCol ? ` (${erCol})` : ""} · v${result.version || "?"}`;
     return {
         sheetName: erSheet,
         erSheet,
         erMonthCol: erCol,
+        erExists: result.erExists,
+        spreadsheetId: result.spreadsheetId,
+        spreadsheetName: result.spreadsheetName,
+        spreadsheetUrl: result.spreadsheetUrl,
+        existingSheets: result.existingSheets,
         row: result.row,
         action: result.action,
         version: result.version,
-        message: `OK → ${erSheet} · columna ${monthLabel}${erCol ? ` (${erCol})` : ""} · v${result.version || "?"}`,
+        message: msg,
     };
 }
 /** Escribe pestaña Análisis YYYY con ranking proveedores + mensual/anual. */

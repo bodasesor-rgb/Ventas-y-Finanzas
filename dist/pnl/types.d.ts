@@ -99,9 +99,15 @@ export interface StatementRun {
     sentToSheet?: {
         ok: boolean;
         sheetName?: string;
+        erSheet?: string;
+        erMonthCol?: string;
+        periodLabel?: string;
+        spreadsheetName?: string;
+        spreadsheetUrl?: string;
         row?: number;
         action?: string;
         version?: string;
+        message?: string;
         error?: string;
     };
 }
