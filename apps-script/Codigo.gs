@@ -1,27 +1,23 @@
 /**
  * ============================================================
  * Apps Script — Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-07-20-v23
+ * VERSION: 2026-07-20-v24
  * ============================================================
- * PEGAR TODO ESTE ARCHIVO (borrar lo anterior → pegar → Guardar)
+ * PEGAR TODO ESTE ARCHIVO (borrar lo anterior -> pegar -> Guardar)
  *
  * Luego:
- *   1) authorizeDrive_ → ▶ Ejecutar (Drive)  [si aún no]
- *   2) restoreMetricasSemanal_ → ▶ Ejecutar
- *      (o desde Hostinger: POST /api/ventas/setup-metricas-auto)
- *   3) Implementar → Nueva versión → misma URL /exec
+ *   1) restoreMetricasSemanal_ -> Ejecutar
+ *   2) Implementar -> Nueva version -> misma URL /exec
  *
- * REGLA v23:
+ * REGLA v24:
  *   - Metricas YYYY (original) NUNCA se modifica
  *   - Todo lo nuevo va a Metricas YYYY Auto (copia de prueba)
  *   - action doPost: setupMetricasAuto
- *
- * doPost: Eventos | upsertEstadoResultados | upsertBanco | setupMetricasAuto | archive
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-07-20-v23';
+var SCRIPT_VERSION = '2026-07-20-v24';
 var METRICAS_MARKER = 'BOT_METRICAS_V14';
-var METRICAS_SEMANAL_MARKER = 'BOT_METRICAS_SEMANAL_V23';
+var METRICAS_SEMANAL_MARKER = 'BOT_METRICAS_SEMANAL_V24';
 var PNL_MARKER = 'BOT_PNL_MESES_V17';
 var ER_MARKER = 'BOT_ESTADO_RESULTADOS_V20';
 var YEAR = 2026;
@@ -1107,30 +1103,30 @@ function doPost(e) {
     if (data && data.action === 'setupMetricasAuto') {
       var resultAuto = ensureMetricasSemanal_();
       var infoAuto = spreadsheetInfo_();
+      var autoOk = resultAuto && resultAuto.ok;
+      var autoMsg = autoOk
+        ? 'Lista ' +
+          METRICAS_AUTO_SHEET +
+          ' en ' +
+          infoAuto.spreadsheetName +
+          '. Original intacta.'
+        : 'No se pudo crear Metricas Auto: ' +
+          ((resultAuto && resultAuto.error) || 'error');
       return json_({
-        ok: Boolean(resultAuto && resultAuto.ok),
+        ok: !!autoOk,
         version: SCRIPT_VERSION,
         action: 'setupMetricasAuto',
         metricasAutoSheet: METRICAS_AUTO_SHEET,
         metricasOriginal: METRICAS_SHEET,
-        duplicated: resultAuto && resultAuto.duplicated,
-        anchorCol: resultAuto && resultAuto.anchorCol,
-        weeks: resultAuto && resultAuto.weeks,
-        error: resultAuto && resultAuto.error,
+        duplicated: resultAuto ? resultAuto.duplicated : false,
+        anchorCol: resultAuto ? resultAuto.anchorCol : null,
+        weeks: resultAuto ? resultAuto.weeks : null,
+        error: resultAuto ? resultAuto.error : null,
         spreadsheetId: infoAuto.spreadsheetId,
         spreadsheetName: infoAuto.spreadsheetName,
         spreadsheetUrl: infoAuto.spreadsheetUrl,
         existingSheets: infoAuto.existingSheets,
-        message: resultAuto && resultAuto.ok
-          ? 'Lista «' +
-            METRICAS_AUTO_SHEET +
-            '» en «' +
-            infoAuto.spreadsheetName +
-            '». La original «' +
-            METRICAS_SHEET +
-            '» no se tocó.'
-          : 'No se pudo crear Metricas Auto: ' +
-            ((resultAuto && resultAuto.error) || 'error'),
+        message: autoMsg,
       });
     }
 
@@ -1661,35 +1657,44 @@ function ensureMetricasSemanal_(ss) {
 
 /**
  * EJECUTAR UNA VEZ:
- * 1) Duplica Metricas YYYY → Metricas YYYY Auto
+ * 1) Duplica Metricas YYYY -> Metricas YYYY Auto
  * 2) Pone el resumen semanal en la copia
- * La pestaña original queda intacta.
+ * La pestana original queda intacta.
  */
 function restoreMetricasSemanal_() {
-  var result = ensureMetricasSemanal_();
-  var msg = result.ok
-    ? 'Metricas Auto OK — ' +
-      SCRIPT_VERSION +
-      '\n\n' +
-      (result.duplicated
-        ? '✓ Se duplicó «' + METRICAS_SHEET + '» → «' + METRICAS_AUTO_SHEET + '»\n'
-        : result.createdBlank
-          ? '✓ Se creó «' + METRICAS_AUTO_SHEET + '» (no había original)\n'
-          : '✓ Usando pestaña existente «' + METRICAS_AUTO_SHEET + '»\n') +
-      '✓ Resumen semanal en columna ' +
+  var result = ensureMetricasSemanal_() || { ok: false, error: 'sin resultado' };
+  var msg = '';
+  if (!result.ok) {
+    msg = 'Error: ' + (result.error || 'desconocido');
+  } else {
+    msg = 'Metricas Auto OK - ' + SCRIPT_VERSION + '\n\n';
+    if (result.duplicated) {
+      msg +=
+        'OK: se duplico ' +
+        METRICAS_SHEET +
+        ' -> ' +
+        METRICAS_AUTO_SHEET +
+        '\n';
+    } else if (result.createdBlank) {
+      msg += 'OK: se creo ' + METRICAS_AUTO_SHEET + ' (en blanco)\n';
+    } else {
+      msg += 'OK: usando pestana existente ' + METRICAS_AUTO_SHEET + '\n';
+    }
+    msg +=
+      'OK: resumen semanal en columna ' +
       result.anchorCol +
       '+\n' +
-      '✓ Semanas 1–' +
+      'OK: semanas 1-' +
       result.weeks +
-      ' ← ' +
+      ' desde ' +
       EVENTOS_SHEET +
       '\n' +
-      '✓ «' +
+      'OK: ' +
       METRICAS_SHEET +
-      '» original NO se modificó\n\n' +
-      'Revisa la pestaña Auto. Si te late, después migrás todo ahí.\n' +
-      'Siguiente: Nueva versión → Implementar'
-    : 'Error: ' + (result.error || 'desconocido');
+      ' original NO se modifico\n\n' +
+      'Revisa la pestana Auto.\n' +
+      'Luego: Implementar -> Nueva version';
+  }
   try {
     SpreadsheetApp.getUi().alert(msg);
   } catch (err) {
