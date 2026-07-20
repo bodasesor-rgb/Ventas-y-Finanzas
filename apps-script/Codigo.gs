@@ -1191,13 +1191,18 @@ function doPost(e) {
       action = 'appended';
     }
 
-    // Adjunta resumen semanal en Metricas (solo si aún no existe; no toca A:L)
+    // Crea Metricas Auto si falta (original intacta)
+    var pipe = { ok: false };
     try {
-      ensureWeeklyPipeline_(SpreadsheetApp.getActiveSpreadsheet());
+      pipe = ensureWeeklyPipeline_(SpreadsheetApp.getActiveSpreadsheet()) || {
+        ok: false,
+      };
     } catch (pipeErr) {
+      pipe = { ok: false, error: String(pipeErr) };
       Logger.log('ensureWeeklyPipeline_: ' + pipeErr);
     }
 
+    var infoPipe = spreadsheetInfo_();
     return json_({
       ok: true,
       version: SCRIPT_VERSION,
@@ -1206,6 +1211,10 @@ function doPost(e) {
       nextRowWouldBe: nextRow,
       dealId: dealId,
       sheetName: sheetName,
+      metricasAuto: pipe,
+      metricasAutoExists:
+        (infoPipe.existingSheets || []).indexOf(METRICAS_AUTO_SHEET) !== -1,
+      existingSheets: infoPipe.existingSheets,
     });
   } catch (err) {
     return json_({
@@ -1303,22 +1312,28 @@ function setupAllSilent_() {
 /**
  * Si falta tabla semanal en Eventos o la pestaña Auto, la prepara.
  * Nunca escribe en Metricas original.
+ * Devuelve {ok, error?, sheet?} para poder ver fallos en doPost.
  */
 function ensureWeeklyPipeline_(ss) {
   ss = ss || SpreadsheetApp.getActiveSpreadsheet();
-  var eventos = ensureEventosSheet_(ss);
-  if (String(eventos.getRange('AD3').getValue()).trim() !== 'Semana') {
-    setupWeeklyTable_(eventos);
-  }
-  var auto = ss.getSheetByName(METRICAS_AUTO_SHEET);
-  if (!auto) {
-    ensureMetricasSemanal_(ss);
-    return;
-  }
-  var col = metricasSemanalAnchorCol_(auto);
-  var marker = String(auto.getRange(2, col).getValue());
-  if (marker.indexOf('BOT_METRICAS_SEMANAL') === -1) {
-    ensureMetricasSemanal_(ss);
+  try {
+    var eventos = ensureEventosSheet_(ss);
+    if (String(eventos.getRange('AD3').getValue()).trim() !== 'Semana') {
+      setupWeeklyTable_(eventos);
+    }
+    var auto = ss.getSheetByName(METRICAS_AUTO_SHEET);
+    if (!auto) {
+      return ensureMetricasSemanal_(ss);
+    }
+    var col = metricasSemanalAnchorCol_(auto);
+    var marker = String(auto.getRange(2, col).getValue());
+    if (marker.indexOf('BOT_METRICAS_SEMANAL') === -1) {
+      return ensureMetricasSemanal_(ss);
+    }
+    return { ok: true, sheet: METRICAS_AUTO_SHEET, already: true };
+  } catch (err) {
+    Logger.log('ensureWeeklyPipeline_ fatal: ' + err);
+    return { ok: false, error: String(err) };
   }
 }
 
@@ -1435,25 +1450,63 @@ function ensureMetricasAutoSheet_(ss) {
   ss = ss || SpreadsheetApp.getActiveSpreadsheet();
   var auto = ss.getSheetByName(METRICAS_AUTO_SHEET);
   if (auto) {
-    return { sheet: auto, duplicated: false, createdBlank: false };
+    return { sheet: auto, duplicated: false, createdBlank: false, error: null };
+  }
+
+  // Por si quedó una copia a medias con otro nombre
+  var sheets = ss.getSheets();
+  for (var i = 0; i < sheets.length; i++) {
+    var nm = sheets[i].getName();
+    if (
+      nm === 'Copia de ' + METRICAS_SHEET ||
+      nm === 'Copy of ' + METRICAS_SHEET
+    ) {
+      try {
+        sheets[i].setName(METRICAS_AUTO_SHEET);
+        return {
+          sheet: sheets[i],
+          duplicated: true,
+          createdBlank: false,
+          error: null,
+        };
+      } catch (renameErr) {
+        Logger.log('rename copia: ' + renameErr);
+      }
+    }
   }
 
   var src = ss.getSheetByName(METRICAS_SHEET);
   if (src) {
-    auto = src.copyTo(ss);
-    auto.setName(METRICAS_AUTO_SHEET);
     try {
-      ss.setActiveSheet(auto);
-      ss.moveActiveSheet(src.getIndex() + 1);
-    } catch (moveErr) {
-      Logger.log('moveActiveSheet: ' + moveErr);
+      auto = src.copyTo(ss);
+      auto.setName(METRICAS_AUTO_SHEET);
+      try {
+        ss.setActiveSheet(auto);
+        ss.moveActiveSheet(src.getIndex() + 1);
+      } catch (moveErr) {
+        Logger.log('moveActiveSheet: ' + moveErr);
+      }
+      return {
+        sheet: auto,
+        duplicated: true,
+        createdBlank: false,
+        error: null,
+      };
+    } catch (copyErr) {
+      Logger.log('copyTo Metricas falló: ' + copyErr);
+      // Fallback: pestaña nueva vacía (solo semanal)
+      auto = ss.insertSheet(METRICAS_AUTO_SHEET);
+      return {
+        sheet: auto,
+        duplicated: false,
+        createdBlank: true,
+        error: String(copyErr),
+      };
     }
-    return { sheet: auto, duplicated: true, createdBlank: false };
   }
 
-  // Sin original: crea Auto vacía (luego se le pone el semanal)
   auto = ss.insertSheet(METRICAS_AUTO_SHEET);
-  return { sheet: auto, duplicated: false, createdBlank: true };
+  return { sheet: auto, duplicated: false, createdBlank: true, error: null };
 }
 
 /**
@@ -1478,12 +1531,29 @@ function ensureMetricasSemanal_(ss) {
   var eventos = ss.getSheetByName(EVENTOS_SHEET);
   if (!eventos) return { ok: false, error: 'Falta ' + EVENTOS_SHEET };
 
+  // Ligero: no reescribe todas las filas de clientes (eso puede tumbar el /exec)
   ensureEventosSheet_(ss);
-  setupEventosRowFormulas_(eventos);
   setupWeeklyTable_(eventos);
+  // Solo fórmulas U en filas con cliente (necesario para SUMIF semanal)
+  try {
+    var lastRow = Math.max(eventos.getLastRow(), 2);
+    var clientes = eventos.getRange(2, 1, lastRow, 1).getValues();
+    for (var i = 0; i < clientes.length; i++) {
+      if (String(clientes[i][0]).trim() === '') continue;
+      var row = i + 2;
+      eventos
+        .getRange(row, SEMANA_CIERRE_COL)
+        .setFormula(
+          '=IF(C' + row + '="","",IFERROR(WEEKNUM(C' + row + ',2),""))'
+        );
+    }
+  } catch (uErr) {
+    Logger.log('fórmulas U: ' + uErr);
+  }
 
   var dup = ensureMetricasAutoSheet_(ss);
   var sh = dup.sheet;
+  if (!sh) return { ok: false, error: 'No se pudo crear ' + METRICAS_AUTO_SHEET };
   var col0 = metricasSemanalAnchorCol_(sh); // 14=N o 27=AA
   var rows = MAX_WEEKS + 4;
 
