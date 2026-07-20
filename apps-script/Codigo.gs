@@ -1523,6 +1523,15 @@ function metricasSemanalAnchorCol_(sh) {
  * Nunca escribe en Metricas YYYY original.
  */
 function ensureMetricasSemanal_(ss) {
+  try {
+    return ensureMetricasSemanalBody_(ss);
+  } catch (err) {
+    Logger.log('ensureMetricasSemanal_: ' + err);
+    return { ok: false, error: String(err) };
+  }
+}
+
+function ensureMetricasSemanalBody_(ss) {
   ss = ss || SpreadsheetApp.getActiveSpreadsheet();
   var eventos = ss.getSheetByName(EVENTOS_SHEET);
   if (!eventos) return { ok: false, error: 'Falta ' + EVENTOS_SHEET };
@@ -1530,7 +1539,7 @@ function ensureMetricasSemanal_(ss) {
   // Ligero: no reescribe todas las filas de clientes (eso puede tumbar el /exec)
   ensureEventosSheet_(ss);
   setupWeeklyTable_(eventos);
-  // Solo fórmulas U en filas con cliente (necesario para SUMIF semanal)
+  // Solo formulas U en filas con cliente (necesario para SUMIF semanal)
   try {
     var lastRow = Math.max(eventos.getLastRow(), 2);
     var clientes = eventos.getRange(2, 1, lastRow, 1).getValues();
@@ -1544,7 +1553,7 @@ function ensureMetricasSemanal_(ss) {
         );
     }
   } catch (uErr) {
-    Logger.log('fórmulas U: ' + uErr);
+    Logger.log('formulas U: ' + uErr);
   }
 
   var dup = ensureMetricasAutoSheet_(ss);
@@ -1556,11 +1565,11 @@ function ensureMetricasSemanal_(ss) {
   sh.getRange(1, col0, rows, col0 + 7).clearContent();
 
   sh.getRange(1, col0).setValue(
-    'RESUMEN SEMANAL — Eventos ' + YEAR + ' (pestaña de prueba)'
+    'RESUMEN SEMANAL - Eventos ' + YEAR + ' (pestana de prueba)'
   );
   sh.getRange(1, col0).setFontWeight('bold').setFontSize(13);
   sh.getRange(2, col0).setValue(
-    METRICAS_SEMANAL_MARKER + ' · ' + SCRIPT_VERSION
+    METRICAS_SEMANAL_MARKER + ' | ' + SCRIPT_VERSION
   );
   sh.getRange(2, col0).setFontColor('#666666');
   sh.getRange(2, col0 + 1).setValue(
