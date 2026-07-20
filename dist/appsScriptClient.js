@@ -14,7 +14,7 @@ function getAppsScriptUrl() {
 /**
  * POST genérico al Apps Script /exec (Eventos, Banco, etc.).
  */
-async function postToAppsScript(payload) {
+async function postToAppsScript(payload, opts) {
     const url = appsScriptUrl();
     if (!url) {
         throw new Error("Falta URL_BODASESOR_DIRECCION_SHEETS (URL /exec del Apps Script)");
@@ -22,12 +22,28 @@ async function postToAppsScript(payload) {
     if (!url.includes("script.google.com") || !url.includes("/exec")) {
         throw new Error("URL_BODASESOR_DIRECCION_SHEETS debe ser la URL de Apps Script que termina en /exec");
     }
-    const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        redirect: "follow",
-    });
+    const timeoutMs = opts?.timeoutMs ?? 45_000;
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), timeoutMs);
+    let res;
+    try {
+        res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+            redirect: "follow",
+            signal: ac.signal,
+        });
+    }
+    catch (err) {
+        if (err instanceof Error && err.name === "AbortError") {
+            throw new Error(`Apps Script timeout (${timeoutMs}ms) — el /exec no respondió a tiempo`);
+        }
+        throw err;
+    }
+    finally {
+        clearTimeout(timer);
+    }
     const text = await res.text();
     let parsed;
     try {

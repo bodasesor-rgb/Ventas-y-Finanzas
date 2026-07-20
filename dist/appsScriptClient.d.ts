@@ -33,7 +33,9 @@ export declare function getAppsScriptUrl(): string;
 /**
  * POST genérico al Apps Script /exec (Eventos, Banco, etc.).
  */
-export declare function postToAppsScript(payload: Record<string, unknown>): Promise<AppsScriptWriteResult>;
+export declare function postToAppsScript(payload: Record<string, unknown>, opts?: {
+    timeoutMs?: number;
+}): Promise<AppsScriptWriteResult>;
 /**
  * Envía la fila al webhook de Google Apps Script (Eventos).
  */

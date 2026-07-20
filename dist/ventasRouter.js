@@ -125,11 +125,11 @@ exports.ventasRouter.get("/api/ventas/lead/:dealId", async (req, res) => {
 exports.ventasRouter.get("/api/ventas/poll", (_req, res) => {
     res.status(200).json({ ok: true, poll: (0, pollClosedDeals_1.getPollStatus)() });
 });
-/** Fuerza una pasada del poller ahora. */
+/** Fuerza una pasada del poller ahora (destraba candado si estaba stuck). */
 exports.ventasRouter.post("/api/ventas/poll", async (_req, res) => {
     try {
-        const result = await (0, pollClosedDeals_1.pollClosedDealsOnce)(40);
-        res.status(200).json({ ok: true, result });
+        const result = await (0, pollClosedDeals_1.pollClosedDealsOnce)(40, { force: true });
+        res.status(200).json({ ok: true, result, poll: (0, pollClosedDeals_1.getPollStatus)() });
     }
     catch (err) {
         res.status(500).json({
@@ -140,8 +140,8 @@ exports.ventasRouter.post("/api/ventas/poll", async (_req, res) => {
 });
 exports.ventasRouter.get("/api/ventas/poll-now", async (_req, res) => {
     try {
-        const result = await (0, pollClosedDeals_1.pollClosedDealsOnce)(40);
-        res.status(200).json({ ok: true, result });
+        const result = await (0, pollClosedDeals_1.pollClosedDealsOnce)(40, { force: true });
+        res.status(200).json({ ok: true, result, poll: (0, pollClosedDeals_1.getPollStatus)() });
     }
     catch (err) {
         res.status(500).json({
