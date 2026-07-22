@@ -1,23 +1,25 @@
-# Estado de Resultados + Metricas Auto (Sheet)
+# Metricas semanal desde Eventos (v25)
 
-## v23 — Crear Metricas Auto a un clic
+## Idea
+**No se crean columnas.** En `Metricas 2026 Auto` se ponen **formulas** en tu tabla semanal (Ingresos, # Eventos, etc.) leyendo `Eventos 2026` por **Fecha de cierre**.
 
-**Original:** `Metricas YYYY` — **nunca se modifica**  
-**Copia:** `Metricas YYYY Auto` — duplicado + resumen semanal  
+| Fila | Fuente |
+|------|--------|
+| Ingresos | `SUMIFS` Venta (J) en el rango de la semana |
+| # Eventos | `COUNTIFS` clientes con cierre en la semana |
+| Ticket | Ingresos / # Eventos |
+| WoW | vs columna anterior |
+| Ganancias | `SUMIFS` Ganancia (N) |
+| Margen | Ganancias / Ingresos |
+| Gasto | **manual — no se toca** |
+| Ganancias brutas | Ganancias − Gasto − Banco |
 
-### Cómo crear la pestaña (elige uno)
+La fecha del **encabezado de cada columna** = inicio de semana (ej. 20/07/2026 = sem 30, del 20 al 26).
 
-**A) Desde Apps Script (ya con v22/v23 pegado)**  
-1. Editor → función **`restoreMetricasSemanal_`** → ▶ Ejecutar  
-2. Refresca el Sheet → debe aparecer **Metricas 2026 Auto**
+## Activar
+1. Pegar `Codigo.gs` v25
+2. Ejecutar **`restoreMetricasSemanal_`**
+3. Implementar → Nueva versión
+4. O: `POST /api/ventas/setup-metricas-auto`
 
-**B) Desde Hostinger (requiere v23 publicado)**  
-`GET` o `POST`  
-`https://TU-HOST/api/ventas/setup-metricas-auto`
-
-**C) Publicar v23**  
-1. Pegar `apps-script/Codigo.gs`  
-2. Implementar → Nueva versión  
-3. Confirmar `"version":"2026-07-20-v23"` en la URL `/exec`
-
-Sheet: https://docs.google.com/spreadsheets/d/1TWbOOjTnm68n2QioiwRsHvXSuARev2PLIhqr1pVctp8/edit
+Original `Metricas 2026` no se modifica.
