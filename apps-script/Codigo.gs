@@ -1107,14 +1107,12 @@ function doPost(e) {
       var infoAuto = spreadsheetInfo_();
       var autoOk = resultAuto && resultAuto.ok;
       var autoMsg = autoOk
-        ? 'Formulas listas en ' +
-          METRICAS_AUTO_SHEET +
-          ' (' +
+        ? 'Metricas Auto REPARADA desde original. ' +
           (resultAuto.weekCols || 0) +
           ' semanas, ' +
           (resultAuto.cellsFilled || 0) +
-          ' celdas). Gasto manual intacto.'
-        : 'No se pudo llenar Metricas Auto: ' +
+          ' formulas. Fechas restauradas. Gasto no tocado.'
+        : 'No se pudo reparar Metricas Auto: ' +
           ((resultAuto && resultAuto.error) || 'error');
       return json_({
         ok: !!autoOk,
@@ -1122,9 +1120,10 @@ function doPost(e) {
         action: 'setupMetricasAuto',
         metricasAutoSheet: METRICAS_AUTO_SHEET,
         metricasOriginal: METRICAS_SHEET,
-        duplicated: resultAuto ? resultAuto.duplicated : false,
+        recreated: resultAuto ? resultAuto.recreated : false,
         weekCols: resultAuto ? resultAuto.weekCols : null,
         cellsFilled: resultAuto ? resultAuto.cellsFilled : null,
+        headerRow: resultAuto ? resultAuto.headerRow : null,
         error: resultAuto ? resultAuto.error : null,
         spreadsheetId: infoAuto.spreadsheetId,
         spreadsheetName: infoAuto.spreadsheetName,
