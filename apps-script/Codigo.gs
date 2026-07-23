@@ -1,25 +1,19 @@
 /**
  * ============================================================
  * Apps Script — Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-07-23-v26
+ * VERSION: 2026-07-23-v28
  * ============================================================
  * PEGAR TODO ESTE ARCHIVO (borrar lo anterior -> pegar -> Guardar)
  *
- * Luego:
- *   1) restoreMetricasSemanal_ -> Ejecutar
- *      (RECREA Metricas Auto desde la original + formulas; no borra fechas)
- *   2) Implementar -> Nueva version
- *
- * REGLA v26:
- *   - Metricas YYYY original NUNCA se modifica
- *   - Metricas Auto se regenera desde la original (recupera fechas)
- *   - Solo setFormula en filas KPI; NUNCA clear de encabezados/fechas
+ * REGLA v28:
+ *   - Encabezado de semana = fila de FECHAS (ej. 20/07/26), no la de numeros 1..53
+ *   - Formulas SUMIFS por Fecha de cierre en Eventos
  *   - Gasto manual no se toca
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-07-23-v26';
+var SCRIPT_VERSION = '2026-07-23-v28';
 var METRICAS_MARKER = 'BOT_METRICAS_V14';
-var METRICAS_SEMANAL_MARKER = 'BOT_METRICAS_SEMANAL_V26';
+var METRICAS_SEMANAL_MARKER = 'BOT_METRICAS_SEMANAL_V28';
 var PNL_MARKER = 'BOT_PNL_MESES_V17';
 var ER_MARKER = 'BOT_ESTADO_RESULTADOS_V20';
 var YEAR = 2026;
@@ -1135,6 +1129,15 @@ function doPost(e) {
     if (data && data.action === 'inspectMetricas') {
       return json_(inspectMetricasLayout_());
     }
+    if (data && data.action === 'debugMetricasEvento') {
+      return json_(debugMetricasEvento_(data));
+    }
+    if (data && data.action === 'normalizeEventosFechas') {
+      return json_(normalizeEventosFechasCierre_());
+    }
+    if (data && data.action === 'inspectMetricasHeaders') {
+      return json_(inspectMetricasHeaders_());
+    }
 
     var values = data.values;
     if (!values || !Array.isArray(values)) {
@@ -1539,26 +1542,52 @@ function detectMetricasWeekLayout_(sh) {
     }
   }
 
-  // Fila de encabezados: arriba de Ingresos, con fechas parseables
+  // Fila de encabezados: arriba de Ingresos, con FECHAS reales del año
+  // (no numeros de semana 1..53 de la fila "Semana")
+  var bestHeader = -1;
+  var bestCount = 0;
   for (var hr = Math.max(0, ingresosRow - 6); hr < ingresosRow; hr++) {
     var dateCount = 0;
     for (var hc = labelCol; hc < lastCol; hc++) {
-      if (parseHeaderDate_(values[hr][hc])) dateCount++;
+      var cell = values[hr][hc];
+      // Ignorar enteros chicos (1..53 = numero de semana)
+      if (typeof cell === 'number' && cell > 0 && cell < 1000) continue;
+      var pd = null;
+      if (cell instanceof Date && !isNaN(cell.getTime())) pd = cell;
+      else pd = parseHeaderDate_(cell);
+      if (!pd) continue;
+      var y = pd.getFullYear();
+      if (y === YEAR || y === YEAR - 1 || y === YEAR + 1) dateCount++;
     }
-    if (dateCount >= 2) {
-      headerRow = hr + 1;
-      break;
+    if (dateCount > bestCount) {
+      bestCount = dateCount;
+      bestHeader = hr + 1;
     }
   }
-  if (headerRow < 0) {
-    headerRow = Math.max(1, ingresosRow - 1);
+  if (bestHeader < 0 || bestCount < 2) {
+    return {
+      ok: false,
+      error:
+        'No encontre fila de fechas de semana (dd/mm/' +
+        YEAR +
+        ') arriba de Ingresos',
+      ingresosRow: ingresosRow,
+    };
   }
+  headerRow = bestHeader;
 
   var weekCols = [];
   var headerVals = sh.getRange(headerRow, 1, 1, lastCol).getValues()[0];
   for (var wc = labelCol; wc < lastCol; wc++) {
-    var d = parseHeaderDate_(headerVals[wc]);
-    if (d) weekCols.push({ col: wc + 1, date: d });
+    var hv = headerVals[wc];
+    if (typeof hv === 'number' && hv > 0 && hv < 1000) continue; // semana #
+    var d = null;
+    if (hv instanceof Date && !isNaN(hv.getTime())) d = hv;
+    else d = parseHeaderDate_(hv);
+    if (!d) continue;
+    var yy = d.getFullYear();
+    if (yy !== YEAR && yy !== YEAR - 1 && yy !== YEAR + 1) continue;
+    weekCols.push({ col: wc + 1, date: d });
   }
 
   return {
@@ -1805,6 +1834,8 @@ function ensureMetricasSemanalBody_(ss) {
     return { ok: false, error: 'Falta ' + EVENTOS_SHEET };
   }
   ensureEventosSheet_(ss);
+  // Critico: col C como Date real, si no SUMIFS no ve los cierres
+  var norm = normalizeEventosFechasCierre_();
 
   var re = recreateMetricasAutoFromOriginal_(ss);
   if (!re.sheet) {
@@ -1842,8 +1873,9 @@ function ensureMetricasSemanalBody_(ss) {
     eventosRow: layout.eventosRow,
     weekCols: layout.weekCols.length,
     cellsFilled: filled,
+    fechasNormalizadas: norm.converted || 0,
     note:
-      'Auto recreada desde original (fechas recuperadas). Solo formulas KPI. Gasto no tocado.',
+      'Auto recreada desde original. Fechas Eventos normalizadas. Solo formulas KPI. Gasto no tocado.',
   };
 }
 
@@ -1881,6 +1913,43 @@ function restoreMetricasSemanal_() {
   return result;
 }
 
+/** Lee filas 1-8 de Metricas Auto: valores + display (para ver fechas reales). */
+function inspectMetricasHeaders_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(METRICAS_AUTO_SHEET) || ss.getSheetByName(METRICAS_SHEET);
+  if (!sh) return { ok: false, error: 'No Metricas', version: SCRIPT_VERSION };
+  var lastCol = Math.min(Math.max(sh.getLastColumn(), 20), 60);
+  var rows = 8;
+  var vals = sh.getRange(1, 1, rows, lastCol).getValues();
+  var disp = sh.getRange(1, 1, rows, lastCol).getDisplayValues();
+  var out = [];
+  for (var r = 0; r < rows; r++) {
+    var cells = [];
+    for (var c = 0; c < lastCol; c++) {
+      var v = vals[r][c];
+      var d = disp[r][c];
+      if (d === '' && (v === '' || v == null)) continue;
+      cells.push({
+        a1: columnToLetter_(c + 1) + (r + 1),
+        display: d,
+        type: v instanceof Date ? 'Date' : typeof v,
+        iso:
+          v instanceof Date
+            ? Utilities.formatDate(v, Session.getScriptTimeZone(), 'dd/MM/yyyy')
+            : null,
+      });
+    }
+    out.push({ row: r + 1, cells: cells });
+  }
+  return {
+    ok: true,
+    version: SCRIPT_VERSION,
+    sheet: sh.getName(),
+    lastCol: lastCol,
+    rows: out,
+  };
+}
+
 /** Diagnostico: layout detectado en Metricas Auto / Metricas. */
 function inspectMetricasLayout_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1900,6 +1969,157 @@ function inspectMetricasLayout_() {
     });
   }
   return layout;
+}
+
+/**
+ * Convierte Fecha de cierre (col C) de texto a Date real.
+ * Sin esto, SUMIFS de Metricas no matchea (texto vs fecha).
+ */
+function normalizeEventosFechasCierre_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(EVENTOS_SHEET);
+  if (!sh) return { ok: false, error: 'Falta ' + EVENTOS_SHEET, version: SCRIPT_VERSION };
+
+  var lastRow = Math.max(sh.getLastRow(), 2);
+  var range = sh.getRange(2, 3, lastRow, 3); // C
+  var values = range.getValues();
+  var converted = 0;
+  var samples = [];
+
+  for (var i = 0; i < values.length; i++) {
+    var v = values[i][0];
+    if (v === '' || v == null) continue;
+    if (v instanceof Date && !isNaN(v.getTime())) {
+      if (samples.length < 5) {
+        samples.push({
+          row: i + 2,
+          before: 'Date',
+          after: Utilities.formatDate(v, Session.getScriptTimeZone(), 'dd/MM/yyyy'),
+        });
+      }
+      continue;
+    }
+    var d = parseHeaderDate_(v);
+    if (d) {
+      values[i][0] = d;
+      converted++;
+      if (samples.length < 8) {
+        samples.push({
+          row: i + 2,
+          before: String(v),
+          after: Utilities.formatDate(d, Session.getScriptTimeZone(), 'dd/MM/yyyy'),
+        });
+      }
+    }
+  }
+  if (converted > 0) {
+    range.setValues(values);
+    range.setNumberFormat('dd/mm/yyyy');
+  }
+  return {
+    ok: true,
+    version: SCRIPT_VERSION,
+    converted: converted,
+    scanned: values.length,
+    samples: samples,
+  };
+}
+
+/**
+ * Debug: busca un cliente (default "prueba") en Eventos y ve si cae en Metricas.
+ */
+function debugMetricasEvento_(data) {
+  var q = String((data && data.cliente) || 'prueba').toLowerCase();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ev = ss.getSheetByName(EVENTOS_SHEET);
+  var met = ss.getSheetByName(METRICAS_AUTO_SHEET);
+  if (!ev) return { ok: false, error: 'Falta Eventos', version: SCRIPT_VERSION };
+
+  var lastRow = Math.max(ev.getLastRow(), 2);
+  var rows = ev.getRange(2, 1, lastRow, 14).getValues(); // A..N
+  var matches = [];
+  for (var i = 0; i < rows.length; i++) {
+    var nombre = String(rows[i][0] || '');
+    if (nombre.toLowerCase().indexOf(q) === -1) continue;
+    var cierre = rows[i][2]; // C
+    var venta = rows[i][9]; // J
+    var ganancia = rows[i][13]; // N
+    var cierreType = cierre instanceof Date ? 'Date' : typeof cierre;
+    var cierreStr =
+      cierre instanceof Date
+        ? Utilities.formatDate(cierre, Session.getScriptTimeZone(), 'dd/MM/yyyy')
+        : String(cierre);
+    var parsed = parseHeaderDate_(cierre);
+    matches.push({
+      row: i + 2,
+      cliente: nombre,
+      cierreRaw: cierreStr,
+      cierreType: cierreType,
+      cierreParsed: parsed
+        ? Utilities.formatDate(parsed, Session.getScriptTimeZone(), 'dd/MM/yyyy')
+        : null,
+      venta: venta,
+      ganancia: ganancia,
+    });
+  }
+
+  var layout = met ? detectMetricasWeekLayout_(met) : { ok: false };
+  var weekHits = [];
+  if (layout.ok && matches.length) {
+    for (var m = 0; m < matches.length; m++) {
+      var pd = parseHeaderDate_(matches[m].cierreRaw) || parseHeaderDate_(rows[matches[m].row - 2][2]);
+      // better use actual cell
+      var cellC = ev.getRange(matches[m].row, 3).getValue();
+      pd = cellC instanceof Date ? cellC : parseHeaderDate_(cellC);
+      if (!pd) {
+        weekHits.push({ row: matches[m].row, hit: false, reason: 'sin fecha parseable' });
+        continue;
+      }
+      var hit = null;
+      for (var w = 0; w < layout.weekCols.length; w++) {
+        var start = layout.weekCols[w].date;
+        var end = new Date(start.getTime());
+        end.setDate(end.getDate() + 7);
+        if (pd >= start && pd < end) {
+          hit = {
+            col: layout.weekCols[w].col,
+            weekStart: Utilities.formatDate(start, Session.getScriptTimeZone(), 'dd/MM/yyyy'),
+            formulaIngresos: layout.ingresosRow
+              ? String(met.getRange(layout.ingresosRow, layout.weekCols[w].col).getFormula())
+              : null,
+            valueIngresos: layout.ingresosRow
+              ? met.getRange(layout.ingresosRow, layout.weekCols[w].col).getValue()
+              : null,
+            valueEventos: layout.eventosRow
+              ? met.getRange(layout.eventosRow, layout.weekCols[w].col).getValue()
+              : null,
+          };
+          break;
+        }
+      }
+      weekHits.push({
+        row: matches[m].row,
+        cliente: matches[m].cliente,
+        cierre: Utilities.formatDate(pd, Session.getScriptTimeZone(), 'dd/MM/yyyy'),
+        hit: !!hit,
+        week: hit,
+      });
+    }
+  }
+
+  return {
+    ok: true,
+    version: SCRIPT_VERSION,
+    query: q,
+    matches: matches,
+    weekHits: weekHits,
+    layoutOk: layout.ok,
+    ingresosRow: layout.ingresosRow,
+    eventosRow: layout.eventosRow,
+    headerRow: layout.headerRow,
+    weekColsCount: layout.weekCols ? layout.weekCols.length : 0,
+    tz: Session.getScriptTimeZone(),
+  };
 }
 
 /**
