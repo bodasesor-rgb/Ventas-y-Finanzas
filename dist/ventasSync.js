@@ -7,6 +7,17 @@ exports.syncDealToSheet = syncDealToSheet;
 const appsScriptClient_1 = require("./appsScriptClient");
 const kommoApi_1 = require("./kommoApi");
 const mapDealToFila_1 = require("./mapDealToFila");
+/** Evita import circular: poller marca estado tras sync exitoso. */
+function markPollSyncedSafe_(dealId, closedAt) {
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { markDealSynced } = require("./pollClosedDeals");
+        markDealSynced(dealId, closedAt);
+    }
+    catch {
+        // poller opcional en tests
+    }
+}
 /** Último resultado en memoria (se pierde al reiniciar Node). */
 let lastSync = null;
 let lastAccepted = null;
@@ -89,6 +100,9 @@ async function syncDealToSheet(leadId, webhookBody) {
         headers: mapDealToFila_1.SHEET_HEADERS,
     };
     lastSync = result;
+    if (result.sheetWrite.ok || !result.sheetWrite.attempted) {
+        markPollSyncedSafe_(result.dealId, lead.closed_at ?? null);
+    }
     console.log(JSON.stringify({
         startedAt,
         dealId: result.dealId,

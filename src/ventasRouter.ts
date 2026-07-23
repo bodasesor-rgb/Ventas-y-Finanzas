@@ -152,7 +152,17 @@ ventasRouter.get("/api/ventas/lead/:dealId", async (req, res) => {
 
 /** Estado del poller automático (backup del webhook). */
 ventasRouter.get("/api/ventas/poll", (_req, res) => {
-  res.status(200).json({ ok: true, poll: getPollStatus() });
+  const poll = getPollStatus();
+  res.status(200).json({
+    ok: true,
+    poll,
+    diagnosis: {
+      webhookLastSource: getLastWebhookAccepted()?.source ?? null,
+      lookbackHours: 6,
+      note:
+        "Si lastAccepted.source nunca es 'webhook', Kommo no está pegando al endpoint. El poller sube cierres de las últimas 6h que falten.",
+    },
+  });
 });
 
 /**

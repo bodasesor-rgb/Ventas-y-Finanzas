@@ -11,3 +11,8 @@ export declare function extractPartialLeadFromWebhook(body: KommoWebhookBody | R
 export declare function fetchLeadWithContact(leadId: number): Promise<KommoLead>;
 /** Últimos leads tocados en Kommo (para sync manual). */
 export declare function fetchRecentLeads(limit?: number): Promise<KommoLead[]>;
+/**
+ * Leads cerrados desde `sinceMs` atrás (por closed_at), no por updated_at.
+ * Así un deal ganado no se pierde entre 40 leads abiertos recién tocados.
+ */
+export declare function fetchRecentlyClosedLeads(limit?: number, lookbackMs?: number): Promise<KommoLead[]>;

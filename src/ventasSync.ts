@@ -11,6 +11,17 @@ import {
 } from "./mapDealToFila";
 import type { FilaVentas, KommoLead, KommoWebhookBody } from "./types";
 
+/** Evita import circular: poller marca estado tras sync exitoso. */
+function markPollSyncedSafe_(dealId: string, closedAt?: number | null): void {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { markDealSynced } = require("./pollClosedDeals") as typeof import("./pollClosedDeals");
+    markDealSynced(dealId, closedAt);
+  } catch {
+    // poller opcional en tests
+  }
+}
+
 export interface VentasSyncResult {
   startedAt: string;
   finishedAt: string;
@@ -136,6 +147,9 @@ export async function syncDealToSheet(
   };
 
   lastSync = result;
+  if (result.sheetWrite.ok || !result.sheetWrite.attempted) {
+    markPollSyncedSafe_(result.dealId, lead.closed_at ?? null);
+  }
   console.log(
     JSON.stringify(
       {

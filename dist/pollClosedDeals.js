@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.isClosedWonLead = isClosedWonLead;
 exports.getPollStatus = getPollStatus;
+exports.markDealSynced = markDealSynced;
 exports.pollClosedDealsOnce = pollClosedDealsOnce;
 exports.syncLatestMissingClosedDeal = syncLatestMissingClosedDeal;
 exports.startClosedDealsPoller = startClosedDealsPoller;
@@ -20,22 +21,26 @@ const POLL_LOCK_MAX_MS = 90_000;
 /** Si no hubo poll reciente, el watchdog fuerza uno. */
 const POLL_STALE_MS = 3 * 60_000;
 /**
- * Sin lastPollAt (cold start): solo considerar cierres de esta ventana.
- * Los cerrados más viejos se marcan en estado SIN escribir al Sheet.
+ * Ventana de escritura: cualquier cierre dentro de estas horas que aún
+ * no esté en estado se sube al Sheet. Más allá = histórico (solo marcar).
+ *
+ * Antes usábamos lastPollAt − 2 min: si el poll fallaba un momento,
+ * el cierre se “sembraba” como viejo y nunca se subía.
  */
-const COLD_START_LOOKBACK_MS = 30 * 60_000;
-/** Solape contra lastPollAt para no perder un cierre en el borde. */
-const POLL_OVERLAP_MS = 2 * 60_000;
+const WRITE_LOOKBACK_MS = 6 * 60 * 60_000;
 let memoryState = {
     syncedUpdatedAt: {},
     lastPollAt: null,
     lastResult: null,
 };
+let stateHydrated = false;
 let pollTimer = null;
 let watchdogTimer = null;
 let polling = false;
 let pollingStartedAt = 0;
 function loadState() {
+    if (stateHydrated)
+        return memoryState;
     try {
         if (fs_1.default.existsSync(STATE_PATH)) {
             const raw = JSON.parse(fs_1.default.readFileSync(STATE_PATH, "utf8"));
@@ -49,10 +54,12 @@ function loadState() {
     catch (err) {
         console.warn("[ventas-poll] No se pudo leer estado", err);
     }
+    stateHydrated = true;
     return memoryState;
 }
 function saveState() {
     try {
+        stateHydrated = true;
         fs_1.default.mkdirSync(path_1.default.dirname(STATE_PATH), { recursive: true });
         fs_1.default.writeFileSync(STATE_PATH, JSON.stringify(memoryState, null, 2));
     }
@@ -75,6 +82,23 @@ function getPollStatus() {
         lockAgeMs: polling ? Date.now() - pollingStartedAt : null,
     };
 }
+/**
+ * Marca un deal como ya subido (webhook / sync manual / poll).
+ * Evita que el poller lo re-suba o lo ignore por estado inconsistente.
+ * No re-lee disco si el estado ya está en memoria (evita pisar un poll en curso).
+ */
+function markDealSynced(dealId, closedAtSec) {
+    loadState();
+    const id = String(dealId);
+    const ts = closedAtSec && closedAtSec > 0
+        ? closedAtSec
+        : Math.floor(Date.now() / 1000);
+    const prev = memoryState.syncedUpdatedAt[id] || 0;
+    if (ts >= prev) {
+        memoryState.syncedUpdatedAt[id] = ts;
+        saveState();
+    }
+}
 /** Libera el candado si un poll anterior se quedó colgado. */
 function releaseStuckLock_(force = false) {
     if (!polling)
@@ -95,25 +119,14 @@ function closedAtSec_(lead) {
 function leadRecency_(lead) {
     return closedAtSec_(lead) || lead.updated_at || 0;
 }
-/** Corte: solo cierres ≥ esto se escriben al Sheet. */
-function writeCutoffSec_() {
-    if (memoryState.lastPollAt) {
-        const t = Date.parse(memoryState.lastPollAt);
-        if (Number.isFinite(t)) {
-            return Math.floor((t - POLL_OVERLAP_MS) / 1000);
-        }
-    }
-    return Math.floor((Date.now() - COLD_START_LOOKBACK_MS) / 1000);
-}
 /**
- * Busca deals cerrados recientes y escribe al Sheet SOLO los que se
- * acabaron de cerrar (closed_at ≥ cutoff). Los cerrados anteriores se
- * marcan en estado sin tocar el Sheet — aunque Kommo los haya “tocado”
- * (updated_at nuevo).
+ * Busca deals cerrados recientes y escribe al Sheet los que falten
+ * dentro de la ventana de lookback. Más viejos: solo marcar estado
+ * (no re-subir histórico).
  *
  * `force` solo destraba candado stuck.
  * `onlyLatestMissing`: como máximo 1 fila (el cierre más reciente elegible).
- * `lookbackMs`: override del cutoff (p. ej. recuperación).
+ * `lookbackMs`: override de la ventana de escritura.
  */
 async function pollClosedDealsOnce(limit = 40, opts) {
     releaseStuckLock_(Boolean(opts?.force));
@@ -137,10 +150,16 @@ async function pollClosedDealsOnce(limit = 40, opts) {
     let seededOld = 0;
     try {
         loadState();
-        const cutoff = opts?.lookbackMs != null
-            ? Math.floor((Date.now() - opts.lookbackMs) / 1000)
-            : writeCutoffSec_();
-        const leads = await (0, kommoApi_1.fetchRecentLeads)(limit);
+        const lookbackMs = opts?.lookbackMs ?? WRITE_LOOKBACK_MS;
+        const cutoff = Math.floor((Date.now() - lookbackMs) / 1000);
+        let leads;
+        try {
+            leads = await (0, kommoApi_1.fetchRecentlyClosedLeads)(limit, lookbackMs);
+        }
+        catch (err) {
+            console.warn("[ventas-poll] fetchRecentlyClosedLeads falló, fallback recent", err instanceof Error ? err.message : err);
+            leads = await (0, kommoApi_1.fetchRecentLeads)(limit);
+        }
         const closed = leads
             .filter(isClosedWonLead)
             .sort((a, b) => leadRecency_(b) - leadRecency_(a));
@@ -148,30 +167,48 @@ async function pollClosedDealsOnce(limit = 40, opts) {
             const id = String(lead.id);
             const closedAt = closedAtSec_(lead);
             const prev = memoryState.syncedUpdatedAt[id] || 0;
-            // Sin closed_at: no adivinamos; solo marcamos para no spamear Sheet
+            // Ganado sin closed_at aún: intentar subir (no marcar con updated_at —
+            // eso bloqueaba el sync cuando Kommo rellenaba closed_at después).
             if (!closedAt) {
-                if (!prev) {
-                    memoryState.syncedUpdatedAt[id] =
-                        lead.updated_at || Math.floor(Date.now() / 1000);
-                    seededOld++;
-                }
-                else {
+                if (prev > 0) {
                     skippedAlreadySynced++;
+                    continue;
                 }
+                // Si updated_at es viejo fuera de lookback, no spamear Sheet
+                const touched = lead.updated_at || 0;
+                if (touched > 0 && touched < cutoff) {
+                    seededOld++;
+                    continue;
+                }
+                try {
+                    const result = await (0, ventasSync_1.syncDealToSheet)(lead.id);
+                    if (result.sheetWrite.ok || !result.sheetWrite.attempted) {
+                        memoryState.syncedUpdatedAt[id] = Math.floor(Date.now() / 1000);
+                        synced.push(id);
+                    }
+                    else {
+                        errors.push(`${id}: ${result.sheetWrite.error || "sheet fail"}`);
+                    }
+                }
+                catch (err) {
+                    errors.push(`${id}: ${err instanceof Error ? err.message : String(err)}`);
+                }
+                if (opts?.onlyLatestMissing)
+                    break;
                 continue;
             }
-            // Ya procesamos este cierre (ignore updated_at de Kommo)
+            // Ya procesamos este cierre
             if (prev >= closedAt) {
                 skippedAlreadySynced++;
                 continue;
             }
-            // Cierre viejo: recordar sin escribir (evita re-subir el histórico)
+            // Histórico fuera de ventana: recordar sin escribir
             if (closedAt < cutoff) {
                 memoryState.syncedUpdatedAt[id] = closedAt;
                 seededOld++;
                 continue;
             }
-            // Cierre nuevo en la ventana → una escritura
+            // Cierre nuevo en la ventana → escribir
             try {
                 const result = await (0, ventasSync_1.syncDealToSheet)(lead.id);
                 if (result.sheetWrite.ok || !result.sheetWrite.attempted) {
@@ -185,7 +222,6 @@ async function pollClosedDealsOnce(limit = 40, opts) {
             catch (err) {
                 errors.push(`${id}: ${err instanceof Error ? err.message : String(err)}`);
             }
-            // Nunca más de un deal por pasada de recuperación
             if (opts?.onlyLatestMissing)
                 break;
         }
@@ -203,7 +239,7 @@ async function pollClosedDealsOnce(limit = 40, opts) {
             console.log("[ventas-poll] sincronizados (solo cierres nuevos)", synced);
         }
         else {
-            console.log(`[ventas-poll] OK sin nuevos · checked=${closed.length} · skipped=${skippedAlreadySynced} · seededOld=${seededOld}`);
+            console.log(`[ventas-poll] OK sin nuevos · checked=${closed.length} · skipped=${skippedAlreadySynced} · seededOld=${seededOld} · lookbackH=${Math.round(lookbackMs / 3600000)}`);
         }
         return memoryState.lastResult;
     }
@@ -243,9 +279,7 @@ function startClosedDealsPoller(intervalMs = 60_000) {
     if (pollTimer)
         return;
     loadState();
-    console.log(`[ventas-poll] activo cada ${Math.round(intervalMs / 1000)}s — solo cierres nuevos (no re-sube históricos)`);
-    // Una sola escritura por pasada: el cierre más reciente elegible.
-    // Cierres viejos se siembran en estado sin tocar el Sheet.
+    console.log(`[ventas-poll] activo cada ${Math.round(intervalMs / 1000)}s — lookback ${Math.round(WRITE_LOOKBACK_MS / 3600000)}h, solo cierres nuevos`);
     const run = (force = false) => {
         void pollClosedDealsOnce(40, {
             force,

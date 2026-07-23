@@ -153,3 +153,58 @@ export async function fetchRecentLeads(limit = 10): Promise<KommoLead[]> {
   };
   return data._embedded?.leads || [];
 }
+
+/**
+ * Leads cerrados desde `sinceMs` atrás (por closed_at), no por updated_at.
+ * Así un deal ganado no se pierde entre 40 leads abiertos recién tocados.
+ */
+export async function fetchRecentlyClosedLeads(
+  limit = 40,
+  lookbackMs = 6 * 60 * 60_000
+): Promise<KommoLead[]> {
+  const base = KOMMO_BASE();
+  const token = KOMMO_TOKEN();
+  if (!base || !token) {
+    throw new Error(
+      "Faltan KOMMO_BASE_URL o KOMMO_ACCESS_TOKEN en variables de entorno"
+    );
+  }
+  const n = Math.min(Math.max(limit, 1), 50);
+  const from = Math.floor((Date.now() - lookbackMs) / 1000);
+  // status 142 = ganado en Kommo/amoCRM
+  const url =
+    `${base}/api/v4/leads?limit=${n}` +
+    `&filter[closed_at][from]=${from}` +
+    `&filter[statuses][0][status_id]=142` +
+    `&order[closed_at]=desc&with=contacts`;
+  const res = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+  // Si el filtro de status no es aceptado, reintentar solo con closed_at
+  if (!res.ok) {
+    const fallbackUrl =
+      `${base}/api/v4/leads?limit=${n}` +
+      `&filter[closed_at][from]=${from}` +
+      `&order[closed_at]=desc&with=contacts`;
+    const res2 = await fetch(fallbackUrl, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
+    });
+    const data2 = (await readJsonOrThrow(
+      res2,
+      "Kommo closed leads"
+    )) as {
+      _embedded?: { leads?: KommoLead[] };
+    };
+    return data2._embedded?.leads || [];
+  }
+  const data = (await readJsonOrThrow(res, "Kommo closed leads")) as {
+    _embedded?: { leads?: KommoLead[] };
+  };
+  return data._embedded?.leads || [];
+}

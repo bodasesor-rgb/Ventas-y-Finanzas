@@ -1,8 +1,8 @@
 import type { KommoLead } from "./types";
 interface PollState {
     /**
-     * dealId → closed_at (unix sec) ya procesado.
-     * (Histórico: pudo guardar updated_at; seguimos comparando contra closed_at.)
+     * dealId → closed_at (unix sec) ya procesado (escrito o histórico).
+     * Nunca guardar updated_at aquí: bloquearía el sync cuando llegue closed_at.
      */
     syncedUpdatedAt: Record<string, number>;
     lastPollAt: string | null;
@@ -22,14 +22,19 @@ export declare function getPollStatus(): PollState & {
     lockAgeMs: number | null;
 };
 /**
- * Busca deals cerrados recientes y escribe al Sheet SOLO los que se
- * acabaron de cerrar (closed_at ≥ cutoff). Los cerrados anteriores se
- * marcan en estado sin tocar el Sheet — aunque Kommo los haya “tocado”
- * (updated_at nuevo).
+ * Marca un deal como ya subido (webhook / sync manual / poll).
+ * Evita que el poller lo re-suba o lo ignore por estado inconsistente.
+ * No re-lee disco si el estado ya está en memoria (evita pisar un poll en curso).
+ */
+export declare function markDealSynced(dealId: string | number, closedAtSec?: number | null): void;
+/**
+ * Busca deals cerrados recientes y escribe al Sheet los que falten
+ * dentro de la ventana de lookback. Más viejos: solo marcar estado
+ * (no re-subir histórico).
  *
  * `force` solo destraba candado stuck.
  * `onlyLatestMissing`: como máximo 1 fila (el cierre más reciente elegible).
- * `lookbackMs`: override del cutoff (p. ej. recuperación).
+ * `lookbackMs`: override de la ventana de escritura.
  */
 export declare function pollClosedDealsOnce(limit?: number, opts?: {
     force?: boolean;
