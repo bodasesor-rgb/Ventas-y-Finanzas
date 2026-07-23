@@ -8,3 +8,8 @@ uploads/
 data/*.json
 data/statements/
 !data/.gitkeep
+
+# clasp / Google auth (NUNCA subir tokens)
+.clasprc.json
+**/.clasprc.json
+apps-script/.clasp.json
