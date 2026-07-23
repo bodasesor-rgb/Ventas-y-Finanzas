@@ -1,6 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SHEET_HEADERS = void 0;
+exports.surnameFromEmailLocal_ = surnameFromEmailLocal_;
+exports.companyFromEmailDomain_ = companyFromEmailDomain_;
+exports.resolveClienteName = resolveClienteName;
 exports.yearFromFecha = yearFromFecha;
 exports.extractFechaFromText = extractFechaFromText;
 exports.parseFechaYHorario = parseFechaYHorario;
@@ -79,6 +82,163 @@ function contactEmail(contact) {
         }
     }
     return "";
+}
+function normalizeNameKey_(s) {
+    return s
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/\p{M}/gu, "")
+        .replace(/[^a-z0-9]/g, "");
+}
+function titleCaseName_(s) {
+    return s
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join(" ");
+}
+function nameTokens_(s) {
+    return s
+        .trim()
+        .split(/\s+/)
+        .map((t) => t.replace(/^[,.]+|[,.]+$/g, ""))
+        .filter(Boolean);
+}
+/** Domínios genéricos: no usar como “empresa” en el apellido. */
+const GENERIC_EMAIL_DOMAINS_ = new Set([
+    "gmail",
+    "googlemail",
+    "hotmail",
+    "outlook",
+    "live",
+    "msn",
+    "yahoo",
+    "ymail",
+    "icloud",
+    "me",
+    "mac",
+    "protonmail",
+    "proton",
+    "aol",
+    "mail",
+    "email",
+    "gmx",
+    "zoho",
+]);
+/**
+ * Del local-part del correo saca apellidos:
+ * - s.moisidelis → Moisidelis
+ * - alejandra.martinez3 → Martinez
+ * - ara.torres.cuevas → Torres Cuevas
+ */
+function surnameFromEmailLocal_(email, firstName) {
+    const at = email.indexOf("@");
+    if (at <= 0)
+        return "";
+    let local = email.slice(0, at).split("+")[0].trim().toLowerCase();
+    if (!local)
+        return "";
+    const parts = local
+        .split(/[._-]+/)
+        .map((p) => p.replace(/\d+$/g, ""))
+        .filter((p) => p.length >= 2);
+    const firstKey = normalizeNameKey_(firstName);
+    const surnames = [];
+    for (const part of parts) {
+        const key = normalizeNameKey_(part);
+        if (!key)
+            continue;
+        // inicial: s.moisidelis
+        if (key.length === 1)
+            continue;
+        // mismo nombre o apodo corto (ara ⊂ araceli, alejandra == alejandra)
+        if (firstKey &&
+            (key === firstKey ||
+                firstKey.startsWith(key) ||
+                key.startsWith(firstKey))) {
+            continue;
+        }
+        surnames.push(part);
+    }
+    // local pegado sin puntos: marianarordz25 — si empieza con el nombre, resto = apellido
+    if (!surnames.length && parts.length === 0) {
+        const glued = local.replace(/\d+$/g, "");
+        const gKey = normalizeNameKey_(glued);
+        if (firstKey && gKey.startsWith(firstKey) && gKey.length > firstKey.length + 2) {
+            surnames.push(glued.slice(firstKey.length));
+        }
+    }
+    else if (!surnames.length && parts.length === 1) {
+        const glued = parts[0];
+        const gKey = normalizeNameKey_(glued);
+        if (firstKey && gKey.startsWith(firstKey) && gKey.length > firstKey.length + 2) {
+            surnames.push(glued.slice(firstKey.length));
+        }
+    }
+    return titleCaseName_(surnames.join(" "));
+}
+/** agency-ia.com → Agency Ia (solo si no es gmail/hotmail/…). */
+function companyFromEmailDomain_(email) {
+    const at = email.indexOf("@");
+    if (at < 0)
+        return "";
+    const host = email
+        .slice(at + 1)
+        .trim()
+        .toLowerCase()
+        .replace(/>$/, "");
+    if (!host || !host.includes("."))
+        return "";
+    const labels = host.split(".").filter(Boolean);
+    if (labels.length < 2)
+        return "";
+    const companyLabel = labels[0];
+    if (GENERIC_EMAIL_DOMAINS_.has(companyLabel))
+        return "";
+    // agency-ia → Agency Ia
+    return titleCaseName_(companyLabel.replace(/[-_]+/g, " "));
+}
+/**
+ * Nombre completo para la columna Cliente.
+ * Si solo hay nombre de pila, completa apellido (o empresa) desde el correo.
+ */
+function resolveClienteName(contact, leadName, email) {
+    const first = (contact?.first_name || "").trim();
+    const last = (contact?.last_name || "").trim();
+    if (first && last)
+        return titleCaseName_(`${first} ${last}`);
+    const contactName = (contact?.name || "").trim();
+    const lead = (leadName || "").trim();
+    const contactTokens = nameTokens_(contactName);
+    const leadTokens = nameTokens_(lead);
+    // Preferir el que ya traiga nombre + apellido
+    let base = "";
+    if (leadTokens.length >= 2 && leadTokens.length >= contactTokens.length) {
+        base = lead;
+    }
+    else if (contactTokens.length >= 2) {
+        base = contactName;
+    }
+    else if (first) {
+        base = first;
+    }
+    else {
+        base = contactName || lead;
+    }
+    const tokens = nameTokens_(base);
+    if (tokens.length >= 2)
+        return titleCaseName_(base);
+    const given = tokens[0] || "";
+    if (!given)
+        return "";
+    const fromMail = email ? surnameFromEmailLocal_(email, given) : "";
+    if (fromMail)
+        return titleCaseName_(`${given} ${fromMail}`);
+    const company = email ? companyFromEmailDomain_(email) : "";
+    if (company)
+        return titleCaseName_(`${given} ${company}`);
+    return titleCaseName_(given);
 }
 /** Sheet: siempre día/mes/año */
 function formatFechaDMY(day, month, year) {
@@ -283,12 +443,13 @@ function mapDealToFilaVentas(lead) {
                 extractFechaFromText(customFieldValue(fields, kommoFieldIds_1.KOMMO_FIELD_IDS.LINK_COTIZACION_FINAL), yearHint) ||
                 extractFechaFromText(lead.name || "", yearHint);
     }
+    const correo = contactEmail(contact);
     return {
-        cliente: (contact?.name || lead.name || "").trim(),
+        cliente: resolveClienteName(contact, lead.name, correo),
         fechaDelEvento,
         fechaDeCierre,
         telefono: contactPhone(contact),
-        correo: contactEmail(contact),
+        correo,
         tipoDeEvento: customFieldValue(fields, kommoFieldIds_1.KOMMO_FIELD_IDS.TIPO_DE_EVENTO),
         invitados: customFieldValue(fields, kommoFieldIds_1.KOMMO_FIELD_IDS.NUMERO_INVITADOS),
         direccionDeEvento: customFieldValue(fields, kommoFieldIds_1.KOMMO_FIELD_IDS.DIRECCION_EVENTO),

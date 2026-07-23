@@ -42,6 +42,8 @@ export interface KommoCustomFieldValue {
 export interface KommoContactEmbedded {
     id?: number;
     name?: string;
+    first_name?: string;
+    last_name?: string;
     custom_fields_values?: KommoCustomFieldValue[];
 }
 export interface KommoLead {
