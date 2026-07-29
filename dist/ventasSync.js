@@ -9,6 +9,7 @@ const eventFingerprint_1 = require("./eventFingerprint");
 const fingerprintStore_1 = require("./fingerprintStore");
 const kommoApi_1 = require("./kommoApi");
 const mapDealToFila_1 = require("./mapDealToFila");
+const sheetEventosReader_1 = require("./sheetEventosReader");
 /** Evita import circular: poller marca estado tras sync exitoso. */
 function markPollSyncedSafe_(dealId, closedAt) {
     try {
@@ -69,17 +70,32 @@ async function syncDealToSheet(leadId, webhookBody) {
             const year = (0, mapDealToFila_1.yearFromFecha)(fila.fechaDeCierre) || new Date().getUTCFullYear();
             const sheetName = `Eventos ${year}`;
             const fp = (0, eventFingerprint_1.eventFingerprintFromFila)(fila);
-            const dupDeal = (0, fingerprintStore_1.findDuplicateDealId)(fp, fila.kommoDealId);
+            // 1) cache local  2) leer Eventos del Sheet (CSV)  3) Apps Script
+            let dupDeal = (0, fingerprintStore_1.findDuplicateDealId)(fp, fila.kommoDealId);
+            let dupSource = dupDeal ? "cache" : "";
+            if (!dupDeal) {
+                const inSheet = await (0, sheetEventosReader_1.findDuplicateInSheet)(fp, fila.kommoDealId, year);
+                if (inSheet) {
+                    dupDeal = inSheet.dealId;
+                    dupSource = "sheet_csv";
+                    sheetWrite.row = inSheet.row;
+                }
+            }
             if (dupDeal) {
                 sheetWrite.ok = true;
                 sheetWrite.action = "skipped_duplicate";
-                console.log("[ventas][fase2] DUPLICADO omitido (cache local)", {
+                (0, fingerprintStore_1.rememberFingerprint)(fp, dupDeal);
+                console.log("[ventas][fase2] DUPLICADO omitido", {
+                    source: dupSource,
                     dealId: fila.kommoDealId,
                     duplicateOfDealId: dupDeal,
                     fingerprint: fp,
                     cliente: fila.cliente,
+                    fechaDelEvento: fila.fechaDelEvento,
+                    fechaDeCierre: fila.fechaDeCierre,
+                    horario: fila.horario,
+                    tipoDeEvento: fila.tipoDeEvento,
                 });
-                (0, fingerprintStore_1.rememberFingerprint)(fp, dupDeal);
             }
             else {
                 const result = await (0, appsScriptClient_1.writeFilaToAppsScript)(fila.kommoDealId, values, sheetName);
@@ -91,15 +107,11 @@ async function syncDealToSheet(leadId, webhookBody) {
                     const other = result.duplicateOfDealId ||
                         fila.kommoDealId;
                     (0, fingerprintStore_1.rememberFingerprint)(fp, other);
-                    console.log("[ventas][fase2] DUPLICADO omitido (Sheet)", {
+                    console.log("[ventas][fase2] DUPLICADO omitido (Apps Script)", {
                         dealId: fila.kommoDealId,
                         row: result.row,
                         duplicateOfDealId: other,
                         cliente: fila.cliente,
-                        fechaDelEvento: fila.fechaDelEvento,
-                        fechaDeCierre: fila.fechaDeCierre,
-                        horario: fila.horario,
-                        tipoDeEvento: fila.tipoDeEvento,
                     });
                 }
                 else {
