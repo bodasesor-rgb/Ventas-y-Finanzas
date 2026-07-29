@@ -4,6 +4,8 @@ exports.extractLeadIdFromWebhook = extractLeadIdFromWebhook;
 exports.extractPartialLeadFromWebhook = extractPartialLeadFromWebhook;
 exports.fetchLeadWithContact = fetchLeadWithContact;
 exports.fetchRecentLeads = fetchRecentLeads;
+exports.listKommoWebhooks = listKommoWebhooks;
+exports.ensureKommoStatusWebhook = ensureKommoStatusWebhook;
 exports.fetchRecentlyClosedLeads = fetchRecentlyClosedLeads;
 const KOMMO_BASE = () => process.env.KOMMO_BASE_URL?.replace(/\/$/, "");
 const KOMMO_TOKEN = () => process.env.KOMMO_ACCESS_TOKEN;
@@ -139,6 +141,94 @@ async function fetchRecentLeads(limit = 10) {
     });
     const data = (await readJsonOrThrow(res, "Kommo leads"));
     return data._embedded?.leads || [];
+}
+/** Lista webhooks del account Kommo. */
+async function listKommoWebhooks() {
+    const base = KOMMO_BASE();
+    const token = KOMMO_TOKEN();
+    if (!base || !token) {
+        throw new Error("Faltan KOMMO_BASE_URL o KOMMO_ACCESS_TOKEN en variables de entorno");
+    }
+    const res = await fetch(`${base}/api/v4/webhooks`, {
+        headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/json",
+        },
+    });
+    if (res.status === 204 || res.status === 404)
+        return [];
+    const data = (await readJsonOrThrow(res, "Kommo webhooks"));
+    return data._embedded?.webhooks || [];
+}
+/**
+ * Asegura webhook status_lead → destination (subida al cerrar, al instante).
+ * Si ya existe el mismo destination, no duplica.
+ */
+async function ensureKommoStatusWebhook(destination) {
+    const base = KOMMO_BASE();
+    const token = KOMMO_TOKEN();
+    if (!base || !token) {
+        return {
+            ok: false,
+            created: false,
+            destination,
+            error: "Faltan KOMMO_BASE_URL o KOMMO_ACCESS_TOKEN",
+        };
+    }
+    const dest = destination.replace(/\/$/, "");
+    let existing = [];
+    try {
+        existing = await listKommoWebhooks();
+    }
+    catch (err) {
+        return {
+            ok: false,
+            created: false,
+            destination: dest,
+            error: err instanceof Error ? err.message : String(err),
+        };
+    }
+    const already = existing.find((w) => (w.destination || "").replace(/\/$/, "") === dest && !w.disabled);
+    if (already) {
+        return {
+            ok: true,
+            created: false,
+            destination: dest,
+            webhook: already,
+            existing,
+        };
+    }
+    const res = await fetch(`${base}/api/v4/webhooks`, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/json",
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            destination: dest,
+            settings: ["status_lead"],
+        }),
+    });
+    if (!res.ok) {
+        const text = await res.text();
+        return {
+            ok: false,
+            created: false,
+            destination: dest,
+            existing,
+            error: `Kommo webhook HTTP ${res.status}: ${text.slice(0, 300)}`,
+        };
+    }
+    const created = (await readJsonOrThrow(res, "Kommo create webhook"));
+    const webhook = created._embedded?.webhooks?.[0] || created;
+    return {
+        ok: true,
+        created: true,
+        destination: dest,
+        webhook,
+        existing,
+    };
 }
 /**
  * Leads con closed_at reciente. El caller filtra ganado (142) vs perdido (143).

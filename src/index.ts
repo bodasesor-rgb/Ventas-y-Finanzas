@@ -70,8 +70,32 @@ app.listen(PORT, "0.0.0.0", () => {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { startClosedDealsPoller } = require("./pollClosedDeals") as typeof import("./pollClosedDeals");
-    startClosedDealsPoller(60_000);
+    // 30s en proceso despierto; el cron externo mantiene el proceso vivo
+    startClosedDealsPoller(30_000);
   } catch (err) {
     console.error("[boot] poller de cierres NO arrancó", err);
+  }
+
+  // Registrar webhook Kommo → subida al instante al ganar
+  try {
+    const publicBase = (
+      process.env.PUBLIC_BASE_URL ||
+      process.env.HOSTINGER_URL ||
+      "https://lightcyan-reindeer-284498.hostingersite.com"
+    ).replace(/\/$/, "");
+    const dest = `${publicBase}/webhooks/kommo/deal-won`;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { ensureKommoStatusWebhook } = require("./kommoApi") as typeof import("./kommoApi");
+    void ensureKommoStatusWebhook(dest).then((r) => {
+      if (r.ok) {
+        console.log(
+          `[boot] Kommo webhook ${r.created ? "creado" : "ya existía"} → ${r.destination}`
+        );
+      } else {
+        console.warn("[boot] Kommo webhook NO registrado:", r.error);
+      }
+    });
+  } catch (err) {
+    console.error("[boot] ensure webhook falló", err);
   }
 });

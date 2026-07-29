@@ -48,6 +48,11 @@ export declare function syncLatestMissingClosedDeal(limit?: number): Promise<Pol
  * Llamar desde cada request HTTP.
  */
 export declare function kickPollIfStale(staleMs?: number): boolean;
+/**
+ * Tick síncrono para cron externo: sube TODOS los faltantes de la ventana ya.
+ * Pensado para GitHub Actions / Apps Script cada 1–5 min.
+ */
+export declare function runPollTick(): Promise<PollState["lastResult"]>;
 /** Arranca poll cada `intervalMs` + watchdog + listo para kick por request. */
 export declare function startClosedDealsPoller(intervalMs?: number): void;
 export declare function getWriteLookbackMs(): number;

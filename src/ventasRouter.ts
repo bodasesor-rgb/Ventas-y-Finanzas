@@ -1,9 +1,11 @@
 import { Router, type Request, type Response } from "express";
 import {
+  ensureKommoStatusWebhook,
   extractLeadIdFromWebhook,
   fetchLeadWithContact,
   fetchRecentLeads,
   fetchRecentlyClosedLeads,
+  listKommoWebhooks,
 } from "./kommoApi";
 import { mapDealToFilaVentas } from "./mapDealToFila";
 import type { KommoWebhookBody } from "./types";
@@ -12,7 +14,7 @@ import {
   getPollStatus,
   getWriteLookbackMs,
   isClosedWonLead,
-  pollClosedDealsOnce,
+  runPollTick,
   syncLatestMissingClosedDeal,
 } from "./pollClosedDeals";
 import {
@@ -21,6 +23,23 @@ import {
   rememberWebhookAccepted,
   syncDealToSheet,
 } from "./ventasSync";
+
+function publicBaseUrl_(req?: { protocol?: string; get?: (h: string) => string | undefined }): string {
+  const env = (
+    process.env.PUBLIC_BASE_URL ||
+    process.env.HOSTINGER_URL ||
+    ""
+  ).trim();
+  if (env) return env.replace(/\/$/, "");
+  if (req?.get) {
+    const host = req.get("x-forwarded-host") || req.get("host");
+    if (host) {
+      const proto = req.get("x-forwarded-proto") || req.protocol || "https";
+      return `${proto}://${host}`.replace(/\/$/, "");
+    }
+  }
+  return "https://lightcyan-reindeer-284498.hostingersite.com";
+}
 
 export const ventasRouter = Router();
 
@@ -78,12 +97,36 @@ ventasRouter.post(
       phase: PHASE(),
       dealId: String(leadId),
       message:
-        "Webhook aceptado. Escribiendo al Sheet en segundo plano. Revisa GET /api/ventas/last",
+        "Webhook aceptado. Si está ganado, escribe al Sheet ya. Revisa GET /api/ventas/last",
     });
 
-    void syncDealToSheet(leadId, body).catch((err) => {
-      console.error("[ventas] Error en sync background", err);
-    });
+    // Solo ganado → Sheet; si no, igual corre un tick por si hubo otro cierre
+    void (async () => {
+      try {
+        const lead = await fetchLeadWithContact(leadId);
+        if (isClosedWonLead(lead)) {
+          await syncDealToSheet(leadId, body);
+        } else {
+          console.log(
+            "[ventas] webhook status no-ganado, skip write",
+            leadId,
+            lead.status_id
+          );
+        }
+      } catch (err) {
+        console.error("[ventas] Error en sync background", err);
+        try {
+          await syncDealToSheet(leadId, body);
+        } catch (err2) {
+          console.error("[ventas] sync fallback fail", err2);
+        }
+      }
+      try {
+        await runPollTick();
+      } catch (err) {
+        console.error("[ventas] tick tras webhook fail", err);
+      }
+    })();
   }
 );
 
@@ -170,14 +213,11 @@ ventasRouter.get("/api/ventas/poll", (_req, res) => {
 });
 
 /**
- * Pasada del poller: destraba candado; sube hasta 5 faltantes de la ventana.
+ * Pasada del poller: destraba candado; sube faltantes de la ventana ya.
  */
 ventasRouter.post("/api/ventas/poll", async (_req, res) => {
   try {
-    const result = await pollClosedDealsOnce(40, {
-      force: true,
-      onlyLatestMissing: false,
-    });
+    const result = await runPollTick();
     res.status(200).json({ ok: true, result, poll: getPollStatus() });
   } catch (err) {
     res.status(500).json({
@@ -189,14 +229,75 @@ ventasRouter.post("/api/ventas/poll", async (_req, res) => {
 
 ventasRouter.get("/api/ventas/poll-now", async (_req, res) => {
   try {
-    const result = await pollClosedDealsOnce(40, {
-      force: true,
-      onlyLatestMissing: false,
-    });
+    const result = await runPollTick();
     res.status(200).json({ ok: true, result, poll: getPollStatus() });
   } catch (err) {
     res.status(500).json({
       ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+/**
+ * Cron externo (GitHub Actions / Apps Script): despierta Hostinger y sube
+ * cierres faltantes al momento. GET o POST.
+ */
+async function handleTick(_req: Request, res: Response): Promise<void> {
+  try {
+    const result = await runPollTick();
+    res.status(200).json({
+      ok: true,
+      at: new Date().toISOString(),
+      result,
+      poll: getPollStatus(),
+      message: "Tick OK — cierres faltantes de la ventana sincronizados",
+    });
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+ventasRouter.get("/api/ventas/tick", handleTick);
+ventasRouter.post("/api/ventas/tick", handleTick);
+
+/** Registra en Kommo el webhook status_lead → este servidor (subida al instante). */
+ventasRouter.post("/api/ventas/ensure-webhook", async (req, res) => {
+  const dest = `${publicBaseUrl_(req)}/webhooks/kommo/deal-won`;
+  try {
+    const result = await ensureKommoStatusWebhook(dest);
+    res.status(result.ok ? 200 : 502).json({
+      ...result,
+      webhookUrl: dest,
+      hint: result.ok
+        ? "Kommo avisará al cerrar/cambiar status → Sheet en segundos"
+        : "Si falla por permisos, en Kommo: Ajustes → Integraciones → Webhooks → URL de arriba + evento status_lead",
+    });
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      webhookUrl: dest,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+ventasRouter.get("/api/ventas/ensure-webhook", async (req, res) => {
+  const dest = `${publicBaseUrl_(req)}/webhooks/kommo/deal-won`;
+  try {
+    const existing = await listKommoWebhooks();
+    const result = await ensureKommoStatusWebhook(dest);
+    res.status(result.ok ? 200 : 502).json({
+      ...result,
+      webhookUrl: dest,
+      allWebhooks: existing,
+    });
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      webhookUrl: dest,
       error: err instanceof Error ? err.message : String(err),
     });
   }

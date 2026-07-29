@@ -11,7 +11,10 @@
  *   - Gasto manual no se toca
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-07-23-v28';
+var SCRIPT_VERSION = '2026-07-29-v29';
+/** Hostinger: tick cada minuto para que los cierres suban al Sheet al momento. */
+var VENTAS_TICK_URL =
+  'https://lightcyan-reindeer-284498.hostingersite.com/api/ventas/tick';
 var METRICAS_MARKER = 'BOT_METRICAS_V14';
 var METRICAS_SEMANAL_MARKER = 'BOT_METRICAS_SEMANAL_V28';
 var PNL_MARKER = 'BOT_PNL_MESES_V17';
@@ -158,6 +161,49 @@ function doGet() {
 
 function testPing() {
   Logger.log(SCRIPT_VERSION);
+}
+
+/**
+ * Keep-alive: despierta Hostinger y fuerza sync de cierres.
+ * Con trigger cada 1 min los cierres suben al Sheet enseguida
+ * aunque nadie abra el sitio.
+ */
+function keepAliveVentasPoll() {
+  try {
+    var res = UrlFetchApp.fetch(VENTAS_TICK_URL, {
+      method: 'get',
+      muteHttpExceptions: true,
+      followRedirects: true,
+    });
+    Logger.log(
+      'keepAliveVentasPoll HTTP ' + res.getResponseCode() + ' ' + res.getContentText().slice(0, 200)
+    );
+    return {
+      ok: res.getResponseCode() === 200,
+      code: res.getResponseCode(),
+      body: res.getContentText().slice(0, 500),
+    };
+  } catch (err) {
+    Logger.log('keepAliveVentasPoll error: ' + err);
+    return { ok: false, error: String(err) };
+  }
+}
+
+/** Instala / reinstala trigger cada 1 minuto. Ejecutar una vez. */
+function installVentasKeepAliveTrigger() {
+  var handlers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < handlers.length; i++) {
+    if (handlers[i].getHandlerFunction() === 'keepAliveVentasPoll') {
+      ScriptApp.deleteTrigger(handlers[i]);
+    }
+  }
+  ScriptApp.newTrigger('keepAliveVentasPoll').timeBased().everyMinutes(1).create();
+  return {
+    ok: true,
+    version: SCRIPT_VERSION,
+    message: 'Trigger keepAliveVentasPoll cada 1 minuto instalado',
+    tickUrl: VENTAS_TICK_URL,
+  };
 }
 
 /* ===================== Eventos helpers ===================== */
@@ -1094,6 +1140,25 @@ function doPost(e) {
           '»: ' +
           ER_SHEET +
           '. Ábrela abajo o con el link del Sheet.',
+      });
+    }
+    if (data && data.action === 'installVentasKeepAlive') {
+      var installed = installVentasKeepAliveTrigger();
+      return json_({
+        ok: true,
+        version: SCRIPT_VERSION,
+        action: 'installVentasKeepAlive',
+        message: installed.message,
+        tickUrl: VENTAS_TICK_URL,
+      });
+    }
+    if (data && data.action === 'keepAliveVentasPoll') {
+      var tick = keepAliveVentasPoll();
+      return json_({
+        ok: !!tick.ok,
+        version: SCRIPT_VERSION,
+        action: 'keepAliveVentasPoll',
+        tick: tick,
       });
     }
     if (data && data.action === 'setupMetricasAuto') {

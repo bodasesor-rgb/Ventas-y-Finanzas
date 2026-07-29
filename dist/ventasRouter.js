@@ -7,6 +7,21 @@ const mapDealToFila_1 = require("./mapDealToFila");
 const appsScriptClient_1 = require("./appsScriptClient");
 const pollClosedDeals_1 = require("./pollClosedDeals");
 const ventasSync_1 = require("./ventasSync");
+function publicBaseUrl_(req) {
+    const env = (process.env.PUBLIC_BASE_URL ||
+        process.env.HOSTINGER_URL ||
+        "").trim();
+    if (env)
+        return env.replace(/\/$/, "");
+    if (req?.get) {
+        const host = req.get("x-forwarded-host") || req.get("host");
+        if (host) {
+            const proto = req.get("x-forwarded-proto") || req.protocol || "https";
+            return `${proto}://${host}`.replace(/\/$/, "");
+        }
+    }
+    return "https://lightcyan-reindeer-284498.hostingersite.com";
+}
 exports.ventasRouter = (0, express_1.Router)();
 function appsScriptUrl() {
     return (process.env.URL_BODASESOR_DIRECCION_SHEETS ||
@@ -52,11 +67,35 @@ exports.ventasRouter.post("/webhooks/kommo/deal-won", (req, res) => {
         accepted: true,
         phase: PHASE(),
         dealId: String(leadId),
-        message: "Webhook aceptado. Escribiendo al Sheet en segundo plano. Revisa GET /api/ventas/last",
+        message: "Webhook aceptado. Si está ganado, escribe al Sheet ya. Revisa GET /api/ventas/last",
     });
-    void (0, ventasSync_1.syncDealToSheet)(leadId, body).catch((err) => {
-        console.error("[ventas] Error en sync background", err);
-    });
+    // Solo ganado → Sheet; si no, igual corre un tick por si hubo otro cierre
+    void (async () => {
+        try {
+            const lead = await (0, kommoApi_1.fetchLeadWithContact)(leadId);
+            if ((0, pollClosedDeals_1.isClosedWonLead)(lead)) {
+                await (0, ventasSync_1.syncDealToSheet)(leadId, body);
+            }
+            else {
+                console.log("[ventas] webhook status no-ganado, skip write", leadId, lead.status_id);
+            }
+        }
+        catch (err) {
+            console.error("[ventas] Error en sync background", err);
+            try {
+                await (0, ventasSync_1.syncDealToSheet)(leadId, body);
+            }
+            catch (err2) {
+                console.error("[ventas] sync fallback fail", err2);
+            }
+        }
+        try {
+            await (0, pollClosedDeals_1.runPollTick)();
+        }
+        catch (err) {
+            console.error("[ventas] tick tras webhook fail", err);
+        }
+    })();
 });
 async function handleManualSync(req, res) {
     const dealId = Number(req.params.dealId);
@@ -137,14 +176,11 @@ exports.ventasRouter.get("/api/ventas/poll", (_req, res) => {
     });
 });
 /**
- * Pasada del poller: destraba candado; sube hasta 5 faltantes de la ventana.
+ * Pasada del poller: destraba candado; sube faltantes de la ventana ya.
  */
 exports.ventasRouter.post("/api/ventas/poll", async (_req, res) => {
     try {
-        const result = await (0, pollClosedDeals_1.pollClosedDealsOnce)(40, {
-            force: true,
-            onlyLatestMissing: false,
-        });
+        const result = await (0, pollClosedDeals_1.runPollTick)();
         res.status(200).json({ ok: true, result, poll: (0, pollClosedDeals_1.getPollStatus)() });
     }
     catch (err) {
@@ -156,15 +192,76 @@ exports.ventasRouter.post("/api/ventas/poll", async (_req, res) => {
 });
 exports.ventasRouter.get("/api/ventas/poll-now", async (_req, res) => {
     try {
-        const result = await (0, pollClosedDeals_1.pollClosedDealsOnce)(40, {
-            force: true,
-            onlyLatestMissing: false,
-        });
+        const result = await (0, pollClosedDeals_1.runPollTick)();
         res.status(200).json({ ok: true, result, poll: (0, pollClosedDeals_1.getPollStatus)() });
     }
     catch (err) {
         res.status(500).json({
             ok: false,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+});
+/**
+ * Cron externo (GitHub Actions / Apps Script): despierta Hostinger y sube
+ * cierres faltantes al momento. GET o POST.
+ */
+async function handleTick(_req, res) {
+    try {
+        const result = await (0, pollClosedDeals_1.runPollTick)();
+        res.status(200).json({
+            ok: true,
+            at: new Date().toISOString(),
+            result,
+            poll: (0, pollClosedDeals_1.getPollStatus)(),
+            message: "Tick OK — cierres faltantes de la ventana sincronizados",
+        });
+    }
+    catch (err) {
+        res.status(500).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+}
+exports.ventasRouter.get("/api/ventas/tick", handleTick);
+exports.ventasRouter.post("/api/ventas/tick", handleTick);
+/** Registra en Kommo el webhook status_lead → este servidor (subida al instante). */
+exports.ventasRouter.post("/api/ventas/ensure-webhook", async (req, res) => {
+    const dest = `${publicBaseUrl_(req)}/webhooks/kommo/deal-won`;
+    try {
+        const result = await (0, kommoApi_1.ensureKommoStatusWebhook)(dest);
+        res.status(result.ok ? 200 : 502).json({
+            ...result,
+            webhookUrl: dest,
+            hint: result.ok
+                ? "Kommo avisará al cerrar/cambiar status → Sheet en segundos"
+                : "Si falla por permisos, en Kommo: Ajustes → Integraciones → Webhooks → URL de arriba + evento status_lead",
+        });
+    }
+    catch (err) {
+        res.status(502).json({
+            ok: false,
+            webhookUrl: dest,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+});
+exports.ventasRouter.get("/api/ventas/ensure-webhook", async (req, res) => {
+    const dest = `${publicBaseUrl_(req)}/webhooks/kommo/deal-won`;
+    try {
+        const existing = await (0, kommoApi_1.listKommoWebhooks)();
+        const result = await (0, kommoApi_1.ensureKommoStatusWebhook)(dest);
+        res.status(result.ok ? 200 : 502).json({
+            ...result,
+            webhookUrl: dest,
+            allWebhooks: existing,
+        });
+    }
+    catch (err) {
+        res.status(502).json({
+            ok: false,
+            webhookUrl: dest,
             error: err instanceof Error ? err.message : String(err),
         });
     }

@@ -9,6 +9,7 @@ exports.markDealSynced = markDealSynced;
 exports.pollClosedDealsOnce = pollClosedDealsOnce;
 exports.syncLatestMissingClosedDeal = syncLatestMissingClosedDeal;
 exports.kickPollIfStale = kickPollIfStale;
+exports.runPollTick = runPollTick;
 exports.startClosedDealsPoller = startClosedDealsPoller;
 exports.getWriteLookbackMs = getWriteLookbackMs;
 const fs_1 = __importDefault(require("fs"));
@@ -28,8 +29,8 @@ const POLL_STALE_MS = 90_000;
  * Hostinger puede congelar Node muchas horas; 6h no bastaba.
  */
 const WRITE_LOOKBACK_MS = 72 * 60 * 60_000;
-/** Máx. cierres nuevos por pasada (evita timeout; la siguiente pasada sigue). */
-const MAX_SYNC_PER_POLL = 5;
+/** Máx. cierres nuevos por pasada (evita timeout; tick/cron sigue enseguida). */
+const MAX_SYNC_PER_POLL = 15;
 let memoryState = {
     syncedUpdatedAt: {},
     lastPollAt: null,
@@ -286,7 +287,7 @@ function kickPollIfStale(staleMs = POLL_STALE_MS) {
     if (!stale || polling)
         return false;
     console.log("[ventas-poll] kick por request (poll stale)");
-    void pollClosedDealsOnce(40, {
+    void pollClosedDealsOnce(50, {
         force: false,
         onlyLatestMissing: false,
     }).catch((err) => {
@@ -295,6 +296,17 @@ function kickPollIfStale(staleMs = POLL_STALE_MS) {
         pollingStartedAt = 0;
     });
     return true;
+}
+/**
+ * Tick síncrono para cron externo: sube TODOS los faltantes de la ventana ya.
+ * Pensado para GitHub Actions / Apps Script cada 1–5 min.
+ */
+async function runPollTick() {
+    return pollClosedDealsOnce(50, {
+        force: true,
+        onlyLatestMissing: false,
+        maxSync: MAX_SYNC_PER_POLL,
+    });
 }
 /** Arranca poll cada `intervalMs` + watchdog + listo para kick por request. */
 function startClosedDealsPoller(intervalMs = 60_000) {

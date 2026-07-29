@@ -1,0 +1,30 @@
+# Despierta Hostinger y sube cierres Kommo→Sheet sin esperar tráfico humano.
+# Sin esto el Node se congela y los cierres tardan horas/días.
+name: ventas-poll-keepalive
+
+on:
+  schedule:
+    # Cada 5 minutos (GitHub a veces retrasa un poco; sigue siendo << horas)
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Tick Hostinger poller
+        run: |
+          set -e
+          URL="${VENTAS_TICK_URL:-https://lightcyan-reindeer-284498.hostingersite.com/api/ventas/tick}"
+          echo "GET $URL"
+          code=$(curl -sS -o /tmp/tick.json -w "%{http_code}" --max-time 90 "$URL" || echo "000")
+          echo "HTTP $code"
+          head -c 2000 /tmp/tick.json || true
+          echo
+          if [ "$code" != "200" ]; then
+            echo "tick falló"
+            exit 1
+          fi
+        env:
+          VENTAS_TICK_URL: ${{ vars.VENTAS_TICK_URL }}
