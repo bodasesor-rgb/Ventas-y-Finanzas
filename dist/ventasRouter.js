@@ -7,6 +7,9 @@ const mapDealToFila_1 = require("./mapDealToFila");
 const appsScriptClient_1 = require("./appsScriptClient");
 const pollClosedDeals_1 = require("./pollClosedDeals");
 const ventasSync_1 = require("./ventasSync");
+const fingerprintStore_1 = require("./fingerprintStore");
+const eventFingerprint_1 = require("./eventFingerprint");
+const sheetEventosReader_1 = require("./sheetEventosReader");
 function publicBaseUrl_(req) {
     const env = (process.env.PUBLIC_BASE_URL ||
         process.env.HOSTINGER_URL ||
@@ -262,6 +265,64 @@ exports.ventasRouter.get("/api/ventas/ensure-webhook", async (req, res) => {
         res.status(502).json({
             ok: false,
             webhookUrl: dest,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+});
+/** Estado anti-duplicados: cuántas huellas hay en Sheet + cache. */
+exports.ventasRouter.get("/api/ventas/dedupe-status", async (_req, res) => {
+    try {
+        const idx = await (0, sheetEventosReader_1.loadEventosSheetIndex)(2026, true);
+        const local = (0, fingerprintStore_1.getFingerprintStoreStatus)();
+        res.status(200).json({
+            ok: true,
+            sheetFingerprints: idx.rowCount,
+            sheetDealIds: Object.keys(idx.byDealId).length,
+            localCache: local,
+            rule: "cliente + fecha evento + fecha cierre + horario + tipo",
+        });
+    }
+    catch (err) {
+        res.status(502).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+});
+/** ¿Este deal sería duplicado si se subiera hoy? */
+exports.ventasRouter.get("/api/ventas/dedupe-check/:dealId", async (req, res) => {
+    const dealId = Number(req.params.dealId);
+    if (!Number.isFinite(dealId) || dealId <= 0) {
+        res.status(400).json({ ok: false, error: "dealId inválido" });
+        return;
+    }
+    try {
+        const lead = await (0, kommoApi_1.fetchLeadWithContact)(dealId);
+        const fila = (0, mapDealToFila_1.mapDealToFilaVentas)(lead);
+        const fp = (0, eventFingerprint_1.eventFingerprintFromFila)(fila);
+        const year = Number(String(fila.fechaDeCierre).split("/")[2]) || 2026;
+        const dup = await (0, sheetEventosReader_1.findDuplicateInSheet)(fp, String(dealId), year);
+        // Simular otro dealId para ver si la huella ya está
+        const wouldDupIfOtherId = await (0, sheetEventosReader_1.findDuplicateInSheet)(fp, "00000000", year);
+        res.status(200).json({
+            ok: true,
+            dealId: String(dealId),
+            cliente: fila.cliente,
+            fingerprint: fp,
+            wouldUpdateOwnRow: !dup,
+            wouldSkipIfDifferentDealId: Boolean(wouldDupIfOtherId),
+            duplicateOf: wouldDupIfOtherId,
+            fields: {
+                fechaDelEvento: fila.fechaDelEvento,
+                fechaDeCierre: fila.fechaDeCierre,
+                horario: fila.horario,
+                tipoDeEvento: fila.tipoDeEvento,
+            },
+        });
+    }
+    catch (err) {
+        res.status(502).json({
+            ok: false,
             error: err instanceof Error ? err.message : String(err),
         });
     }
