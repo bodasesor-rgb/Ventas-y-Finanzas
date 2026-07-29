@@ -1,14 +1,13 @@
 /**
  * ============================================================
  * Apps Script — Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-07-23-v28
+ * VERSION: 2026-07-29-v29
  * ============================================================
  * PEGAR TODO ESTE ARCHIVO (borrar lo anterior -> pegar -> Guardar)
  *
- * REGLA v28:
- *   - Encabezado de semana = fila de FECHAS (ej. 20/07/26), no la de numeros 1..53
- *   - Formulas SUMIFS por Fecha de cierre en Eventos
- *   - Gasto manual no se toca
+ * REGLA v29:
+ *   - keepAliveVentasPoll cada 1 min → Hostinger sube cierres al momento
+ *   - v28: encabezado semana = fechas; SUMIFS Eventos; Gasto manual intacto
  * ============================================================
  */
 var SCRIPT_VERSION = '2026-07-29-v29';
