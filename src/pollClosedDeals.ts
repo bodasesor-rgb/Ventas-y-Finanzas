@@ -4,22 +4,22 @@ import { fetchRecentLeads, fetchRecentlyClosedLeads } from "./kommoApi";
 import type { KommoLead } from "./types";
 import { syncDealToSheet } from "./ventasSync";
 
-/** Status ganado por defecto en Kommo/amoCRM */
+/** Status ganado / perdido por defecto en Kommo/amoCRM */
 const DEFAULT_WON_STATUS_ID = 142;
+const DEFAULT_LOST_STATUS_ID = 143;
 
 const STATE_PATH = path.join(process.cwd(), "data", "ventas-poll.json");
 /** Si un poll queda colgado más de esto, se destraba. */
 const POLL_LOCK_MAX_MS = 90_000;
-/** Si no hubo poll reciente, el watchdog fuerza uno. */
-const POLL_STALE_MS = 3 * 60_000;
+/** Si no hubo poll reciente, el watchdog / request fuerza uno. */
+const POLL_STALE_MS = 90_000;
 /**
- * Ventana de escritura: cualquier cierre dentro de estas horas que aún
- * no esté en estado se sube al Sheet. Más allá = histórico (solo marcar).
- *
- * Antes usábamos lastPollAt − 2 min: si el poll fallaba un momento,
- * el cierre se “sembraba” como viejo y nunca se subía.
+ * Ventana de escritura: cierres dentro de estas horas que falten → Sheet.
+ * Hostinger puede congelar Node muchas horas; 6h no bastaba.
  */
-const WRITE_LOOKBACK_MS = 6 * 60 * 60_000;
+const WRITE_LOOKBACK_MS = 72 * 60 * 60_000;
+/** Máx. cierres nuevos por pasada (evita timeout; la siguiente pasada sigue). */
+const MAX_SYNC_PER_POLL = 5;
 
 interface PollState {
   /**
@@ -79,8 +79,9 @@ function saveState(): void {
 }
 
 export function isClosedWonLead(lead: KommoLead): boolean {
-  if (lead.closed_at && lead.closed_at > 0) return true;
+  if (lead.status_id === DEFAULT_LOST_STATUS_ID) return false;
   if (lead.status_id === DEFAULT_WON_STATUS_ID) return true;
+  // Sin status 142 no asumimos ganado solo por closed_at (puede ser perdido).
   return false;
 }
 
@@ -88,18 +89,25 @@ export function getPollStatus(): PollState & {
   polling: boolean;
   pollingStartedAt: number | null;
   lockAgeMs: number | null;
+  lookbackHours: number;
+  pollAgeMs: number | null;
 } {
+  loadState();
+  const last = memoryState.lastPollAt
+    ? Date.parse(memoryState.lastPollAt)
+    : NaN;
   return {
     ...memoryState,
     polling,
     pollingStartedAt: polling ? pollingStartedAt : null,
     lockAgeMs: polling ? Date.now() - pollingStartedAt : null,
+    lookbackHours: Math.round(WRITE_LOOKBACK_MS / 3600000),
+    pollAgeMs: Number.isFinite(last) ? Date.now() - last : null,
   };
 }
 
 /**
  * Marca un deal como ya subido (webhook / sync manual / poll).
- * Evita que el poller lo re-suba o lo ignore por estado inconsistente.
  * No re-lee disco si el estado ya está en memoria (evita pisar un poll en curso).
  */
 export function markDealSynced(
@@ -144,20 +152,17 @@ function leadRecency_(lead: KommoLead): number {
 }
 
 /**
- * Busca deals cerrados recientes y escribe al Sheet los que falten
- * dentro de la ventana de lookback. Más viejos: solo marcar estado
- * (no re-subir histórico).
- *
- * `force` solo destraba candado stuck.
- * `onlyLatestMissing`: como máximo 1 fila (el cierre más reciente elegible).
- * `lookbackMs`: override de la ventana de escritura.
+ * Busca deals ganados recientes y escribe al Sheet los que falten
+ * dentro de la ventana de lookback.
  */
 export async function pollClosedDealsOnce(
   limit = 40,
   opts?: {
     force?: boolean;
+    /** Si true: máx. 1 escritura. Si false: hasta MAX_SYNC_PER_POLL. */
     onlyLatestMissing?: boolean;
     lookbackMs?: number;
+    maxSync?: number;
   }
 ): Promise<PollState["lastResult"]> {
   releaseStuckLock_(Boolean(opts?.force));
@@ -188,6 +193,9 @@ export async function pollClosedDealsOnce(
     loadState();
     const lookbackMs = opts?.lookbackMs ?? WRITE_LOOKBACK_MS;
     const cutoff = Math.floor((Date.now() - lookbackMs) / 1000);
+    const maxSync =
+      opts?.maxSync ??
+      (opts?.onlyLatestMissing ? 1 : MAX_SYNC_PER_POLL);
 
     let leads: KommoLead[];
     try {
@@ -205,18 +213,18 @@ export async function pollClosedDealsOnce(
       .sort((a, b) => leadRecency_(b) - leadRecency_(a));
 
     for (const lead of closed) {
+      if (synced.length >= maxSync) break;
+
       const id = String(lead.id);
       const closedAt = closedAtSec_(lead);
       const prev = memoryState.syncedUpdatedAt[id] || 0;
 
-      // Ganado sin closed_at aún: intentar subir (no marcar con updated_at —
-      // eso bloqueaba el sync cuando Kommo rellenaba closed_at después).
+      // Ganado sin closed_at: intentar subir (no marcar con updated_at).
       if (!closedAt) {
         if (prev > 0) {
           skippedAlreadySynced++;
           continue;
         }
-        // Si updated_at es viejo fuera de lookback, no spamear Sheet
         const touched = lead.updated_at || 0;
         if (touched > 0 && touched < cutoff) {
           seededOld++;
@@ -235,11 +243,9 @@ export async function pollClosedDealsOnce(
             `${id}: ${err instanceof Error ? err.message : String(err)}`
           );
         }
-        if (opts?.onlyLatestMissing) break;
         continue;
       }
 
-      // Ya procesamos este cierre
       if (prev >= closedAt) {
         skippedAlreadySynced++;
         continue;
@@ -252,7 +258,6 @@ export async function pollClosedDealsOnce(
         continue;
       }
 
-      // Cierre nuevo en la ventana → escribir
       try {
         const result = await syncDealToSheet(lead.id);
         if (result.sheetWrite.ok || !result.sheetWrite.attempted) {
@@ -266,8 +271,6 @@ export async function pollClosedDealsOnce(
           `${id}: ${err instanceof Error ? err.message : String(err)}`
         );
       }
-
-      if (opts?.onlyLatestMissing) break;
     }
 
     memoryState.lastPollAt = new Date().toISOString();
@@ -309,8 +312,7 @@ export async function pollClosedDealsOnce(
 }
 
 /**
- * Solo el cierre más reciente de las últimas 2h que aún no se subió.
- * No re-sube cerrados anteriores.
+ * Solo el cierre más reciente de las últimas 48h que aún no se subió.
  */
 export async function syncLatestMissingClosedDeal(
   limit = 40
@@ -318,22 +320,46 @@ export async function syncLatestMissingClosedDeal(
   return pollClosedDealsOnce(limit, {
     force: true,
     onlyLatestMissing: true,
-    lookbackMs: 2 * 60 * 60_000,
+    lookbackMs: 48 * 60 * 60_000,
   });
 }
 
-/** Arranca poll cada `intervalMs` (default 60s) + watchdog si se queda quieto. */
+/**
+ * Si el poll está viejo (Hostinger congela timers), dispara uno en background.
+ * Llamar desde cada request HTTP.
+ */
+export function kickPollIfStale(staleMs = POLL_STALE_MS): boolean {
+  loadState();
+  releaseStuckLock_(false);
+  const last = memoryState.lastPollAt
+    ? Date.parse(memoryState.lastPollAt)
+    : 0;
+  const stale = !last || Date.now() - last > staleMs;
+  if (!stale || polling) return false;
+  console.log("[ventas-poll] kick por request (poll stale)");
+  void pollClosedDealsOnce(40, {
+    force: false,
+    onlyLatestMissing: false,
+  }).catch((err) => {
+    console.error("[ventas-poll] kick error", err);
+    polling = false;
+    pollingStartedAt = 0;
+  });
+  return true;
+}
+
+/** Arranca poll cada `intervalMs` + watchdog + listo para kick por request. */
 export function startClosedDealsPoller(intervalMs = 60_000): void {
   if (pollTimer) return;
   loadState();
   console.log(
-    `[ventas-poll] activo cada ${Math.round(intervalMs / 1000)}s — lookback ${Math.round(WRITE_LOOKBACK_MS / 3600000)}h, solo cierres nuevos`
+    `[ventas-poll] activo cada ${Math.round(intervalMs / 1000)}s — lookback ${Math.round(WRITE_LOOKBACK_MS / 3600000)}h, hasta ${MAX_SYNC_PER_POLL} cierres/pasada + kick por request`
   );
 
   const run = (force = false) => {
     void pollClosedDealsOnce(40, {
       force,
-      onlyLatestMissing: true,
+      onlyLatestMissing: false,
     }).catch((err) => {
       console.error("[ventas-poll] error", err);
       polling = false;
@@ -341,7 +367,7 @@ export function startClosedDealsPoller(intervalMs = 60_000): void {
     });
   };
 
-  setTimeout(() => run(false), 8_000);
+  setTimeout(() => run(false), 3_000);
   pollTimer = setInterval(() => run(false), intervalMs);
 
   if (!watchdogTimer) {
@@ -357,6 +383,10 @@ export function startClosedDealsPoller(intervalMs = 60_000): void {
         );
         run(false);
       }
-    }, 60_000);
+    }, 45_000);
   }
+}
+
+export function getWriteLookbackMs(): number {
+  return WRITE_LOOKBACK_MS;
 }
