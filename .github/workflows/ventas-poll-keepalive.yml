@@ -4,8 +4,9 @@ name: ventas-poll-keepalive
 
 on:
   schedule:
-    # Cada 5 minutos (GitHub a veces retrasa un poco; sigue siendo << horas)
-    - cron: "*/5 * * * *"
+    # Cada minuto: despierta Hostinger para que el cierre suba al Sheet ya
+    # (GitHub puede retrasar 1–2 min bajo carga; sigue siendo al momento, no días)
+    - cron: "* * * * *"
   workflow_dispatch:
 
 jobs:
