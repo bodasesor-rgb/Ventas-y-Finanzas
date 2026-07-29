@@ -10,6 +10,21 @@ const app = (0, express_1.default)();
 const PORT = Number(process.env.PORT) || 3000;
 app.use(express_1.default.json({ limit: "2mb" }));
 app.use(express_1.default.urlencoded({ extended: true }));
+/**
+ * Hostinger congela Node sin tráfico: setInterval deja de correr.
+ * En cada request, si el poll está viejo, disparamos uno en background.
+ */
+app.use((_req, _res, next) => {
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { kickPollIfStale } = require("./pollClosedDeals");
+        kickPollIfStale(90_000);
+    }
+    catch {
+        // poller opcional al boot
+    }
+    next();
+});
 // Ventas siempre (crítico)
 app.use(ventasRouter_1.ventasRouter);
 // P&L opcional: si falla el require, la app de ventas sigue viva

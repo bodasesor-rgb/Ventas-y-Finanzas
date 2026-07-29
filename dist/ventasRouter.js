@@ -130,20 +130,20 @@ exports.ventasRouter.get("/api/ventas/poll", (_req, res) => {
         poll,
         diagnosis: {
             webhookLastSource: (0, ventasSync_1.getLastWebhookAccepted)()?.source ?? null,
-            lookbackHours: 6,
-            note: "Si lastAccepted.source nunca es 'webhook', Kommo no está pegando al endpoint. El poller sube cierres de las últimas 6h que falten.",
+            lookbackHours: poll.lookbackHours,
+            pollAgeMs: poll.pollAgeMs,
+            note: "Si lastAccepted.source nunca es 'webhook', Kommo no está pegando al endpoint. El poller sube cierres ganados (72h) en cada request + timer.",
         },
     });
 });
 /**
- * Pasada del poller: destraba candado si hace falta.
- * Solo el cierre más reciente en la ventana; no re-sube históricos.
+ * Pasada del poller: destraba candado; sube hasta 5 faltantes de la ventana.
  */
 exports.ventasRouter.post("/api/ventas/poll", async (_req, res) => {
     try {
         const result = await (0, pollClosedDeals_1.pollClosedDealsOnce)(40, {
             force: true,
-            onlyLatestMissing: true,
+            onlyLatestMissing: false,
         });
         res.status(200).json({ ok: true, result, poll: (0, pollClosedDeals_1.getPollStatus)() });
     }
@@ -158,12 +158,49 @@ exports.ventasRouter.get("/api/ventas/poll-now", async (_req, res) => {
     try {
         const result = await (0, pollClosedDeals_1.pollClosedDealsOnce)(40, {
             force: true,
-            onlyLatestMissing: true,
+            onlyLatestMissing: false,
         });
         res.status(200).json({ ok: true, result, poll: (0, pollClosedDeals_1.getPollStatus)() });
     }
     catch (err) {
         res.status(500).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+});
+/** Lista cierres ganados recientes en Kommo (diagnóstico). */
+exports.ventasRouter.get("/api/ventas/closed", async (req, res) => {
+    const hours = Math.min(Math.max(Number(req.query.hours) || 72, 1), 168);
+    try {
+        const leads = await (0, kommoApi_1.fetchRecentlyClosedLeads)(50, hours * 60 * 60_000);
+        const won = leads.filter(pollClosedDeals_1.isClosedWonLead);
+        const poll = (0, pollClosedDeals_1.getPollStatus)();
+        const items = won.map((l) => {
+            const id = String(l.id);
+            const closedAt = l.closed_at && l.closed_at > 0 ? l.closed_at : 0;
+            const prev = poll.syncedUpdatedAt[id] || 0;
+            const fila = (0, mapDealToFila_1.mapDealToFilaVentas)(l);
+            return {
+                dealId: id,
+                cliente: fila.cliente,
+                venta: fila.venta,
+                fechaDeCierre: fila.fechaDeCierre,
+                closed_at: closedAt,
+                status_id: l.status_id ?? null,
+                inPollState: prev > 0 && (!closedAt || prev >= closedAt),
+            };
+        });
+        res.status(200).json({
+            ok: true,
+            hours,
+            lookbackHoursDefault: Math.round((0, pollClosedDeals_1.getWriteLookbackMs)() / 3600000),
+            count: items.length,
+            items,
+        });
+    }
+    catch (err) {
+        res.status(502).json({
             ok: false,
             error: err instanceof Error ? err.message : String(err),
         });

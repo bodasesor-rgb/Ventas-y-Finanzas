@@ -141,10 +141,10 @@ async function fetchRecentLeads(limit = 10) {
     return data._embedded?.leads || [];
 }
 /**
- * Leads cerrados desde `sinceMs` atrás (por closed_at), no por updated_at.
- * Así un deal ganado no se pierde entre 40 leads abiertos recién tocados.
+ * Leads con closed_at reciente. El caller filtra ganado (142) vs perdido (143).
+ * No depende solo de updated_at (un ganado se pierde entre leads abiertos).
  */
-async function fetchRecentlyClosedLeads(limit = 40, lookbackMs = 6 * 60 * 60_000) {
+async function fetchRecentlyClosedLeads(limit = 40, lookbackMs = 72 * 60 * 60_000) {
     const base = KOMMO_BASE();
     const token = KOMMO_TOKEN();
     if (!base || !token) {
@@ -152,32 +152,34 @@ async function fetchRecentlyClosedLeads(limit = 40, lookbackMs = 6 * 60 * 60_000
     }
     const n = Math.min(Math.max(limit, 1), 50);
     const from = Math.floor((Date.now() - lookbackMs) / 1000);
-    // status 142 = ganado en Kommo/amoCRM
-    const url = `${base}/api/v4/leads?limit=${n}` +
+    // 1) Preferir filtro status ganado 142 + closed_at
+    const wonUrl = `${base}/api/v4/leads?limit=${n}` +
         `&filter[closed_at][from]=${from}` +
         `&filter[statuses][0][status_id]=142` +
         `&order[closed_at]=desc&with=contacts`;
-    const res = await fetch(url, {
+    const wonRes = await fetch(wonUrl, {
         headers: {
             Authorization: `Bearer ${token}`,
             Accept: "application/json",
         },
     });
-    // Si el filtro de status no es aceptado, reintentar solo con closed_at
-    if (!res.ok) {
-        const fallbackUrl = `${base}/api/v4/leads?limit=${n}` +
-            `&filter[closed_at][from]=${from}` +
-            `&order[closed_at]=desc&with=contacts`;
-        const res2 = await fetch(fallbackUrl, {
-            headers: {
-                Authorization: `Bearer ${token}`,
-                Accept: "application/json",
-            },
-        });
-        const data2 = (await readJsonOrThrow(res2, "Kommo closed leads"));
-        return data2._embedded?.leads || [];
+    if (wonRes.ok) {
+        const data = (await readJsonOrThrow(wonRes, "Kommo closed won"));
+        const won = data._embedded?.leads || [];
+        if (won.length)
+            return won;
     }
-    const data = (await readJsonOrThrow(res, "Kommo closed leads"));
-    return data._embedded?.leads || [];
+    // 2) Fallback: cualquier closed_at (incluye perdidos; el poller filtra 142)
+    const anyUrl = `${base}/api/v4/leads?limit=${n}` +
+        `&filter[closed_at][from]=${from}` +
+        `&order[closed_at]=desc&with=contacts`;
+    const anyRes = await fetch(anyUrl, {
+        headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/json",
+        },
+    });
+    const data2 = (await readJsonOrThrow(anyRes, "Kommo closed leads"));
+    return data2._embedded?.leads || [];
 }
 //# sourceMappingURL=kommoApi.js.map
