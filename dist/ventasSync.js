@@ -5,6 +5,8 @@ exports.getLastWebhookAccepted = getLastWebhookAccepted;
 exports.rememberWebhookAccepted = rememberWebhookAccepted;
 exports.syncDealToSheet = syncDealToSheet;
 const appsScriptClient_1 = require("./appsScriptClient");
+const eventFingerprint_1 = require("./eventFingerprint");
+const fingerprintStore_1 = require("./fingerprintStore");
 const kommoApi_1 = require("./kommoApi");
 const mapDealToFila_1 = require("./mapDealToFila");
 /** Evita import circular: poller marca estado tras sync exitoso. */
@@ -66,17 +68,50 @@ async function syncDealToSheet(leadId, webhookBody) {
         try {
             const year = (0, mapDealToFila_1.yearFromFecha)(fila.fechaDeCierre) || new Date().getUTCFullYear();
             const sheetName = `Eventos ${year}`;
-            const result = await (0, appsScriptClient_1.writeFilaToAppsScript)(fila.kommoDealId, values, sheetName);
-            sheetWrite.ok = true;
-            sheetWrite.action = result.action;
-            sheetWrite.row = result.row;
-            sheetWrite.version = result.version;
-            console.log("[ventas][fase2] Sheet write OK", {
-                dealId: fila.kommoDealId,
-                action: result.action,
-                row: result.row,
-                sheetName,
-            });
+            const fp = (0, eventFingerprint_1.eventFingerprintFromFila)(fila);
+            const dupDeal = (0, fingerprintStore_1.findDuplicateDealId)(fp, fila.kommoDealId);
+            if (dupDeal) {
+                sheetWrite.ok = true;
+                sheetWrite.action = "skipped_duplicate";
+                console.log("[ventas][fase2] DUPLICADO omitido (cache local)", {
+                    dealId: fila.kommoDealId,
+                    duplicateOfDealId: dupDeal,
+                    fingerprint: fp,
+                    cliente: fila.cliente,
+                });
+                (0, fingerprintStore_1.rememberFingerprint)(fp, dupDeal);
+            }
+            else {
+                const result = await (0, appsScriptClient_1.writeFilaToAppsScript)(fila.kommoDealId, values, sheetName);
+                sheetWrite.ok = true;
+                sheetWrite.action = result.action;
+                sheetWrite.row = result.row;
+                sheetWrite.version = result.version;
+                if (result.action === "skipped_duplicate") {
+                    const other = result.duplicateOfDealId ||
+                        fila.kommoDealId;
+                    (0, fingerprintStore_1.rememberFingerprint)(fp, other);
+                    console.log("[ventas][fase2] DUPLICADO omitido (Sheet)", {
+                        dealId: fila.kommoDealId,
+                        row: result.row,
+                        duplicateOfDealId: other,
+                        cliente: fila.cliente,
+                        fechaDelEvento: fila.fechaDelEvento,
+                        fechaDeCierre: fila.fechaDeCierre,
+                        horario: fila.horario,
+                        tipoDeEvento: fila.tipoDeEvento,
+                    });
+                }
+                else {
+                    (0, fingerprintStore_1.rememberFingerprint)(fp, fila.kommoDealId);
+                    console.log("[ventas][fase2] Sheet write OK", {
+                        dealId: fila.kommoDealId,
+                        action: result.action,
+                        row: result.row,
+                        sheetName,
+                    });
+                }
+            }
         }
         catch (writeErr) {
             sheetWrite.ok = false;

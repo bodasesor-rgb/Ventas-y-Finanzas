@@ -1,4 +1,9 @@
 import { writeFilaToAppsScript } from "./appsScriptClient";
+import { eventFingerprintFromFila } from "./eventFingerprint";
+import {
+  findDuplicateDealId,
+  rememberFingerprint,
+} from "./fingerprintStore";
 import {
   extractPartialLeadFromWebhook,
   fetchLeadWithContact,
@@ -107,21 +112,53 @@ export async function syncDealToSheet(
       const year =
         yearFromFecha(fila.fechaDeCierre) || new Date().getUTCFullYear();
       const sheetName = `Eventos ${year}`;
-      const result = await writeFilaToAppsScript(
-        fila.kommoDealId,
-        values,
-        sheetName
-      );
-      sheetWrite.ok = true;
-      sheetWrite.action = result.action;
-      sheetWrite.row = result.row;
-      sheetWrite.version = result.version;
-      console.log("[ventas][fase2] Sheet write OK", {
-        dealId: fila.kommoDealId,
-        action: result.action,
-        row: result.row,
-        sheetName,
-      });
+      const fp = eventFingerprintFromFila(fila);
+      const dupDeal = findDuplicateDealId(fp, fila.kommoDealId);
+      if (dupDeal) {
+        sheetWrite.ok = true;
+        sheetWrite.action = "skipped_duplicate";
+        console.log("[ventas][fase2] DUPLICADO omitido (cache local)", {
+          dealId: fila.kommoDealId,
+          duplicateOfDealId: dupDeal,
+          fingerprint: fp,
+          cliente: fila.cliente,
+        });
+        rememberFingerprint(fp, dupDeal);
+      } else {
+        const result = await writeFilaToAppsScript(
+          fila.kommoDealId,
+          values,
+          sheetName
+        );
+        sheetWrite.ok = true;
+        sheetWrite.action = result.action;
+        sheetWrite.row = result.row;
+        sheetWrite.version = result.version;
+        if (result.action === "skipped_duplicate") {
+          const other =
+            (result as { duplicateOfDealId?: string }).duplicateOfDealId ||
+            fila.kommoDealId;
+          rememberFingerprint(fp, other);
+          console.log("[ventas][fase2] DUPLICADO omitido (Sheet)", {
+            dealId: fila.kommoDealId,
+            row: result.row,
+            duplicateOfDealId: other,
+            cliente: fila.cliente,
+            fechaDelEvento: fila.fechaDelEvento,
+            fechaDeCierre: fila.fechaDeCierre,
+            horario: fila.horario,
+            tipoDeEvento: fila.tipoDeEvento,
+          });
+        } else {
+          rememberFingerprint(fp, fila.kommoDealId);
+          console.log("[ventas][fase2] Sheet write OK", {
+            dealId: fila.kommoDealId,
+            action: result.action,
+            row: result.row,
+            sheetName,
+          });
+        }
+      }
     } catch (writeErr) {
       sheetWrite.ok = false;
       sheetWrite.error =

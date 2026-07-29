@@ -1,16 +1,17 @@
 /**
  * ============================================================
  * Apps Script — Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-07-29-v29
+ * VERSION: 2026-07-29-v30
  * ============================================================
  * PEGAR TODO ESTE ARCHIVO (borrar lo anterior -> pegar -> Guardar)
  *
- * REGLA v29:
- *   - keepAliveVentasPoll cada 1 min → Hostinger sube cierres al momento
- *   - v28: encabezado semana = fechas; SUMIFS Eventos; Gasto manual intacto
+ * REGLA v30:
+ *   - No duplicar Eventos: si ya hay misma fila (cliente+fechas+horario+tipo)
+ *     → skipped_duplicate (no vuelve a subir)
+ *   - v29: keepAliveVentasPoll cada 1 min
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-07-29-v29';
+var SCRIPT_VERSION = '2026-07-29-v30';
 /** Hostinger: tick cada minuto para que los cierres suban al Sheet al momento. */
 var VENTAS_TICK_URL =
   'https://lightcyan-reindeer-284498.hostingersite.com/api/ventas/tick';
@@ -241,6 +242,109 @@ function findRowByDealId_(sheet, dealId) {
       .getValues();
     for (var j = 0; j < ids2.length; j++) {
       if (String(ids2[j][0]).trim() === dealId) {
+        return MAX_CLIENT_SCAN + 1 + j;
+      }
+    }
+  }
+  return -1;
+}
+
+/** Normaliza texto para comparar duplicados (sin acentos, minúsculas). */
+function normDupKey_(v) {
+  var s = String(v == null ? '' : v)
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+  try {
+    s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  } catch (eNorm) {}
+  return s;
+}
+
+/** Normaliza fecha a DD/MM/YYYY si viene como Date del Sheet. */
+function normDupFecha_(v) {
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    var d = v.getUTCDate();
+    var m = v.getUTCMonth() + 1;
+    var y = v.getUTCFullYear();
+    // Sheet suele ser fecha local; preferir partes locales del spreadsheet
+    d = v.getDate();
+    m = v.getMonth() + 1;
+    y = v.getFullYear();
+    return (
+      (d < 10 ? '0' : '') +
+      d +
+      '/' +
+      (m < 10 ? '0' : '') +
+      m +
+      '/' +
+      y
+    );
+  }
+  var s = String(v == null ? '' : v).trim();
+  var m1 = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+  if (m1) {
+    var day = m1[1].length === 1 ? '0' + m1[1] : m1[1];
+    var mon = m1[2].length === 1 ? '0' + m1[2] : m1[2];
+    var year = m1[3].length === 2 ? '20' + m1[3] : m1[3];
+    return day + '/' + mon + '/' + year;
+  }
+  return normDupKey_(s);
+}
+
+/**
+ * Huella del evento: cliente + fecha evento + fecha cierre + horario + tipo.
+ * No basta el nombre: dos cumpleaños distintos el mismo día no chocan si
+ * cambia horario/tipo/fecha.
+ */
+function eventFingerprintFromValues_(values) {
+  return [
+    normDupKey_(values[0]), // Cliente
+    normDupFecha_(values[1]), // Fecha del evento
+    normDupFecha_(values[2]), // Fecha de cierre
+    normDupKey_(values[8]), // Horario
+    normDupKey_(values[5]), // Tipo de evento
+  ].join('|');
+}
+
+function eventFingerprintFromSheetRow_(rowVals) {
+  return eventFingerprintFromValues_(rowVals);
+}
+
+/**
+ * Busca fila con la misma huella de evento (otro dealId o sin id).
+ * Excluye excludeDealId para no auto-matchear al actualizar.
+ */
+function findRowByEventFingerprint_(sheet, values, excludeDealId) {
+  var lastRow = Math.max(sheet.getLastRow(), 1);
+  if (lastRow < 2) return -1;
+  var target = eventFingerprintFromValues_(values);
+  if (!target || target === '||||') return -1;
+  // Sin cliente no tiene sentido deduplicar
+  if (!normDupKey_(values[0])) return -1;
+
+  var scanTo = Math.min(lastRow, MAX_CLIENT_SCAN);
+  var block = sheet.getRange(2, 1, scanTo, DEAL_ID_COL).getValues();
+  for (var i = 0; i < block.length; i++) {
+    var row = block[i];
+    var rowDeal = String(row[DEAL_ID_COL - 1] || '').trim();
+    if (excludeDealId && rowDeal && rowDeal === excludeDealId) continue;
+    // Fila vacía
+    if (!normDupKey_(row[0])) continue;
+    if (eventFingerprintFromSheetRow_(row) === target) {
+      return i + 2;
+    }
+  }
+  if (lastRow > MAX_CLIENT_SCAN) {
+    var block2 = sheet
+      .getRange(MAX_CLIENT_SCAN + 1, 1, lastRow, DEAL_ID_COL)
+      .getValues();
+    for (var j = 0; j < block2.length; j++) {
+      var row2 = block2[j];
+      var rowDeal2 = String(row2[DEAL_ID_COL - 1] || '').trim();
+      if (excludeDealId && rowDeal2 && rowDeal2 === excludeDealId) continue;
+      if (!normDupKey_(row2[0])) continue;
+      if (eventFingerprintFromSheetRow_(row2) === target) {
         return MAX_CLIENT_SCAN + 1 + j;
       }
     }
@@ -1248,12 +1352,41 @@ function doPost(e) {
     var nextRow = findNextClientRow_(sheet);
     var rowIndex;
     var action;
+    var duplicateOfDealId = '';
+    var fingerprint = eventFingerprintFromValues_(values);
 
     if (existingRow !== -1) {
+      // Mismo Kommo Deal ID → actualizar esa fila (no es cliente nuevo)
       rowIndex = existingRow;
       writeRowValues_(sheet, rowIndex, values);
       action = 'updated';
     } else {
+      // ¿Ya existe el mismo evento (cliente+fechas+horario+tipo)?
+      var dupRow = findRowByEventFingerprint_(sheet, values, dealId);
+      if (dupRow !== -1) {
+        rowIndex = dupRow;
+        var existingDeal = String(
+          sheet.getRange(dupRow, DEAL_ID_COL).getValue() || ''
+        ).trim();
+        duplicateOfDealId = existingDeal;
+        action = 'skipped_duplicate';
+        // No escribe nada: evita repetir el cliente en Eventos
+        var infoDup = spreadsheetInfo_();
+        return json_({
+          ok: true,
+          version: SCRIPT_VERSION,
+          action: action,
+          row: rowIndex,
+          nextRowWouldBe: nextRow,
+          dealId: dealId,
+          duplicateOfDealId: duplicateOfDealId,
+          fingerprint: fingerprint,
+          sheetName: sheetName,
+          message:
+            'Cliente/evento ya estaba en el Sheet (misma fecha, horario y tipo). No se volvió a subir.',
+          existingSheets: infoDup.existingSheets,
+        });
+      }
       rowIndex = nextRow;
       sheet.getRange(rowIndex, 1, 1, DEAL_ID_COL).setValues([values]);
       applyCalcFormulas_(sheet, rowIndex);
@@ -1279,6 +1412,7 @@ function doPost(e) {
       row: rowIndex,
       nextRowWouldBe: nextRow,
       dealId: dealId,
+      fingerprint: fingerprint,
       sheetName: sheetName,
       metricasAuto: pipe,
       metricasAutoExists:
