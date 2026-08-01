@@ -10,6 +10,7 @@ const ventasSync_1 = require("./ventasSync");
 const fingerprintStore_1 = require("./fingerprintStore");
 const eventFingerprint_1 = require("./eventFingerprint");
 const sheetEventosReader_1 = require("./sheetEventosReader");
+const metricasVisitasSync_1 = require("./metricasVisitasSync");
 function publicBaseUrl_(req) {
     const env = (process.env.PUBLIC_BASE_URL ||
         process.env.HOSTINGER_URL ||
@@ -209,14 +210,28 @@ exports.ventasRouter.get("/api/ventas/poll-now", async (_req, res) => {
  * Cron externo (GitHub Actions / Apps Script): despierta Hostinger y sube
  * cierres faltantes al momento. GET o POST.
  */
+let lastVisitasTickAt = 0;
+const VISITAS_TICK_EVERY_MS = 6 * 60 * 60_000;
 async function handleTick(_req, res) {
     try {
         const result = await (0, pollClosedDeals_1.runPollTick)();
+        let visitas = null;
+        const ga4 = (0, metricasVisitasSync_1.metricasVisitasStatus)().ga4;
+        if (ga4.ok && Date.now() - lastVisitasTickAt > VISITAS_TICK_EVERY_MS) {
+            lastVisitasTickAt = Date.now();
+            try {
+                visitas = await (0, metricasVisitasSync_1.syncMetricasVisitas)({ lookbackDays: 45 });
+            }
+            catch (err) {
+                console.warn("[tick] sync visitas", err instanceof Error ? err.message : err);
+            }
+        }
         res.status(200).json({
             ok: true,
             at: new Date().toISOString(),
             result,
             poll: (0, pollClosedDeals_1.getPollStatus)(),
+            visitas,
             message: "Tick OK — cierres faltantes de la ventana sincronizados",
         });
     }
@@ -269,6 +284,38 @@ exports.ventasRouter.get("/api/ventas/ensure-webhook", async (req, res) => {
         });
     }
 });
+/** Estado de integración Google Analytics → Metricas (visitas). */
+exports.ventasRouter.get("/api/ventas/ga4-status", (_req, res) => {
+    res.status(200).json({ ok: true, ...(0, metricasVisitasSync_1.metricasVisitasStatus)() });
+});
+/**
+ * Llena Visitas al sitio / orgánicas / blogs / colecciones desde GA4
+ * en Metricas Auto (solo celdas vacías de semanas ya empezadas).
+ * Query: ?force=1 para sobrescribir, ?days=90 lookback.
+ */
+async function handleSyncVisitas(req, res) {
+    try {
+        const body = (req.body || {});
+        const force = String(req.query.force || body.force || "") === "1" ||
+            body.force === true;
+        const days = Number(req.query.days || body.days || 120);
+        const result = await (0, metricasVisitasSync_1.syncMetricasVisitas)({
+            overwrite: force,
+            force,
+            lookbackDays: Number.isFinite(days) ? days : 120,
+        });
+        res.status(result.ok ? 200 : 502).json(result);
+    }
+    catch (err) {
+        res.status(502).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+            hint: (0, metricasVisitasSync_1.metricasVisitasStatus)(),
+        });
+    }
+}
+exports.ventasRouter.post("/api/ventas/sync-visitas", handleSyncVisitas);
+exports.ventasRouter.get("/api/ventas/sync-visitas", handleSyncVisitas);
 /** Estado anti-duplicados: cuántas huellas hay en Sheet + cache. */
 exports.ventasRouter.get("/api/ventas/dedupe-status", async (_req, res) => {
     try {
@@ -300,7 +347,7 @@ exports.ventasRouter.get("/api/ventas/dedupe-check/:dealId", async (req, res) =>
         const lead = await (0, kommoApi_1.fetchLeadWithContact)(dealId);
         const fila = (0, mapDealToFila_1.mapDealToFilaVentas)(lead);
         const fp = (0, eventFingerprint_1.eventFingerprintFromFila)(fila);
-        const year = Number(String(fila.fechaDeCierre).split("/")[2]) || 2026;
+        const year = (0, mapDealToFila_1.yearFromFecha)(fila.fechaDeCierre) || 2026;
         const dup = await (0, sheetEventosReader_1.findDuplicateInSheet)(fp, String(dealId), year);
         // Simular otro dealId para ver si la huella ya está
         const wouldDupIfOtherId = await (0, sheetEventosReader_1.findDuplicateInSheet)(fp, "00000000", year);
@@ -506,6 +553,7 @@ exports.ventasRouter.get("/health", (_req, res) => {
             lastPollAt: (0, pollClosedDeals_1.getPollStatus)().lastPollAt,
             lastSynced: (0, pollClosedDeals_1.getPollStatus)().lastResult?.synced || [],
         },
+        ga4: (0, metricasVisitasSync_1.metricasVisitasStatus)().ga4,
     });
 });
 exports.ventasRouter.get("/health/kommo", async (_req, res) => {

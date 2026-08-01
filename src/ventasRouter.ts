@@ -29,6 +29,10 @@ import {
   findDuplicateInSheet,
   loadEventosSheetIndex,
 } from "./sheetEventosReader";
+import {
+  metricasVisitasStatus,
+  syncMetricasVisitas,
+} from "./metricasVisitasSync";
 
 function publicBaseUrl_(req?: { protocol?: string; get?: (h: string) => string | undefined }): string {
   const env = (
@@ -249,14 +253,31 @@ ventasRouter.get("/api/ventas/poll-now", async (_req, res) => {
  * Cron externo (GitHub Actions / Apps Script): despierta Hostinger y sube
  * cierres faltantes al momento. GET o POST.
  */
+let lastVisitasTickAt = 0;
+const VISITAS_TICK_EVERY_MS = 6 * 60 * 60_000;
+
 async function handleTick(_req: Request, res: Response): Promise<void> {
   try {
     const result = await runPollTick();
+    let visitas: Awaited<ReturnType<typeof syncMetricasVisitas>> | null = null;
+    const ga4 = metricasVisitasStatus().ga4;
+    if (ga4.ok && Date.now() - lastVisitasTickAt > VISITAS_TICK_EVERY_MS) {
+      lastVisitasTickAt = Date.now();
+      try {
+        visitas = await syncMetricasVisitas({ lookbackDays: 45 });
+      } catch (err) {
+        console.warn(
+          "[tick] sync visitas",
+          err instanceof Error ? err.message : err
+        );
+      }
+    }
     res.status(200).json({
       ok: true,
       at: new Date().toISOString(),
       result,
       poll: getPollStatus(),
+      visitas,
       message: "Tick OK — cierres faltantes de la ventana sincronizados",
     });
   } catch (err) {
@@ -308,6 +329,40 @@ ventasRouter.get("/api/ventas/ensure-webhook", async (req, res) => {
     });
   }
 });
+
+/** Estado de integración Google Analytics → Metricas (visitas). */
+ventasRouter.get("/api/ventas/ga4-status", (_req, res) => {
+  res.status(200).json({ ok: true, ...metricasVisitasStatus() });
+});
+
+/**
+ * Llena Visitas al sitio / orgánicas / blogs / colecciones desde GA4
+ * en Metricas Auto (solo celdas vacías de semanas ya empezadas).
+ * Query: ?force=1 para sobrescribir, ?days=90 lookback.
+ */
+async function handleSyncVisitas(req: Request, res: Response): Promise<void> {
+  try {
+    const body = (req.body || {}) as { force?: unknown; days?: unknown };
+    const force =
+      String(req.query.force || body.force || "") === "1" ||
+      body.force === true;
+    const days = Number(req.query.days || body.days || 120);
+    const result = await syncMetricasVisitas({
+      overwrite: force,
+      force,
+      lookbackDays: Number.isFinite(days) ? days : 120,
+    });
+    res.status(result.ok ? 200 : 502).json(result);
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+      hint: metricasVisitasStatus(),
+    });
+  }
+}
+ventasRouter.post("/api/ventas/sync-visitas", handleSyncVisitas);
+ventasRouter.get("/api/ventas/sync-visitas", handleSyncVisitas);
 
 /** Estado anti-duplicados: cuántas huellas hay en Sheet + cache. */
 ventasRouter.get("/api/ventas/dedupe-status", async (_req, res) => {
@@ -564,6 +619,7 @@ ventasRouter.get("/health", (_req, res) => {
       lastPollAt: getPollStatus().lastPollAt,
       lastSynced: getPollStatus().lastResult?.synced || [],
     },
+    ga4: metricasVisitasStatus().ga4,
   });
 });
 

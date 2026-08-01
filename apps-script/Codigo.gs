@@ -1,17 +1,16 @@
 /**
  * ============================================================
  * Apps Script — Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-07-29-v30
+ * VERSION: 2026-08-01-v31
  * ============================================================
  * PEGAR TODO ESTE ARCHIVO (borrar lo anterior -> pegar -> Guardar)
  *
- * REGLA v30:
- *   - No duplicar Eventos: si ya hay misma fila (cliente+fechas+horario+tipo)
- *     → skipped_duplicate (no vuelve a subir)
- *   - v29: keepAliveVentasPoll cada 1 min
+ * REGLA v31:
+ *   - upsertMetricasVisitas: llena Visitas (GA4) por semana
+ *   - v30: no duplicar Eventos por huella cliente+fechas+horario+tipo
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-07-29-v30';
+var SCRIPT_VERSION = '2026-08-01-v31';
 /** Hostinger: tick cada minuto para que los cierres suban al Sheet al momento. */
 var VENTAS_TICK_URL =
   'https://lightcyan-reindeer-284498.hostingersite.com/api/ventas/tick';
@@ -1245,6 +1244,9 @@ function doPost(e) {
           '. Ábrela abajo o con el link del Sheet.',
       });
     }
+    if (data && data.action === 'upsertMetricasVisitas') {
+      return json_(upsertMetricasVisitas_(data));
+    }
     if (data && data.action === 'installVentasKeepAlive') {
       var installed = installVentasKeepAliveTrigger();
       return json_({
@@ -2074,6 +2076,142 @@ function ensureMetricasSemanalBody_(ss) {
     fechasNormalizadas: norm.converted || 0,
     note:
       'Auto recreada desde original. Fechas Eventos normalizadas. Solo formulas KPI. Gasto no tocado.',
+  };
+}
+
+/**
+ * Escribe visitas GA4 en Metricas Auto por columna de semana.
+ * data.weeks = [{ weekStart, site, organic, blogs, colecciones }]
+ */
+function upsertMetricasVisitas_(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetName = String(
+    (data && data.sheetName) || METRICAS_AUTO_SHEET
+  ).trim();
+  var sh = ss.getSheetByName(sheetName);
+  if (!sh) {
+    return {
+      ok: false,
+      version: SCRIPT_VERSION,
+      error: 'No existe pestana ' + sheetName,
+    };
+  }
+  var layout = detectMetricasWeekLayout_(sh);
+  if (!layout.ok) {
+    return {
+      ok: false,
+      version: SCRIPT_VERSION,
+      error: layout.error || 'layout Metricas invalido',
+    };
+  }
+
+  // Filas de visitas por etiqueta
+  var lastRow = Math.min(Math.max(sh.getLastRow(), 20), 80);
+  var labels = sh
+    .getRange(1, layout.labelCol, lastRow, layout.labelCol)
+    .getValues();
+  var siteRow = -1;
+  var organicRow = -1;
+  var blogsRow = -1;
+  var coleccionesRow = -1;
+  for (var r = 0; r < labels.length; r++) {
+    var lab = normLabel_(labels[r][0]);
+    if (siteRow < 0 && lab.indexOf('visitas al sitio') >= 0) siteRow = r + 1;
+    if (
+      organicRow < 0 &&
+      (lab.indexOf('visitas organicas') >= 0 ||
+        lab.indexOf('visitas orgánicas') >= 0)
+    ) {
+      organicRow = r + 1;
+    }
+    if (blogsRow < 0 && lab.indexOf('visitas blog') >= 0) blogsRow = r + 1;
+    if (coleccionesRow < 0 && lab.indexOf('visitas colecciones') >= 0) {
+      coleccionesRow = r + 1;
+    }
+  }
+  if (siteRow < 0) {
+    return {
+      ok: false,
+      version: SCRIPT_VERSION,
+      error: 'No encontre fila Visitas al sitio',
+    };
+  }
+
+  function weekKey_(d) {
+    if (!(d instanceof Date) || isNaN(d.getTime())) return '';
+    var dd = d.getDate();
+    var mm = d.getMonth() + 1;
+    var yy = d.getFullYear();
+    return (
+      (dd < 10 ? '0' : '') +
+      dd +
+      '/' +
+      (mm < 10 ? '0' : '') +
+      mm +
+      '/' +
+      yy
+    );
+  }
+
+  var colByKey = {};
+  for (var i = 0; i < layout.weekCols.length; i++) {
+    var w = layout.weekCols[i];
+    colByKey[weekKey_(w.date)] = w.col;
+    // también yy corto
+    var d2 = w.date;
+    var shortKey =
+      (d2.getDate() < 10 ? '0' : '') +
+      d2.getDate() +
+      '/' +
+      (d2.getMonth() + 1 < 10 ? '0' : '') +
+      (d2.getMonth() + 1) +
+      '/' +
+      String(d2.getFullYear()).slice(-2);
+    colByKey[shortKey] = w.col;
+  }
+
+  var weeks = (data && data.weeks) || [];
+  var updated = 0;
+  var written = [];
+  for (var j = 0; j < weeks.length; j++) {
+    var item = weeks[j] || {};
+    var key = String(item.weekStart || item.weekStartLong || '').trim();
+    var col = colByKey[key];
+    if (!col && item.weekStartLong) col = colByKey[String(item.weekStartLong)];
+    if (!col) continue;
+    if (siteRow > 0 && item.site != null) {
+      sh.getRange(siteRow, col).setValue(Number(item.site) || 0);
+      updated++;
+    }
+    if (organicRow > 0 && item.organic != null) {
+      sh.getRange(organicRow, col).setValue(Number(item.organic) || 0);
+      updated++;
+    }
+    if (blogsRow > 0 && item.blogs != null) {
+      sh.getRange(blogsRow, col).setValue(Number(item.blogs) || 0);
+      updated++;
+    }
+    if (coleccionesRow > 0 && item.colecciones != null) {
+      sh.getRange(coleccionesRow, col).setValue(Number(item.colecciones) || 0);
+      updated++;
+    }
+    written.push({ weekStart: key, col: col });
+  }
+
+  return {
+    ok: true,
+    version: SCRIPT_VERSION,
+    action: 'upsertMetricasVisitas',
+    sheet: sheetName,
+    updatedCells: updated,
+    weeksWritten: written.length,
+    rows: {
+      site: siteRow,
+      organic: organicRow,
+      blogs: blogsRow,
+      colecciones: coleccionesRow,
+    },
+    written: written,
   };
 }
 
