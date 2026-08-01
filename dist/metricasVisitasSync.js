@@ -434,19 +434,33 @@ async function syncMetricasVisitas(opts) {
     };
 }
 function metricasVisitasStatus() {
-    const sa = (() => {
-        try {
-            return (0, googleAuth_1.loadServiceAccountJson)();
+    let sa = null;
+    let loadError = null;
+    try {
+        sa = (0, googleAuth_1.loadServiceAccountJson)();
+    }
+    catch (err) {
+        loadError = err instanceof Error ? err.message : String(err);
+    }
+    const envKeysPresent = (0, googleAuth_1.listGaEnvKeysPresent)();
+    const ga4 = (0, ga4Client_1.ga4Configured)();
+    let hint;
+    if (!ga4.ok) {
+        if (!envKeysPresent.includes("GOOGLE_SERVICE_ACCOUNT_JSON") && !sa) {
+            hint =
+                "En Hostinger → Node.js → Variables de entorno: crea GOOGLE_SERVICE_ACCOUNT_JSON con el JSON completo ({...}). Luego Restart de la app.";
         }
-        catch {
-            return null;
+        else if (loadError) {
+            hint = loadError;
         }
-    })();
+    }
     return {
-        ga4: (0, ga4Client_1.ga4Configured)(),
+        ga4,
         sheetId: (0, googleAuth_1.metricasSheetId)(),
         sheetName: (0, googleAuth_1.metricasSheetName)(),
         serviceAccountEmail: sa?.client_email || null,
+        envKeysPresent,
+        hint,
     };
 }
 //# sourceMappingURL=metricasVisitasSync.js.map

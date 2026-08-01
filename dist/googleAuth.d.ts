@@ -6,7 +6,9 @@ export type ServiceAccountJson = {
     project_id?: string;
     [k: string]: unknown;
 };
-/** Lee JSON de service account desde env (string o path). */
+/** Nombres de env relacionados (sin valores) — para diagnosticar Hostinger. */
+export declare function listGaEnvKeysPresent(): string[];
+/** Lee JSON de service account desde env (string, base64 o path). */
 export declare function loadServiceAccountJson(): ServiceAccountJson | null;
 export declare function hasGoogleCredentials(): boolean;
 /** Auth para GA4 Data API + Sheets. */

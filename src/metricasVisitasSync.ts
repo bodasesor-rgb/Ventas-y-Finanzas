@@ -6,6 +6,7 @@ import {
 } from "./ga4Client";
 import {
   getGoogleAuthClient,
+  listGaEnvKeysPresent,
   loadServiceAccountJson,
   metricasSheetId,
   metricasSheetName,
@@ -551,18 +552,33 @@ export function metricasVisitasStatus(): {
   sheetId: string;
   sheetName: string;
   serviceAccountEmail: string | null;
+  envKeysPresent: string[];
+  hint?: string;
 } {
-  const sa = (() => {
-    try {
-      return loadServiceAccountJson();
-    } catch {
-      return null;
+  let sa: ReturnType<typeof loadServiceAccountJson> = null;
+  let loadError: string | null = null;
+  try {
+    sa = loadServiceAccountJson();
+  } catch (err) {
+    loadError = err instanceof Error ? err.message : String(err);
+  }
+  const envKeysPresent = listGaEnvKeysPresent();
+  const ga4 = ga4Configured();
+  let hint: string | undefined;
+  if (!ga4.ok) {
+    if (!envKeysPresent.includes("GOOGLE_SERVICE_ACCOUNT_JSON") && !sa) {
+      hint =
+        "En Hostinger → Node.js → Variables de entorno: crea GOOGLE_SERVICE_ACCOUNT_JSON con el JSON completo ({...}). Luego Restart de la app.";
+    } else if (loadError) {
+      hint = loadError;
     }
-  })();
+  }
   return {
-    ga4: ga4Configured(),
+    ga4,
     sheetId: metricasSheetId(),
     sheetName: metricasSheetName(),
     serviceAccountEmail: sa?.client_email || null,
+    envKeysPresent,
+    hint,
   };
 }

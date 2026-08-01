@@ -8,25 +8,52 @@ export type ServiceAccountJson = {
   [k: string]: unknown;
 };
 
-/** Lee JSON de service account desde env (string o path). */
+const SA_ENV_KEYS_ = [
+  "GOOGLE_SERVICE_ACCOUNT_JSON",
+  "GA4_SERVICE_ACCOUNT_JSON",
+  "GOOGLE_SERVICE_ACCOUNT",
+  "FIREBASE_SERVICE_ACCOUNT_JSON",
+] as const;
+
+/** Nombres de env relacionados (sin valores) — para diagnosticar Hostinger. */
+export function listGaEnvKeysPresent(): string[] {
+  const keys = [
+    ...SA_ENV_KEYS_,
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "GA4_PROPERTY_ID",
+    "GA4_MEASUREMENT_ID",
+    "GOOGLE_SHEET_ID",
+    "METRICAS_SHEET_NAME",
+  ];
+  return keys.filter((k) => Boolean(String(process.env[k] || "").trim()));
+}
+
+/** Lee JSON de service account desde env (string, base64 o path). */
 export function loadServiceAccountJson(): ServiceAccountJson | null {
-  const inline = (
-    process.env.GOOGLE_SERVICE_ACCOUNT_JSON ||
-    process.env.GA4_SERVICE_ACCOUNT_JSON ||
-    ""
-  ).trim();
-  if (inline) {
+  for (const key of SA_ENV_KEYS_) {
+    const inline = String(process.env[key] || "").trim();
+    if (!inline) continue;
+    // Path a archivo
+    if (
+      (inline.startsWith("/") || inline.endsWith(".json")) &&
+      !inline.startsWith("{")
+    ) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const fs = require("fs") as typeof import("fs");
+      if (fs.existsSync(inline)) {
+        return JSON.parse(fs.readFileSync(inline, "utf8")) as ServiceAccountJson;
+      }
+    }
     try {
       return JSON.parse(inline) as ServiceAccountJson;
     } catch {
-      // a veces viene base64
       try {
         return JSON.parse(
           Buffer.from(inline, "base64").toString("utf8")
         ) as ServiceAccountJson;
       } catch {
         throw new Error(
-          "GOOGLE_SERVICE_ACCOUNT_JSON no es JSON válido (ni base64 JSON)"
+          `${key} no es JSON válido (ni base64 JSON ni ruta a .json)`
         );
       }
     }

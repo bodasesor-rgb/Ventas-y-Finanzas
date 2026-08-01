@@ -36,4 +36,6 @@ export declare function metricasVisitasStatus(): {
     sheetId: string;
     sheetName: string;
     serviceAccountEmail: string | null;
+    envKeysPresent: string[];
+    hint?: string;
 };

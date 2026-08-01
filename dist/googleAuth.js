@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.listGaEnvKeysPresent = listGaEnvKeysPresent;
 exports.loadServiceAccountJson = loadServiceAccountJson;
 exports.hasGoogleCredentials = hasGoogleCredentials;
 exports.getGoogleAuthClient = getGoogleAuthClient;
@@ -7,22 +8,48 @@ exports.ga4PropertyId = ga4PropertyId;
 exports.metricasSheetId = metricasSheetId;
 exports.metricasSheetName = metricasSheetName;
 const google_auth_library_1 = require("google-auth-library");
-/** Lee JSON de service account desde env (string o path). */
+const SA_ENV_KEYS_ = [
+    "GOOGLE_SERVICE_ACCOUNT_JSON",
+    "GA4_SERVICE_ACCOUNT_JSON",
+    "GOOGLE_SERVICE_ACCOUNT",
+    "FIREBASE_SERVICE_ACCOUNT_JSON",
+];
+/** Nombres de env relacionados (sin valores) — para diagnosticar Hostinger. */
+function listGaEnvKeysPresent() {
+    const keys = [
+        ...SA_ENV_KEYS_,
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "GA4_PROPERTY_ID",
+        "GA4_MEASUREMENT_ID",
+        "GOOGLE_SHEET_ID",
+        "METRICAS_SHEET_NAME",
+    ];
+    return keys.filter((k) => Boolean(String(process.env[k] || "").trim()));
+}
+/** Lee JSON de service account desde env (string, base64 o path). */
 function loadServiceAccountJson() {
-    const inline = (process.env.GOOGLE_SERVICE_ACCOUNT_JSON ||
-        process.env.GA4_SERVICE_ACCOUNT_JSON ||
-        "").trim();
-    if (inline) {
+    for (const key of SA_ENV_KEYS_) {
+        const inline = String(process.env[key] || "").trim();
+        if (!inline)
+            continue;
+        // Path a archivo
+        if ((inline.startsWith("/") || inline.endsWith(".json")) &&
+            !inline.startsWith("{")) {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const fs = require("fs");
+            if (fs.existsSync(inline)) {
+                return JSON.parse(fs.readFileSync(inline, "utf8"));
+            }
+        }
         try {
             return JSON.parse(inline);
         }
         catch {
-            // a veces viene base64
             try {
                 return JSON.parse(Buffer.from(inline, "base64").toString("utf8"));
             }
             catch {
-                throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON no es JSON válido (ni base64 JSON)");
+                throw new Error(`${key} no es JSON válido (ni base64 JSON ni ruta a .json)`);
             }
         }
     }
