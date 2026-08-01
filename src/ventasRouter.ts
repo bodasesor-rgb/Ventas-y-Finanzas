@@ -33,6 +33,7 @@ import {
   metricasVisitasStatus,
   syncMetricasVisitas,
 } from "./metricasVisitasSync";
+import { saveServiceAccountJson } from "./googleAuth";
 
 function publicBaseUrl_(req?: { protocol?: string; get?: (h: string) => string | undefined }): string {
   const env = (
@@ -333,6 +334,35 @@ ventasRouter.get("/api/ventas/ensure-webhook", async (req, res) => {
 /** Estado de integración Google Analytics → Metricas (visitas). */
 ventasRouter.get("/api/ventas/ga4-status", (_req, res) => {
   res.status(200).json({ ok: true, ...metricasVisitasStatus() });
+});
+
+/**
+ * Guarda el service account como archivo en data/
+ * (Hostinger suele truncar variables de entorno muy largas).
+ * Body: el JSON completo del .json de Google Cloud.
+ */
+ventasRouter.post("/api/ventas/ga4-setup-sa", (req, res) => {
+  try {
+    const body = req.body;
+    const raw =
+      typeof body === "string"
+        ? body
+        : body?.serviceAccount || body?.json || body;
+    const saved = saveServiceAccountJson(raw);
+    res.status(200).json({
+      ...saved,
+      message:
+        "Service account guardado en disco. Ahora POST /api/ventas/sync-visitas",
+      status: metricasVisitasStatus(),
+    });
+  } catch (err) {
+    res.status(400).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+      hint:
+        "Envía el JSON del service account como body (Content-Type: application/json)",
+    });
+  }
 });
 
 /**

@@ -566,11 +566,13 @@ export function metricasVisitasStatus(): {
   const ga4 = ga4Configured();
   let hint: string | undefined;
   if (!ga4.ok) {
-    if (!envKeysPresent.includes("GOOGLE_SERVICE_ACCOUNT_JSON") && !sa) {
+    if (!sa) {
       hint =
-        "En Hostinger → Node.js → Variables de entorno: crea GOOGLE_SERVICE_ACCOUNT_JSON con el JSON completo ({...}). Luego Restart de la app.";
+        "Hostinger trunca JSON largos en env. Usa POST /api/ventas/ga4-setup-sa con el archivo JSON (se guarda en data/). También necesitas GA4_PROPERTY_ID.";
     } else if (loadError) {
       hint = loadError;
+    } else if (!envKeysPresent.includes("GA4_PROPERTY_ID")) {
+      hint = "Falta GA4_PROPERTY_ID en variables de entorno.";
     }
   }
   return {

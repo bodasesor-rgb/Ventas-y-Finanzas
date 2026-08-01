@@ -11,6 +11,7 @@ const fingerprintStore_1 = require("./fingerprintStore");
 const eventFingerprint_1 = require("./eventFingerprint");
 const sheetEventosReader_1 = require("./sheetEventosReader");
 const metricasVisitasSync_1 = require("./metricasVisitasSync");
+const googleAuth_1 = require("./googleAuth");
 function publicBaseUrl_(req) {
     const env = (process.env.PUBLIC_BASE_URL ||
         process.env.HOSTINGER_URL ||
@@ -287,6 +288,32 @@ exports.ventasRouter.get("/api/ventas/ensure-webhook", async (req, res) => {
 /** Estado de integración Google Analytics → Metricas (visitas). */
 exports.ventasRouter.get("/api/ventas/ga4-status", (_req, res) => {
     res.status(200).json({ ok: true, ...(0, metricasVisitasSync_1.metricasVisitasStatus)() });
+});
+/**
+ * Guarda el service account como archivo en data/
+ * (Hostinger suele truncar variables de entorno muy largas).
+ * Body: el JSON completo del .json de Google Cloud.
+ */
+exports.ventasRouter.post("/api/ventas/ga4-setup-sa", (req, res) => {
+    try {
+        const body = req.body;
+        const raw = typeof body === "string"
+            ? body
+            : body?.serviceAccount || body?.json || body;
+        const saved = (0, googleAuth_1.saveServiceAccountJson)(raw);
+        res.status(200).json({
+            ...saved,
+            message: "Service account guardado en disco. Ahora POST /api/ventas/sync-visitas",
+            status: (0, metricasVisitasSync_1.metricasVisitasStatus)(),
+        });
+    }
+    catch (err) {
+        res.status(400).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+            hint: "Envía el JSON del service account como body (Content-Type: application/json)",
+        });
+    }
 });
 /**
  * Llena Visitas al sitio / orgánicas / blogs / colecciones desde GA4
