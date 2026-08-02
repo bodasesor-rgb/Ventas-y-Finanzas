@@ -4,16 +4,35 @@ export declare function parsePdfToLines(buffer: Buffer, rules: RecurringRule[]):
     lines: BankLine[];
 }>;
 /**
- * Separa montos Banamex pegados y quita basura de folios/POS/T.C.
- * Casos típicos:
- *   500.003,169.72      → 500.00 + 3,169.72
- *   400.00785,432.10    → 400.00 + 785,432.10
- *   9000/00126,000.00   → 6,000.00
+ * Quita del CONCEPTO todo lo que no es texto: folios, CLABE, refs, fechas, etc.
+ * Por política: NUNCA un número del concepto puede entrar al monto.
+ */
+export declare function stripConceptNumbers(concept: string): string;
+/**
+ * Prepara la línea para leer SOLO columnas Retiros/Depósitos/Saldo.
+ * - Saca POS/T.C.
+ * - Separa letras↔dígitos del concepto
+ * - Borra enteros del concepto (folios/CLABE/refs) — nunca tienen .centavos
+ * - Despega montos de columna pegados (.xx pegado a otro monto)
+ * No parte montos válidos con coma (100,500.00).
  */
 export declare function unglueMoneyText(s: string): string;
+export interface AmountColumns {
+    /** Texto del concepto sin ningún dígito */
+    concept: string;
+    /** Retiro o Depósito impreso (una sola columna; la otra viene vacía) */
+    printedMove: number | null;
+    /** Saldo (última columna) */
+    saldo: number | null;
+}
 /**
- * Extrae montos; soporta saldo negativo Banamex escrito como "329.95-".
- * Orden: quitar T.C./POS → separar montos pegados → aplicar signo −.
+ * Banamex: FECHA | CONCEPTO | RETIROS | DEPÓSITOS | SALDO
+ * En texto plano solo existen 1–2 montos al FINAL (retiro XOR depósito + saldo).
+ * Cualquier número anterior es del concepto y se IGNORA por completo.
+ */
+export declare function extractAmountColumns(body: string): AmountColumns;
+/**
+ * Solo montos de columnas (trailing). No devuelve números del concepto.
  */
 export declare function collectMoney(s: string): number[];
 /**

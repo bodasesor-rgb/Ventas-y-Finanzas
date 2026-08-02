@@ -4,7 +4,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.parsePdfToLines = parsePdfToLines;
+exports.stripConceptNumbers = stripConceptNumbers;
 exports.unglueMoneyText = unglueMoneyText;
+exports.extractAmountColumns = extractAmountColumns;
 exports.collectMoney = collectMoney;
 exports.moneyTypoVariants = moneyTypoVariants;
 exports.extractMoveAndSaldo = extractMoveAndSaldo;
@@ -86,12 +88,27 @@ function parseMoneyToken(tok) {
         return null;
     return Math.round(n * 100) / 100;
 }
+/** Monto Banamex con centavos (única forma válida en columnas Retiros/Depósitos/Saldo). */
+const MONEY_COL_RE = /-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}/g;
 /**
- * Separa montos Banamex pegados y quita basura de folios/POS/T.C.
- * Casos típicos:
- *   500.003,169.72      → 500.00 + 3,169.72
- *   400.00785,432.10    → 400.00 + 785,432.10
- *   9000/00126,000.00   → 6,000.00
+ * Quita del CONCEPTO todo lo que no es texto: folios, CLABE, refs, fechas, etc.
+ * Por política: NUNCA un número del concepto puede entrar al monto.
+ */
+function stripConceptNumbers(concept) {
+    return String(concept || "")
+        .replace(MONEY_COL_RE, " ")
+        .replace(/\d+/g, " ")
+        .replace(/[\/\\|#_@]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+/**
+ * Prepara la línea para leer SOLO columnas Retiros/Depósitos/Saldo.
+ * - Saca POS/T.C.
+ * - Separa letras↔dígitos del concepto
+ * - Borra enteros del concepto (folios/CLABE/refs) — nunca tienen .centavos
+ * - Despega montos de columna pegados (.xx pegado a otro monto)
+ * No parte montos válidos con coma (100,500.00).
  */
 function unglueMoneyText(s) {
     let t = String(s || "")
@@ -100,38 +117,90 @@ function unglueMoneyText(s) {
         .replace(/Mexican Peso T\.C\.[^\d]*/gi, " ")
         .replace(/T\.C\.1\s*\.\d+/gi, " ")
         .replace(/T\.C\.\s*\d+\.\d{4,6}/gi, " ")
-        // POS Banamex: 9000/0012 + dígito basura, sin comerse el monto
-        //   9000/00126,000.00 → 6,000.00
+        // POS Banamex: 9000/0012 + dígito basura → deja el monto intacto
         .replace(/900[01]\/001\d(?=\d{1,3}(?:,\d{3})*\.\d{2})/gi, " ")
-        // Fechas AAAAMMDD sueltas
-        .replace(/\b20\d{6}\b/g, " ")
-        // Folios largos pegados delante de monto con coma de miles
-        .replace(/\d{8,}(?=\d{1,3}(?:,\d{3})+\.\d{2})/g, " ")
         .replace(/\s+/g, " ")
         .trim();
-    // Clave: partir SIEMPRE tras los centavos si sigue un dígito
-    //   400.00785,432.10 → 400.00 785,432.10
-    //   500.003,169.72   → 500.00 3,169.72
-    //   214600.00785,400 → 214600.00 785,400.00
+    // PERIODO MAY29500.00 → MAY29 500.00 (día pegado al monto de comisión)
+    t = t.replace(new RegExp(`\\b(${MONTH_RE})([0-2]\\d|3[01])(\\d{1,3}(?:,\\d{3})*\\.\\d{2})`, "gi"), "$1$2 $3");
+    // REF785400.00 → REF 785400.00 (el folio queda como entero o monto aparte)
+    t = t.replace(/([A-Za-zÁÉÍÓÚÑáéíóúñ])(\d)/g, "$1 $2");
+    t = t.replace(/(\d)([A-Za-zÁÉÍÓÚÑáéíóúñ])/g, "$1 $2");
+    // Enteros del concepto (sin .centavos): folios, CLABE, fechas, refs
+    t = t.replace(/\b\d{3,}(?![,\d]*\.\d{2})\b/g, " ");
+    // Columnas pegadas: 400.00785,432.10 → 400.00 785,432.10
     t = t.replace(/(\.\d{2})(?=\d)/g, "$1 ");
-    // Saldo negativo Banamex: 329.95-
     t = t.replace(/((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})-/g, " -$1 ");
     return t.replace(/\s+/g, " ").trim();
 }
 /**
- * Extrae montos; soporta saldo negativo Banamex escrito como "329.95-".
- * Orden: quitar T.C./POS → separar montos pegados → aplicar signo −.
+ * Banamex: FECHA | CONCEPTO | RETIROS | DEPÓSITOS | SALDO
+ * En texto plano solo existen 1–2 montos al FINAL (retiro XOR depósito + saldo).
+ * Cualquier número anterior es del concepto y se IGNORA por completo.
+ */
+function extractAmountColumns(body) {
+    const prepared = unglueMoneyText(body);
+    const hits = [];
+    const re = new RegExp(MONEY_COL_RE.source, "g");
+    let m;
+    while ((m = re.exec(prepared)) !== null) {
+        const v = parseMoneyToken(m[0]);
+        if (v == null)
+            continue;
+        hits.push({
+            value: v,
+            start: m.index,
+            end: m.index + m[0].length,
+            hasComma: m[0].includes(","),
+        });
+    }
+    if (!hits.length) {
+        return {
+            concept: stripConceptNumbers(prepared),
+            printedMove: null,
+            saldo: null,
+        };
+    }
+    // Solo bloque contiguo al final: entre montos de columna solo espacios
+    const trailing = [hits[hits.length - 1]];
+    for (let i = hits.length - 2; i >= 0 && trailing.length < 2; i--) {
+        const prev = hits[i];
+        const between = prepared.slice(prev.end, trailing[0].start);
+        if (/^\s*$/.test(between)) {
+            trailing.unshift(prev);
+        }
+        else {
+            // Hay letras/basura → ese monto está en el CONCEPTO: no capturar
+            break;
+        }
+    }
+    const saldoHit = trailing[trailing.length - 1];
+    const saldo = Math.abs(saldoHit.value);
+    let printedMove = trailing.length >= 2 ? Math.abs(trailing[trailing.length - 2].value) : null;
+    // Folio del concepto disfrazado de monto (785400.00 sin coma) junto a saldo real (214,600.00)
+    if (printedMove != null &&
+        trailing.length >= 2 &&
+        !trailing[trailing.length - 2].hasComma &&
+        printedMove >= 1000 &&
+        saldoHit.hasComma) {
+        printedMove = null;
+    }
+    const cut = printedMove == null && trailing.length >= 2
+        ? saldoHit.start
+        : trailing[0].start;
+    const concept = stripConceptNumbers(prepared.slice(0, cut));
+    return { concept, printedMove, saldo };
+}
+/**
+ * Solo montos de columnas (trailing). No devuelve números del concepto.
  */
 function collectMoney(s) {
-    const t = unglueMoneyText(s);
+    const cols = extractAmountColumns(s);
     const out = [];
-    const re = /-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}/g;
-    let m;
-    while ((m = re.exec(t)) !== null) {
-        const n = parseMoneyToken(m[0]);
-        if (n != null)
-            out.push(n);
-    }
+    if (cols.printedMove != null)
+        out.push(cols.printedMove);
+    if (cols.saldo != null)
+        out.push(cols.saldo);
     return out;
 }
 /**
@@ -186,10 +255,9 @@ function stripBanamexPosJunk(body) {
     return unglueMoneyText(body);
 }
 function softClean(body) {
-    return stripBanamexPosJunk(body)
-        .replace(/\b\d{12,}\b/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
+    // Descripción = solo concepto; montos/folios fuera
+    const cols = extractAmountColumns(body);
+    return cols.concept || stripConceptNumbers(stripBanamexPosJunk(body));
 }
 /**
  * Extrae movimiento + saldo (legado / debug).
@@ -248,16 +316,8 @@ function splitMergedBodies(rawBody) {
         .filter((p) => p.length > 3);
 }
 function cleanDescription(body) {
-    let desc = softClean(body);
-    desc = desc
-        .replace(/U\.S\.\s*Dollar\s*T\.C\.\s*\d+\.\d{4,6}/gi, " ")
-        .replace(/Mexican Peso T\.C\.[^\d]*/gi, " ")
-        .replace(/T\.C\.1\s*\.\d+/gi, " ")
-        .replace(/-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}/g, " ")
-        .replace(/(?<![\d,.])\b\d{6,8}\b(?![\d,.])/g, " ")
-        .replace(/\b\d{10,}\b/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
+    // Cero dígitos del concepto: el monto solo vive en Retiros/Depósitos/Saldo
+    const desc = softClean(body).replace(/\d+/g, " ").replace(/\s+/g, " ").trim();
     return desc.slice(0, 220);
 }
 function monthToken(mon) {
@@ -294,9 +354,9 @@ function extractBanamex(text, rules, options = {}) {
         if (!rawBody)
             continue;
         if (/^SALDO ANTERIOR/i.test(rawBody)) {
-            const nums = collectMoney(rawBody);
-            if (nums.length)
-                openingSaldo = nums[nums.length - 1];
+            const cols = extractAmountColumns(rawBody);
+            if (cols.saldo != null)
+                openingSaldo = cols.saldo;
             continue;
         }
         // Basura de tablas de intereses / resumen
@@ -307,8 +367,8 @@ function extractBanamex(text, rules, options = {}) {
         }
         // Exención informativa: actualiza saldo, no cuenta como movimiento
         if (/^EXENCION COBRO/i.test(rawBody)) {
-            const nums = collectMoney(rawBody);
-            if (nums.length) {
+            const cols = extractAmountColumns(rawBody);
+            if (cols.saldo != null) {
                 rows.push({
                     date: `${tok.day}/${tok.mon}`,
                     day: tok.day,
@@ -316,46 +376,53 @@ function extractBanamex(text, rules, options = {}) {
                     body: rawBody,
                     desc: "EXENCION COBRO COMISION",
                     printedMove: null,
-                    saldo: nums[nums.length - 1],
+                    saldo: cols.saldo,
                     skipTx: true,
                 });
             }
             continue;
         }
-        // Comisión: "PERIODO MAY01 AL MAY29500.003,169.72"
-        const periodo = rawBody.match(/PERIODO\s+[A-ZÁÉÍÓÚ]{3}\d{0,2}\s+AL\s+[A-ZÁÉÍÓÚ]{3}(\d{2})(\d[\d,]*\.\d{2})\s*((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})/i);
-        if (periodo && /COMISI/i.test(rawBody)) {
-            rows.push({
-                date: `${tok.day}/${tok.mon}`,
-                day: tok.day,
-                mon: tok.mon,
-                body: rawBody,
-                desc: cleanDescription(rawBody),
-                printedMove: parseMoneyToken(periodo[2]),
-                saldo: parseMoneyToken(periodo[3]),
-            });
-            continue;
+        // Comisión: columnas al final; PERIODO… puede pegar día+monto
+        if (/COMISI/i.test(rawBody) && /PERIODO/i.test(rawBody)) {
+            const cols = extractAmountColumns(rawBody);
+            if (cols.saldo != null) {
+                rows.push({
+                    date: `${tok.day}/${tok.mon}`,
+                    day: tok.day,
+                    mon: tok.mon,
+                    body: rawBody,
+                    desc: cleanDescription(rawBody) || "COMISION",
+                    printedMove: cols.printedMove,
+                    saldo: cols.saldo,
+                });
+                continue;
+            }
         }
         for (const body of splitMergedBodies(rawBody)) {
             if (/^SALDO ANTERIOR/i.test(body))
                 continue;
-            const nums = collectMoney(body);
-            let printedMove = null;
-            let saldo = null;
-            if (nums.length >= 2) {
-                printedMove = nums[nums.length - 2];
-                saldo = nums[nums.length - 1];
-            }
-            else if (nums.length === 1) {
-                saldo = nums[0];
-            }
-            const desc = cleanDescription(body);
-            if (desc.length < 3)
+            // ESTRICTO: solo Retiros/Depósitos + Saldo al final de la línea
+            const cols = extractAmountColumns(body);
+            const printedMove = cols.printedMove;
+            const saldo = cols.saldo;
+            if (saldo == null)
                 continue;
-            if (/^PAGO RECIBIDO DE SU REF\.?/i.test(desc.trim()) && desc.length < 40) {
-                // Puede ser abono real corto; no filtrar si hay saldo
-                if (saldo == null)
+            const desc = cols.concept || cleanDescription(body);
+            if (desc.length < 3) {
+                // Concepto quedó vacío tras quitar números; usar keywords del body
+                const fallback = cleanDescription(body);
+                if (fallback.length < 3)
                     continue;
+                rows.push({
+                    date: `${tok.day}/${tok.mon}`,
+                    day: tok.day,
+                    mon: tok.mon,
+                    body,
+                    desc: fallback,
+                    printedMove,
+                    saldo,
+                });
+                continue;
             }
             rows.push({
                 date: `${tok.day}/${tok.mon}`,
