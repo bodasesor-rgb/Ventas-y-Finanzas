@@ -21,7 +21,7 @@ curl -X POST https://TU-HOST/api/ventas/brevo-setup \
   -d '{"api_key":"xkeysib-..."}'
 ```
 
-O en Hostinger: variable de entorno **`BREVO_API_KEY`** (o `BREVO`).
+O en Hostinger: variable de entorno **`BREVO_AUTH`** (también `BREVO_API_KEY` / `BREVO`).
 
 3. Sincronizar:
 

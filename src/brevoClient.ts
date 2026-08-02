@@ -33,6 +33,7 @@ function readStore_(): BrevoStore | null {
 
 export function getBrevoApiKey(): string {
   const fromEnv = (
+    process.env.BREVO_AUTH ||
     process.env.BREVO_API_KEY ||
     process.env.BREVO ||
     process.env.SENDINBLUE_API_KEY ||
@@ -61,13 +62,14 @@ export function brevoConfigured(): { ok: boolean; missing: string[] } {
   if (getBrevoApiKey()) return { ok: true, missing: [] };
   return {
     ok: false,
-    missing: ["BREVO_API_KEY o data/brevo.json"],
+    missing: ["BREVO_AUTH / BREVO_API_KEY o data/brevo.json"],
   };
 }
 
 export function brevoStatus() {
   const cfg = brevoConfigured();
   const keys = [
+    "BREVO_AUTH",
     "BREVO_API_KEY",
     "BREVO",
     "SENDINBLUE_API_KEY",

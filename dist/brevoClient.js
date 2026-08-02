@@ -29,7 +29,8 @@ function readStore_() {
     return null;
 }
 function getBrevoApiKey() {
-    const fromEnv = (process.env.BREVO_API_KEY ||
+    const fromEnv = (process.env.BREVO_AUTH ||
+        process.env.BREVO_API_KEY ||
         process.env.BREVO ||
         process.env.SENDINBLUE_API_KEY ||
         "").trim();
