@@ -13,10 +13,7 @@ import { detectPeriodFromText } from "./period";
 import { deleteStatementPdf, saveStatementPdf } from "./statementFiles";
 import { pruneMerchantCategories } from "./autoCategories";
 import { colorForCategoryId } from "./categoryColors";
-import {
-  extractStatementOfficialTotals,
-  reconcileTotals,
-} from "./statementSummary";
+import { buildOfficialAwareTotals } from "./officialTotals";
 import { applyAutoReviewToRun, verifyOnFirstRead } from "./autoReview";
 import {
   archiveStatementToDrive,
@@ -867,12 +864,15 @@ pnlRouter.patch("/api/pnl/runs/:runId/lines/:lineId", (req, res) => {
     if (isIncomeCategory(line.category)) line.needsReview = false;
   }
 
-  run.summaryByCategory = summarizeByCategory(run.lines);
-  run.totals = summarizeTotals(run.lines);
   const text = run.textFull || run.textPreview || "";
   if (text.length >= 50) {
-    const oficial = extractStatementOfficialTotals(text);
-    run.reconciliation = reconcileTotals(oficial, run.totals);
+    const finalized = buildOfficialAwareTotals(run.lines, text);
+    run.summaryByCategory = finalized.summaryByCategory;
+    run.totals = finalized.totals;
+    run.reconciliation = finalized.reconciliation;
+  } else {
+    run.summaryByCategory = summarizeByCategory(run.lines);
+    run.totals = summarizeTotals(run.lines);
   }
   saveRuns(runs);
   res.json({

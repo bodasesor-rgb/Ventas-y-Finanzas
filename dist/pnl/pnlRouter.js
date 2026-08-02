@@ -15,7 +15,7 @@ const period_1 = require("./period");
 const statementFiles_1 = require("./statementFiles");
 const autoCategories_1 = require("./autoCategories");
 const categoryColors_1 = require("./categoryColors");
-const statementSummary_1 = require("./statementSummary");
+const officialTotals_1 = require("./officialTotals");
 const autoReview_1 = require("./autoReview");
 const driveArchive_1 = require("./driveArchive");
 const providerAnalysis_1 = require("./providerAnalysis");
@@ -793,12 +793,16 @@ exports.pnlRouter.patch("/api/pnl/runs/:runId/lines/:lineId", (req, res) => {
         if ((0, store_1.isIncomeCategory)(line.category))
             line.needsReview = false;
     }
-    run.summaryByCategory = (0, parseStatement_1.summarizeByCategory)(run.lines);
-    run.totals = (0, parseStatement_1.summarizeTotals)(run.lines);
     const text = run.textFull || run.textPreview || "";
     if (text.length >= 50) {
-        const oficial = (0, statementSummary_1.extractStatementOfficialTotals)(text);
-        run.reconciliation = (0, statementSummary_1.reconcileTotals)(oficial, run.totals);
+        const finalized = (0, officialTotals_1.buildOfficialAwareTotals)(run.lines, text);
+        run.summaryByCategory = finalized.summaryByCategory;
+        run.totals = finalized.totals;
+        run.reconciliation = finalized.reconciliation;
+    }
+    else {
+        run.summaryByCategory = (0, parseStatement_1.summarizeByCategory)(run.lines);
+        run.totals = (0, parseStatement_1.summarizeTotals)(run.lines);
     }
     (0, store_1.saveRuns)(runs);
     res.json({

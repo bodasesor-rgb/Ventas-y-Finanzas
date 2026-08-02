@@ -155,8 +155,26 @@ function renderSendSheetStatus(run) {
 function renderTotals(run) {
   const bar = document.getElementById("totalsBar");
   if (!bar) return;
-  const t = run.totals || computeTotals(run.lines);
   const rec = run.reconciliation;
+  const parseado =
+    run.totals?.parseado ||
+    rec?.parseado ||
+    computeTotals(run.lines);
+  // Totales grandes = resumen del inicio del PDF (no la suma de líneas)
+  const oficialIng = rec?.oficial?.ingresosOficiales;
+  const oficialGas = rec?.oficial?.gastosOficiales;
+  const t = {
+    ingresos:
+      oficialIng != null
+        ? oficialIng
+        : run.totals?.ingresos ?? parseado.ingresos,
+    gastos:
+      oficialGas != null
+        ? oficialGas
+        : run.totals?.gastos ?? parseado.gastos,
+  };
+  t.neto = Math.round((t.ingresos + t.gastos) * 100) / 100;
+
   bar.hidden = false;
   renderSendSheetStatus(run);
   const ing = document.getElementById("totalIngresos");
@@ -180,51 +198,76 @@ function renderTotals(run) {
   gasCard?.classList.remove("ok-match", "bad-match");
 
   if (rec?.oficial) {
+    const diffIng =
+      rec.diffIngresos != null
+        ? rec.diffIngresos
+        : Math.round((parseado.ingresos - t.ingresos) * 100) / 100;
+    const diffGas =
+      rec.diffGastos != null
+        ? rec.diffGastos
+        : Math.round((parseado.gastos - t.gastos) * 100) / 100;
+
     if (oIng) {
       oIng.textContent =
-        rec.oficial.ingresosOficiales != null
-          ? `Estado: ${money(rec.oficial.ingresosOficiales)} (Depósitos)${
-              rec.diffIngresos != null
-                ? ` · diff ${money(rec.diffIngresos)}`
-                : ""
+        oficialIng != null
+          ? `Suma movimientos: ${money(parseado.ingresos)}${
+              Math.abs(diffIng) > 1 ? ` · dañado ${money(diffIng)}` : " · ok"
             }`
-          : "Estado: (sin leer Depósitos)";
+          : "No se leyó Depósitos del resumen";
     }
     if (oGas) {
       oGas.textContent =
-        rec.oficial.gastosOficiales != null
-          ? `Estado: ${money(rec.oficial.gastosOficiales)} (Otros cargos)${
-              rec.diffGastos != null ? ` · diff ${money(rec.diffGastos)}` : ""
+        oficialGas != null
+          ? `Suma movimientos: ${money(parseado.gastos)}${
+              Math.abs(diffGas) > 1 ? ` · dañado ${money(diffGas)}` : " · ok"
             }`
-          : "Estado: (sin leer Otros cargos)";
+          : "No se leyó Otros cargos del resumen";
     }
+    // Verde = tenemos resumen oficial; rojo en sublínea si movimientos no suman
     if (ingCard) {
-      ingCard.classList.add(rec.matchIngresos ? "ok-match" : "bad-match");
+      ingCard.classList.add(
+        oficialIng != null
+          ? rec.matchIngresos
+            ? "ok-match"
+            : "bad-match"
+          : "bad-match"
+      );
     }
     if (gasCard) {
-      gasCard.classList.add(rec.matchGastos ? "ok-match" : "bad-match");
+      gasCard.classList.add(
+        oficialGas != null
+          ? rec.matchGastos
+            ? "ok-match"
+            : "bad-match"
+          : "bad-match"
+      );
     }
     if (status) {
-      status.textContent = rec.matchCompleto
-        ? "✓ Cuadra con el PDF"
-        : "✗ No cuadra — revisa movimientos";
-      status.style.color = rec.matchCompleto ? "#0b6b3a" : "#9a3412";
+      if (oficialIng != null && oficialGas != null) {
+        status.textContent = rec.matchCompleto
+          ? "✓ Resumen + movimientos cuadran"
+          : "Resumen OK · movimientos con daño";
+        status.style.color = rec.matchCompleto ? "#0b6b3a" : "#9a3412";
+      } else {
+        status.textContent = "Sin resumen del PDF";
+        status.style.color = "#9a3412";
+      }
     }
     if (msg) {
       msg.hidden = false;
       msg.className =
         "reconcile-msg " + (rec.matchCompleto ? "ok" : "bad");
       msg.textContent = rec.matchCompleto
-        ? "Verificado: los totales coinciden con Depósitos y Otros cargos del estado de cuenta."
-        : `La 1ª lectura ya verificó y aún no cuadra. Depósitos estado ${money(
-            rec.oficial.ingresosOficiales || 0
-          )} vs parseado ${money(t.ingresos)}. Cargos estado ${money(
-            rec.oficial.gastosOficiales || 0
-          )} vs parseado ${money(t.gastos)}. Pulsa «Revisar automáticamente (forzar cuadre)».`;
+        ? "Los totales grandes son del resumen del estado (inicio del PDF). La suma de movimientos también coincide."
+        : `Los totales grandes son del resumen del estado (Depósitos / Otros cargos del inicio). La suma de movimientos no coincide — ahí están las líneas dañadas (diff dep ${money(
+            diffIng
+          )}, cargos ${money(
+            diffGas
+          )}). Corrige montos marcados o usa «Revisar automáticamente».`;
     }
   } else {
-    if (oIng) oIng.textContent = "";
-    if (oGas) oGas.textContent = "";
+    if (oIng) oIng.textContent = "Suma de movimientos (sin resumen)";
+    if (oGas) oGas.textContent = "Suma de movimientos (sin resumen)";
     if (status) status.textContent = "";
     if (msg) msg.hidden = true;
   }

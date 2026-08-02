@@ -15,6 +15,7 @@ const parseStatement_1 = require("./parseStatement");
 const statementSummary_1 = require("./statementSummary");
 const autoCategories_1 = require("./autoCategories");
 const counterparties_1 = require("./counterparties");
+const officialTotals_1 = require("./officialTotals");
 const TOL = 1;
 const STRATEGIES = [
     { id: "delta", label: "Δsaldo + reparación dígitos pegados" },
@@ -77,18 +78,16 @@ function officialSaldoConsistent(o, tol = 2) {
     return Math.abs(expected - o.saldoCorte) <= tol;
 }
 /**
- * Si el resumen no cuadra con saldos, prueba totales alternos del texto
- * (a veces "Otros cargos" del detalle pisa el del resumen).
+ * Totales oficiales del inicio del estado; si no cuadran con saldos,
+ * prueba candidatos solo dentro de la portada (antes del detalle).
  */
 function refineOfficialTotals(text) {
-    const base = (0, statementSummary_1.extractStatementOfficialTotals)(text);
+    const base = (0, officialTotals_1.extractOfficialFromPreamble)(text);
     if (officialSaldoConsistent(base))
         return base;
-    const t = text.replace(/\s+/g, " ");
-    const allMoney = [
-        ...t.matchAll(/((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})/g),
-    ].map((m) => Number(m[1].replace(/,/g, "")));
-    // Candidatos cerca de etiquetas de cargos/depósitos
+    const cut = text.search(/Detalle de Operaciones/i);
+    const preamble = cut > 80 ? text.slice(0, cut) : text.slice(0, 4500);
+    const t = preamble.replace(/\s+/g, " ");
     const depMatches = [
         ...t.matchAll(/Dep[oó]sitos\s*((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})/gi),
     ].map((m) => Number(m[1].replace(/,/g, "")));
@@ -101,7 +100,6 @@ function refineOfficialTotals(text) {
         return base;
     }
     let best = base;
-    let bestErr = Infinity;
     const score = (o) => {
         if (o.saldoAnterior == null ||
             o.saldoCorte == null ||
@@ -110,12 +108,9 @@ function refineOfficialTotals(text) {
             return Infinity;
         return Math.abs(o.saldoAnterior + o.ingresosOficiales + o.gastosOficiales - o.saldoCorte);
     };
-    bestErr = score(base);
+    let bestErr = score(base);
     for (const dep of [...new Set(depMatches)]) {
-        const cargos = cargoMatches.length > 0
-            ? cargoMatches
-            : allMoney.filter((n) => n > 0 && n !== dep);
-        for (const cargo of [...new Set(cargos)].slice(0, 12)) {
+        for (const cargo of [...new Set(cargoMatches)].slice(0, 12)) {
             const cand = {
                 ...base,
                 depositos: dep,
@@ -523,12 +518,12 @@ function verifyStatementParse(text, rules, options = {}) {
     }
     if (!best) {
         const empty = prepare([]);
-        const got = withOficial(oficial, empty);
+        const finalized = (0, officialTotals_1.buildOfficialAwareTotals)(empty, oficial);
         return {
             lines: empty,
-            summaryByCategory: {},
-            totals: got.totals,
-            reconciliation: got.reconciliation,
+            summaryByCategory: finalized.summaryByCategory,
+            totals: finalized.totals,
+            reconciliation: finalized.reconciliation,
             verified: false,
             autoReview: {
                 ranAt: new Date().toISOString(),
@@ -656,27 +651,29 @@ function verifyStatementParse(text, rules, options = {}) {
                 : l;
         });
     }
-    const finals = withOficial(oficial, finalLines);
-    const matched = finals.reconciliation.matchCompleto;
+    // Totales principales = resumen del inicio del estado (no la suma de líneas)
+    const finalized = (0, officialTotals_1.buildOfficialAwareTotals)(finalLines, oficial);
+    const matched = finalized.reconciliation.matchCompleto;
+    const parseado = finalized.totals.parseado;
     let message;
     if (matched && best.strategy === "force-adjust") {
         message = `Cuadrado con ajuste de conciliación. Revisa las líneas «AJUSTE CONCILIACIÓN» marcadas en Revisar.`;
     }
     else if (matched && suspects.some((s) => s.suggestedAmount != null)) {
         const top = suspects.find((s) => s.suggestedAmount != null);
-        message = `Verificado y corregido: ${top.description.slice(0, 50)} ${money(top.amount)} → ${money(top.suggestedAmount)}. Ya cuadra con el PDF.`;
+        message = `Verificado y corregido: ${top.description.slice(0, 50)} ${money(top.amount)} → ${money(top.suggestedAmount)}. Movimientos = resumen del estado.`;
     }
     else if (matched) {
-        message = `Verificado en la 1ª lectura (${passes.length} pasada(s)). Cuadra con Depósitos y Otros cargos del PDF.`;
+        message = `Totales del resumen del estado aplicados. La suma de movimientos también cuadra.`;
     }
     else {
-        message = `1ª lectura verificada: aún no cuadra (diff dep ${finals.reconciliation.diffIngresos ?? "—"}, cargos ${finals.reconciliation.diffGastos ?? "—"}). Usa «Revisar automáticamente» — forzará el cuadre.`;
+        message = `Totales = resumen del PDF (Depósitos ${money(finalized.totals.ingresos)}, cargos ${money(finalized.totals.gastos)}). Suma de movimientos: dep ${money(parseado.ingresos)} / cargos ${money(parseado.gastos)} — hay líneas dañadas (diff ${money(finalized.reconciliation.diffIngresos ?? 0)} / ${money(finalized.reconciliation.diffGastos ?? 0)}). Usa revisión o corrige los marcados.`;
     }
     return {
         lines: finalLines,
-        summaryByCategory: (0, parseStatement_1.summarizeByCategory)(finalLines),
-        totals: finals.totals,
-        reconciliation: finals.reconciliation,
+        summaryByCategory: finalized.summaryByCategory,
+        totals: finalized.totals,
+        reconciliation: finalized.reconciliation,
         verified: matched,
         autoReview: {
             ranAt: new Date().toISOString(),

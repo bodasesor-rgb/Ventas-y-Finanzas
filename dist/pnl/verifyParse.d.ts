@@ -11,17 +11,23 @@ export interface VerifyResult {
         ingresos: number;
         gastos: number;
         neto: number;
+        source?: "oficial" | "parseado";
+        parseado?: {
+            ingresos: number;
+            gastos: number;
+            neto: number;
+        };
     };
     reconciliation: Reconciliation;
     autoReview: AutoReviewReport;
-    /** true si ya cuadró en la verificación (sin botón) */
+    /** true si la suma de movimientos ya cuadra con el resumen oficial */
     verified: boolean;
 }
 /** Identidad: Saldo anterior + depósitos + gastos ≈ saldo al corte */
 export declare function officialSaldoConsistent(o: StatementOfficialTotals, tol?: number): boolean;
 /**
- * Si el resumen no cuadra con saldos, prueba totales alternos del texto
- * (a veces "Otros cargos" del detalle pisa el del resumen).
+ * Totales oficiales del inicio del estado; si no cuadran con saldos,
+ * prueba candidatos solo dentro de la portada (antes del detalle).
  */
 export declare function refineOfficialTotals(text: string): StatementOfficialTotals;
 /**

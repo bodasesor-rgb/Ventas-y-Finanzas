@@ -98,6 +98,14 @@ export interface StatementRun {
         ingresos: number;
         gastos: number;
         neto: number;
+        /** oficial = Depósitos/Otros cargos del inicio del PDF */
+        source?: "oficial" | "parseado";
+        /** Suma de movimientos leídos (para ver líneas dañadas) */
+        parseado?: {
+            ingresos: number;
+            gastos: number;
+            neto: number;
+        };
     };
     /** Totales del resumen del PDF + cruce con lo parseado */
     reconciliation?: {

@@ -82,10 +82,16 @@ function fillFromRun(run) {
     }
     let venta = Number(s.venta) || 0;
     let ingreso = Number(s.ingreso) || 0;
-    const ingresosTot = run.totals?.ingresos ?? 0;
+    // Preferir Depósitos del resumen del estado (inicio del PDF)
+    const oficialIng = run.reconciliation?.oficial?.ingresosOficiales;
+    const oficialGas = run.reconciliation?.oficial?.gastosOficiales;
+    const ingresosTot = oficialIng != null ? oficialIng : run.totals?.ingresos ?? 0;
     if (venta === 0 && ingreso === 0 && ingresosTot > 0) {
         ingreso = ingresosTot;
     }
+    const netoOficial = oficialIng != null && oficialGas != null
+        ? round2(oficialIng + oficialGas)
+        : round2(run.totals?.neto ?? 0);
     return {
         venta: round2(Math.max(0, venta)),
         ingreso: round2(Math.max(0, ingreso)),
@@ -103,7 +109,7 @@ function fillFromRun(run) {
         otro: round2(absAmt(s.otro)),
         otros: round2(otros + absAmt(s.renta) + absAmt(s.impuestos)),
         socio: round2(absAmt(s.socio)),
-        neto: round2(run.totals?.neto ?? 0),
+        neto: netoOficial,
         ingresosTot: round2(ingresosTot),
         filled: true,
     };

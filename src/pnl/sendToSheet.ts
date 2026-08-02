@@ -40,7 +40,17 @@ export async function sendRunToBancoSheet(run: StatementRun): Promise<{
   }
   const year = Number(periodKey.slice(0, 4));
   const month = Number(periodKey.slice(5, 7));
+  // Preferir Depósitos / Otros cargos del resumen del PDF (inicio del estado)
+  const oficial = run.reconciliation?.oficial;
   const totals = run.totals || { ingresos: 0, gastos: 0, neto: 0 };
+  const ingresos =
+    oficial?.ingresosOficiales != null
+      ? oficial.ingresosOficiales
+      : totals.ingresos;
+  const gastosSigned =
+    oficial?.gastosOficiales != null ? oficial.gastosOficiales : totals.gastos;
+  const neto = Math.round((ingresos + gastosSigned) * 100) / 100;
+
   const summary = run.summaryByCategory || {};
   const cats = loadCategories();
   const labelOf = (id: string) =>
@@ -59,17 +69,16 @@ export async function sendRunToBancoSheet(run: StatementRun): Promise<{
     if (!known.has(id)) otros += amt;
   }
 
-  const oficial = run.reconciliation?.oficial;
   const payload = {
     action: "upsertEstadoResultados",
     year,
     month,
     periodKey,
     periodLabel: run.periodLabel || periodKey,
-    ingresos: totals.ingresos,
+    ingresos,
     // Sheet: gastos como positivo (monto salido)
-    gastos: Math.abs(totals.gastos),
-    neto: totals.neto,
+    gastos: Math.abs(gastosSigned),
+    neto,
     byCategory,
     otros: Math.round(otros * 100) / 100,
     depositosOficiales: oficial?.ingresosOficiales ?? oficial?.depositos ?? null,
@@ -77,7 +86,12 @@ export async function sendRunToBancoSheet(run: StatementRun): Promise<{
       oficial?.gastosOficiales == null
         ? null
         : Math.abs(oficial.gastosOficiales),
-    cuadra: Boolean(run.reconciliation?.matchCompleto),
+    // Cuadra a nivel totales oficiales del resumen (siempre, si existen)
+    cuadra: Boolean(
+      oficial?.ingresosOficiales != null && oficial?.gastosOficiales != null
+    ),
+    movimientosCuadran: Boolean(run.reconciliation?.matchCompleto),
+    totalsSource: totals.source || "oficial",
     runId: run.id,
     filename: run.storedName || run.filename || "",
   };
