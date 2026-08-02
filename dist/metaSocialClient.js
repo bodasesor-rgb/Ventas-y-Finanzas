@@ -44,7 +44,8 @@ function saveMetaTokenStore(raw) {
     return next;
 }
 function getMetaAccessToken() {
-    const fromEnv = (process.env.META_PAGE_ACCESS_TOKEN ||
+    const fromEnv = (process.env.FB_META ||
+        process.env.META_PAGE_ACCESS_TOKEN ||
         process.env.META_ACCESS_TOKEN ||
         process.env.FACEBOOK_PAGE_ACCESS_TOKEN ||
         "").trim();
@@ -53,7 +54,7 @@ function getMetaAccessToken() {
     const store = readStore_();
     if (store?.access_token)
         return store.access_token;
-    throw new Error("Falta token Meta: POST /api/ventas/meta-setup o META_PAGE_ACCESS_TOKEN");
+    throw new Error("Falta token Meta: env FB_META / META_PAGE_ACCESS_TOKEN o POST /api/ventas/meta-setup");
 }
 function metaConfigured() {
     const missing = [];
@@ -61,7 +62,7 @@ function metaConfigured() {
         getMetaAccessToken();
     }
     catch {
-        missing.push("META_PAGE_ACCESS_TOKEN o data/meta-token.json");
+        missing.push("FB_META / META_PAGE_ACCESS_TOKEN o data/meta-token.json");
     }
     return { ok: missing.length === 0, missing };
 }
@@ -69,6 +70,7 @@ function metaStatus() {
     const store = readStore_();
     const cfg = metaConfigured();
     const envKeys = [
+        "FB_META",
         "META_PAGE_ACCESS_TOKEN",
         "META_ACCESS_TOKEN",
         "FACEBOOK_PAGE_ACCESS_TOKEN",

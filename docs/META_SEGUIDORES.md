@@ -14,7 +14,9 @@ Escribe la **semana actual** (no inventa histórico).
 1. [Meta for Developers](https://developers.facebook.com/) → tu App → Graph API Explorer  
 2. Permisos: `pages_show_list`, `pages_read_engagement`, `instagram_basic` (o `instagram_manage_insights`)  
 3. Genera un **Page Access Token** de la página Bodasesor (largo plazo si puedes)  
-4. Envíalo al server:
+4. En Hostinger pon el token en la variable **`FB_META`** (o `META_PAGE_ACCESS_TOKEN`) y reinicia la app.
+
+   Alternativa (archivo en disco):
 
 ```bash
 curl -X POST https://TU-HOST/api/ventas/meta-setup \
