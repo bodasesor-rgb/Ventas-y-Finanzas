@@ -5,8 +5,8 @@ Llena la sección **Google Ads** en `Metricas 2026 Auto`:
 | Fila | Fuente preferida (API) | Fallback GA4 |
 |------|------------------------|--------------|
 | Inversión | `metrics.cost_micros` | `advertiserAdCost` (google/cpc) |
-| Conversión | `metrics.conversions` | — (no se escribe) |
-| CPL | cost ÷ conversions | — |
+| Conversión | `metrics.conversions` | **10% de los clics** (regla Bodasesor) |
+| CPL | cost ÷ conversions | cost ÷ (10% clics) |
 | CPC | cost ÷ clicks | cost ÷ clicks |
 | Clics | `metrics.clicks` | `advertiserAdClicks` |
 

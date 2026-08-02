@@ -331,7 +331,7 @@ export async function syncMetricasGoogleAds(opts?: {
     });
     source = "ga4";
     warning =
-      "Usando GA4 (costo/clics). Para Conversión/CPL reales configura Google Ads API.";
+      "Usando GA4 (costo/clics) + Conversión/CPL estimados = 10% de clics.";
   }
 
   const auth = await getGoogleAuthClient([
@@ -362,26 +362,29 @@ export async function syncMetricasGoogleAds(opts?: {
       source
     );
     const letter = colLetter_(w.col);
+    const clics = Math.round(m.clics);
+    const conversion = Math.round(m.conversion);
+    const inversion = round2_(m.inversion);
     const payload = {
       weekStart: formatDmy_(w.date),
-      inversion: round2_(m.inversion),
-      conversion: round2_(m.conversion),
-      cpl: round2_(m.cpl),
-      cpc: round2_(m.cpc),
-      clics: Math.round(m.clics),
+      inversion,
+      conversion,
+      cpl: conversion > 0 ? round2_(inversion / conversion) : 0,
+      cpc: clics > 0 ? round2_(inversion / clics) : round2_(m.cpc),
+      clics,
     };
     written.push(payload);
 
-    const writeConv = source === "google_ads_api";
-    const map: Array<[number, number, boolean]> = [
-      [layout.rows.inversion, payload.inversion, true],
-      [layout.rows.conversion, payload.conversion, writeConv],
-      [layout.rows.cpl, payload.cpl, writeConv],
-      [layout.rows.cpc, payload.cpc, true],
-      [layout.rows.clics, payload.clics, true],
+    // Conversión/CPL: API real o estimado 10% clics (GA4 fallback)
+    const map: Array<[number, number]> = [
+      [layout.rows.inversion, payload.inversion],
+      [layout.rows.conversion, payload.conversion],
+      [layout.rows.cpl, payload.cpl],
+      [layout.rows.cpc, payload.cpc],
+      [layout.rows.clics, payload.clics],
     ];
-    for (const [row, val, doWrite] of map) {
-      if (row > 0 && doWrite) {
+    for (const [row, val] of map) {
+      if (row > 0) {
         data.push({
           range: `'${layout.sheetName}'!${letter}${row}`,
           values: [[val]],

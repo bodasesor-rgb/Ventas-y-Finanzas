@@ -289,7 +289,11 @@ async function probeGoogleAdsApi() {
         };
     }
 }
-/** Fallback: costo/clics desde GA4 (Google Ads vinculado). Conversiones = 0. */
+/**
+ * Fallback: costo/clics desde GA4 (Google Ads vinculado).
+ * Conversiones: regla de negocio Bodasesor = 10% de los clics
+ * (no hay Google Ads API; el histórico del Sheet coincide ~10%).
+ */
 async function fetchGoogleAdsGa4Daily(opts) {
     const sa = (0, googleAuth_1.loadServiceAccountJson)();
     if (!sa?.client_email || !sa?.private_key) {
@@ -344,11 +348,13 @@ async function fetchGoogleAdsGa4Daily(opts) {
         if (!/^\d{8}$/.test(yyyymmdd))
             continue;
         const date = `${yyyymmdd.slice(0, 4)}-${yyyymmdd.slice(4, 6)}-${yyyymmdd.slice(6, 8)}`;
+        const clicks = num_(row.metricValues?.[1]?.value);
         out.push({
             date,
             cost: num_(row.metricValues?.[0]?.value),
-            clicks: num_(row.metricValues?.[1]?.value),
-            conversions: 0,
+            clicks,
+            // Estimado: 10% de clics (acordado; sin Ads API)
+            conversions: clicks * 0.1,
         });
     }
     return out;
