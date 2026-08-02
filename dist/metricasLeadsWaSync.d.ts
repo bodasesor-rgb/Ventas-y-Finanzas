@@ -1,8 +1,8 @@
 /** Clasificación de etapa según nombre (reglas Bodasesor). */
 export declare function classifyStatusName_(name: string): "no_contestaron" | "llenado" | "other";
 /**
- * Correo: si hay asunto, solo cotización (excluye publicidad).
- * Si Kommo no manda asunto (muy frecuente en events), cuenta el outgoing_mail.
+ * Solo mails reales con asunto que diga cotización.
+ * No cuenta chats Lucy ni outgoing_mail sin asunto (no se puede filtrar publicidad).
  */
 export declare function countsAsCotizacionMail_(opts: {
     subject: string;

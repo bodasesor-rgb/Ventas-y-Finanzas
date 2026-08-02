@@ -378,58 +378,7 @@ async function fetchOutgoingMailEvents(opts) {
         if (batch.length < 250)
             break;
     }
-    // Notes comunes cuyo texto menciona cotización (a veces el mail queda como nota)
-    if (out.length < 10) {
-        for (let page = 1; page <= Math.min(maxPages, 20); page++) {
-            const url = `${base}/api/v4/leads/notes?limit=250&page=${page}` +
-                `&filter[updated_at][from]=${opts.fromUnix}` +
-                `&filter[updated_at][to]=${opts.toUnix}`;
-            const res = await fetch(url, {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    Accept: "application/json",
-                },
-            });
-            if (res.status === 204)
-                break;
-            if (!res.ok)
-                break;
-            const data = (await readJsonOrThrow(res, `Kommo notes scan p${page}`));
-            const batch = data._embedded?.notes || [];
-            if (!batch.length)
-                break;
-            for (const note of batch) {
-                const params = (note.params || {});
-                const text = String(params.subject || params.text || params.message || "");
-                const norm = text
-                    .toLowerCase()
-                    .normalize("NFD")
-                    .replace(/\p{M}/gu, "");
-                if (!norm.includes("cotizacion"))
-                    continue;
-                if (norm.includes("publicidad") ||
-                    norm.includes("newsletter") ||
-                    norm.includes("marketing")) {
-                    continue;
-                }
-                const id = `cotiz-note-${note.id}`;
-                if (seen.has(id))
-                    continue;
-                seen.add(id);
-                const created = Number(note.created_at || note.updated_at || 0);
-                out.push({
-                    id: Number(note.id) || undefined,
-                    type: "cotizacion_note",
-                    entity_id: Number(note.entity_id) || undefined,
-                    created_at: created || undefined,
-                    subject: text.slice(0, 200),
-                    raw: note,
-                });
-            }
-            if (batch.length < 250)
-                break;
-        }
-    }
+    // NO escanear notes common/Lucy: mencionan "cotización" en WhatsApp y no son mails.
     return out;
 }
 function extractMailSubject_(ev) {

@@ -80,24 +80,28 @@ function classifyStatusName_(name) {
     return "other";
 }
 /**
- * Correo: si hay asunto, solo cotización (excluye publicidad).
- * Si Kommo no manda asunto (muy frecuente en events), cuenta el outgoing_mail.
+ * Solo mails reales con asunto que diga cotización.
+ * No cuenta chats Lucy ni outgoing_mail sin asunto (no se puede filtrar publicidad).
  */
 function countsAsCotizacionMail_(opts) {
     const n = normLabel_(opts.subject);
+    if (!n)
+        return false;
+    if (n.includes("lucy") || n.includes("agente virtual"))
+        return false;
     if (n.includes("publicidad") ||
         n.includes("newsletter") ||
         n.includes("marketing") ||
         (n.includes("promo") && !n.includes("cotizacion"))) {
         return false;
     }
-    if (n.includes("cotizacion"))
-        return true;
-    // Sin asunto legible: Kommo events outgoing_mail no traen subject
-    if (!n && (0, kommoApi_1.isOutgoingMailEvent_)({ type: opts.type, subject: opts.subject })) {
-        return true;
+    if (!(0, kommoApi_1.isOutgoingMailEvent_)({ type: opts.type, subject: opts.subject })) {
+        // mail_message_note sí; cotizacion_note/chats no
+        const t = String(opts.type || "");
+        if (t !== "mail_message_note" && t !== "mail_message")
+            return false;
     }
-    return false;
+    return n.includes("cotizacion");
 }
 function pickWaPipeline_(pipelines) {
     if (!pipelines.length)
