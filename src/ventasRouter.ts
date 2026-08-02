@@ -43,6 +43,12 @@ import {
   syncMetricasFacebookAds,
 } from "./metricasFacebookAdsSync";
 import {
+  googleAdsProbe,
+  googleAdsSyncStatus,
+  syncMetricasGoogleAds,
+} from "./metricasGoogleAdsSync";
+import { saveGoogleAdsCredentials } from "./googleAdsClient";
+import {
   discoverMetaAccounts,
   saveMetaTokenStore,
 } from "./metaSocialClient";
@@ -271,9 +277,11 @@ ventasRouter.get("/api/ventas/poll-now", async (_req, res) => {
 let lastVisitasTickAt = 0;
 let lastSeguidoresTickAt = 0;
 let lastFacebookAdsTickAt = 0;
+let lastGoogleAdsTickAt = 0;
 const VISITAS_TICK_EVERY_MS = 6 * 60 * 60_000;
 const SEGUIDORES_TICK_EVERY_MS = 12 * 60 * 60_000;
 const FACEBOOK_ADS_TICK_EVERY_MS = 6 * 60 * 60_000;
+const GOOGLE_ADS_TICK_EVERY_MS = 6 * 60 * 60_000;
 
 async function handleTick(_req: Request, res: Response): Promise<void> {
   try {
@@ -284,6 +292,9 @@ async function handleTick(_req: Request, res: Response): Promise<void> {
     > | null = null;
     let facebookAds: Awaited<
       ReturnType<typeof syncMetricasFacebookAds>
+    > | null = null;
+    let googleAds: Awaited<
+      ReturnType<typeof syncMetricasGoogleAds>
     > | null = null;
     const ga4 = metricasVisitasStatus().ga4;
     if (ga4.ok && Date.now() - lastVisitasTickAt > VISITAS_TICK_EVERY_MS) {
@@ -326,6 +337,20 @@ async function handleTick(_req: Request, res: Response): Promise<void> {
         );
       }
     }
+    if (
+      googleAdsSyncStatus().canSync &&
+      Date.now() - lastGoogleAdsTickAt > GOOGLE_ADS_TICK_EVERY_MS
+    ) {
+      lastGoogleAdsTickAt = Date.now();
+      try {
+        googleAds = await syncMetricasGoogleAds({ lookbackDays: 45 });
+      } catch (err) {
+        console.warn(
+          "[tick] sync google ads",
+          err instanceof Error ? err.message : err
+        );
+      }
+    }
     res.status(200).json({
       ok: true,
       at: new Date().toISOString(),
@@ -334,6 +359,7 @@ async function handleTick(_req: Request, res: Response): Promise<void> {
       visitas,
       seguidores,
       facebookAds,
+      googleAds,
       message: "Tick OK — cierres faltantes de la ventana sincronizados",
     });
   } catch (err) {
@@ -583,6 +609,111 @@ async function handleSyncFacebookAds(
 }
 ventasRouter.post("/api/ventas/sync-facebook-ads", handleSyncFacebookAds);
 ventasRouter.get("/api/ventas/sync-facebook-ads", handleSyncFacebookAds);
+
+/** Estado Google Ads → sección Google Ads en Metricas. */
+ventasRouter.get("/api/ventas/google-ads-status", async (_req, res) => {
+  try {
+    const probe = await googleAdsProbe();
+    res.status(200).json(probe);
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+      status: googleAdsSyncStatus(),
+    });
+  }
+});
+
+/**
+ * Guarda credenciales Google Ads API.
+ * Body: { developer_token, customer_id, client_id?, client_secret?, refresh_token?, login_customer_id?, use_service_account? }
+ * También acepta env GOOGLE_ADS (JSON) en Hostinger.
+ */
+ventasRouter.post("/api/ventas/google-ads-setup", (req, res) => {
+  try {
+    const body = (req.body || {}) as Record<string, unknown>;
+    const saved = saveGoogleAdsCredentials({
+      developer_token: String(body.developer_token || body.developerToken || ""),
+      customer_id: String(body.customer_id || body.customerId || ""),
+      client_id: body.client_id
+        ? String(body.client_id)
+        : body.clientId
+          ? String(body.clientId)
+          : undefined,
+      client_secret: body.client_secret
+        ? String(body.client_secret)
+        : body.clientSecret
+          ? String(body.clientSecret)
+          : undefined,
+      refresh_token: body.refresh_token
+        ? String(body.refresh_token)
+        : body.refreshToken
+          ? String(body.refreshToken)
+          : undefined,
+      login_customer_id: body.login_customer_id
+        ? String(body.login_customer_id)
+        : body.loginCustomerId
+          ? String(body.loginCustomerId)
+          : undefined,
+      use_service_account:
+        body.use_service_account === true ||
+        body.use_service_account === 1 ||
+        body.use_service_account === "1",
+    });
+    res.status(200).json({
+      ok: true,
+      saved: {
+        customer_id: saved.customer_id,
+        hasDeveloperToken: Boolean(saved.developer_token),
+        hasRefreshToken: Boolean(saved.refresh_token),
+        use_service_account: Boolean(saved.use_service_account),
+      },
+      status: googleAdsSyncStatus(),
+      message: "Credenciales guardadas. Ahora POST /api/ventas/sync-google-ads",
+    });
+  } catch (err) {
+    res.status(400).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+async function handleSyncGoogleAds(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    const body = (req.body || {}) as {
+      force?: unknown;
+      lookbackDays?: unknown;
+      preferGa4?: unknown;
+    };
+    const force =
+      String(req.query.force || body.force || "") === "1" ||
+      body.force === true;
+    const preferGa4 =
+      String(req.query.preferGa4 || body.preferGa4 || "") === "1" ||
+      body.preferGa4 === true;
+    const lookbackDays = Number(
+      req.query.lookbackDays || body.lookbackDays || 45
+    );
+    const result = await syncMetricasGoogleAds({
+      force,
+      lookbackDays,
+      preferGa4,
+    });
+    res.status(result.ok ? 200 : 502).json(result);
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+      status: googleAdsSyncStatus(),
+    });
+  }
+}
+ventasRouter.post("/api/ventas/sync-google-ads", handleSyncGoogleAds);
+ventasRouter.get("/api/ventas/sync-google-ads", handleSyncGoogleAds);
 
 /** Estado anti-duplicados: cuántas huellas hay en Sheet + cache. */
 ventasRouter.get("/api/ventas/dedupe-status", async (_req, res) => {

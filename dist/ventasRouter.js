@@ -13,6 +13,8 @@ const sheetEventosReader_1 = require("./sheetEventosReader");
 const metricasVisitasSync_1 = require("./metricasVisitasSync");
 const metricasSeguidoresSync_1 = require("./metricasSeguidoresSync");
 const metricasFacebookAdsSync_1 = require("./metricasFacebookAdsSync");
+const metricasGoogleAdsSync_1 = require("./metricasGoogleAdsSync");
+const googleAdsClient_1 = require("./googleAdsClient");
 const metaSocialClient_1 = require("./metaSocialClient");
 const metaAdsClient_1 = require("./metaAdsClient");
 const googleAuth_1 = require("./googleAuth");
@@ -218,15 +220,18 @@ exports.ventasRouter.get("/api/ventas/poll-now", async (_req, res) => {
 let lastVisitasTickAt = 0;
 let lastSeguidoresTickAt = 0;
 let lastFacebookAdsTickAt = 0;
+let lastGoogleAdsTickAt = 0;
 const VISITAS_TICK_EVERY_MS = 6 * 60 * 60_000;
 const SEGUIDORES_TICK_EVERY_MS = 12 * 60 * 60_000;
 const FACEBOOK_ADS_TICK_EVERY_MS = 6 * 60 * 60_000;
+const GOOGLE_ADS_TICK_EVERY_MS = 6 * 60 * 60_000;
 async function handleTick(_req, res) {
     try {
         const result = await (0, pollClosedDeals_1.runPollTick)();
         let visitas = null;
         let seguidores = null;
         let facebookAds = null;
+        let googleAds = null;
         const ga4 = (0, metricasVisitasSync_1.metricasVisitasStatus)().ga4;
         if (ga4.ok && Date.now() - lastVisitasTickAt > VISITAS_TICK_EVERY_MS) {
             lastVisitasTickAt = Date.now();
@@ -258,6 +263,16 @@ async function handleTick(_req, res) {
                 console.warn("[tick] sync facebook ads", err instanceof Error ? err.message : err);
             }
         }
+        if ((0, metricasGoogleAdsSync_1.googleAdsSyncStatus)().canSync &&
+            Date.now() - lastGoogleAdsTickAt > GOOGLE_ADS_TICK_EVERY_MS) {
+            lastGoogleAdsTickAt = Date.now();
+            try {
+                googleAds = await (0, metricasGoogleAdsSync_1.syncMetricasGoogleAds)({ lookbackDays: 45 });
+            }
+            catch (err) {
+                console.warn("[tick] sync google ads", err instanceof Error ? err.message : err);
+            }
+        }
         res.status(200).json({
             ok: true,
             at: new Date().toISOString(),
@@ -266,6 +281,7 @@ async function handleTick(_req, res) {
             visitas,
             seguidores,
             facebookAds,
+            googleAds,
             message: "Tick OK — cierres faltantes de la ventana sincronizados",
         });
     }
@@ -492,6 +508,99 @@ async function handleSyncFacebookAds(req, res) {
 }
 exports.ventasRouter.post("/api/ventas/sync-facebook-ads", handleSyncFacebookAds);
 exports.ventasRouter.get("/api/ventas/sync-facebook-ads", handleSyncFacebookAds);
+/** Estado Google Ads → sección Google Ads en Metricas. */
+exports.ventasRouter.get("/api/ventas/google-ads-status", async (_req, res) => {
+    try {
+        const probe = await (0, metricasGoogleAdsSync_1.googleAdsProbe)();
+        res.status(200).json(probe);
+    }
+    catch (err) {
+        res.status(502).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+            status: (0, metricasGoogleAdsSync_1.googleAdsSyncStatus)(),
+        });
+    }
+});
+/**
+ * Guarda credenciales Google Ads API.
+ * Body: { developer_token, customer_id, client_id?, client_secret?, refresh_token?, login_customer_id?, use_service_account? }
+ * También acepta env GOOGLE_ADS (JSON) en Hostinger.
+ */
+exports.ventasRouter.post("/api/ventas/google-ads-setup", (req, res) => {
+    try {
+        const body = (req.body || {});
+        const saved = (0, googleAdsClient_1.saveGoogleAdsCredentials)({
+            developer_token: String(body.developer_token || body.developerToken || ""),
+            customer_id: String(body.customer_id || body.customerId || ""),
+            client_id: body.client_id
+                ? String(body.client_id)
+                : body.clientId
+                    ? String(body.clientId)
+                    : undefined,
+            client_secret: body.client_secret
+                ? String(body.client_secret)
+                : body.clientSecret
+                    ? String(body.clientSecret)
+                    : undefined,
+            refresh_token: body.refresh_token
+                ? String(body.refresh_token)
+                : body.refreshToken
+                    ? String(body.refreshToken)
+                    : undefined,
+            login_customer_id: body.login_customer_id
+                ? String(body.login_customer_id)
+                : body.loginCustomerId
+                    ? String(body.loginCustomerId)
+                    : undefined,
+            use_service_account: body.use_service_account === true ||
+                body.use_service_account === 1 ||
+                body.use_service_account === "1",
+        });
+        res.status(200).json({
+            ok: true,
+            saved: {
+                customer_id: saved.customer_id,
+                hasDeveloperToken: Boolean(saved.developer_token),
+                hasRefreshToken: Boolean(saved.refresh_token),
+                use_service_account: Boolean(saved.use_service_account),
+            },
+            status: (0, metricasGoogleAdsSync_1.googleAdsSyncStatus)(),
+            message: "Credenciales guardadas. Ahora POST /api/ventas/sync-google-ads",
+        });
+    }
+    catch (err) {
+        res.status(400).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+});
+async function handleSyncGoogleAds(req, res) {
+    try {
+        const body = (req.body || {});
+        const force = String(req.query.force || body.force || "") === "1" ||
+            body.force === true;
+        const preferGa4 = String(req.query.preferGa4 || body.preferGa4 || "") === "1" ||
+            body.preferGa4 === true;
+        const lookbackDays = Number(req.query.lookbackDays || body.lookbackDays || 45);
+        const result = await (0, metricasGoogleAdsSync_1.syncMetricasGoogleAds)({
+            force,
+            lookbackDays,
+            preferGa4,
+        });
+        res.status(result.ok ? 200 : 502).json(result);
+    }
+    catch (err) {
+        res.status(502).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+            status: (0, metricasGoogleAdsSync_1.googleAdsSyncStatus)(),
+        });
+    }
+}
+exports.ventasRouter.post("/api/ventas/sync-google-ads", handleSyncGoogleAds);
+exports.ventasRouter.get("/api/ventas/sync-google-ads", handleSyncGoogleAds);
 /** Estado anti-duplicados: cuántas huellas hay en Sheet + cache. */
 exports.ventasRouter.get("/api/ventas/dedupe-status", async (_req, res) => {
     try {
