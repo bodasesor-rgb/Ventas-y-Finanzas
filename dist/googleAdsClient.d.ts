@@ -54,7 +54,11 @@ export declare function probeGoogleAdsApi(): Promise<{
     sample?: unknown;
     error?: string;
 }>;
-/** Fallback: costo/clics desde GA4 (Google Ads vinculado). Conversiones = 0. */
+/**
+ * Fallback: costo/clics desde GA4 (Google Ads vinculado).
+ * Conversiones: regla de negocio Bodasesor = 10% de los clics
+ * (no hay Google Ads API; el histórico del Sheet coincide ~10%).
+ */
 export declare function fetchGoogleAdsGa4Daily(opts: {
     since: string;
     until: string;

@@ -5,6 +5,51 @@ import type { KommoLead, KommoWebhookBody } from "./types";
  */
 export declare function extractLeadIdFromWebhook(body: KommoWebhookBody | Record<string, unknown>): number | null;
 export declare function extractPartialLeadFromWebhook(body: KommoWebhookBody | Record<string, unknown>, leadId: number): KommoLead;
+export declare function kommoGetJson_(pathAndQuery: string, label: string): Promise<unknown>;
+export type KommoPipelineStatus = {
+    id: number;
+    name: string;
+    sort?: number;
+    type?: number;
+};
+export type KommoPipeline = {
+    id: number;
+    name: string;
+    is_main?: boolean;
+    statuses: KommoPipelineStatus[];
+};
+/** Pipelines + statuses (nombres de etapas). */
+export declare function fetchKommoPipelines(): Promise<KommoPipeline[]>;
+/**
+ * Leads creados en [fromUnix, toUnix] (inclusive), paginado.
+ * Opcional: filtrar por pipeline_id.
+ */
+export declare function fetchLeadsCreatedBetween(opts: {
+    fromUnix: number;
+    toUnix: number;
+    pipelineId?: number;
+    maxPages?: number;
+}): Promise<KommoLead[]>;
+export type KommoMailEvent = {
+    id?: number;
+    type?: string;
+    entity_id?: number;
+    entity_type?: string;
+    created_at?: number;
+    value_after?: unknown;
+    value_before?: unknown;
+    subject?: string;
+    raw?: unknown;
+};
+/**
+ * Eventos de correo saliente en rango (para contar cotizaciones).
+ * Prueba types típicos de Kommo/amoCRM.
+ */
+export declare function fetchOutgoingMailEvents(opts: {
+    fromUnix: number;
+    toUnix: number;
+    maxPages?: number;
+}): Promise<KommoMailEvent[]>;
 /**
  * Obtiene el deal completo + contacto embebido desde la API de Kommo.
  */

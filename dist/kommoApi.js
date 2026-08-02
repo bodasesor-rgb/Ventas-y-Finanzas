@@ -2,6 +2,10 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.extractLeadIdFromWebhook = extractLeadIdFromWebhook;
 exports.extractPartialLeadFromWebhook = extractPartialLeadFromWebhook;
+exports.kommoGetJson_ = kommoGetJson_;
+exports.fetchKommoPipelines = fetchKommoPipelines;
+exports.fetchLeadsCreatedBetween = fetchLeadsCreatedBetween;
+exports.fetchOutgoingMailEvents = fetchOutgoingMailEvents;
 exports.fetchLeadWithContact = fetchLeadWithContact;
 exports.fetchRecentLeads = fetchRecentLeads;
 exports.listKommoWebhooks = listKommoWebhooks;
@@ -85,6 +89,210 @@ async function readJsonOrThrow(res, label) {
     catch {
         throw new Error(`${label}: JSON inválido (HTTP ${res.status}): ${text.slice(0, 200)}`);
     }
+}
+function kommoAuth_() {
+    const base = KOMMO_BASE();
+    const token = KOMMO_TOKEN();
+    if (!base || !token) {
+        throw new Error("Faltan KOMMO_BASE_URL o KOMMO_ACCESS_TOKEN en variables de entorno");
+    }
+    return { base, token };
+}
+async function kommoGetJson_(pathAndQuery, label) {
+    const { base, token } = kommoAuth_();
+    const url = pathAndQuery.startsWith("http")
+        ? pathAndQuery
+        : `${base}${pathAndQuery.startsWith("/") ? "" : "/"}${pathAndQuery}`;
+    const res = await fetch(url, {
+        headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/json",
+        },
+    });
+    if (res.status === 204)
+        return null;
+    return readJsonOrThrow(res, label);
+}
+/** Pipelines + statuses (nombres de etapas). */
+async function fetchKommoPipelines() {
+    const data = (await kommoGetJson_("/api/v4/leads/pipelines", "Kommo pipelines"));
+    return (data?._embedded?.pipelines || []).map((p) => ({
+        id: p.id,
+        name: p.name,
+        is_main: p.is_main,
+        statuses: (p._embedded?.statuses || []).map((s) => ({
+            id: s.id,
+            name: s.name,
+            sort: s.sort,
+            type: s.type,
+        })),
+    }));
+}
+/**
+ * Leads creados en [fromUnix, toUnix] (inclusive), paginado.
+ * Opcional: filtrar por pipeline_id.
+ */
+async function fetchLeadsCreatedBetween(opts) {
+    const { base, token } = kommoAuth_();
+    const maxPages = Math.min(Math.max(opts.maxPages || 40, 1), 80);
+    const out = [];
+    for (let page = 1; page <= maxPages; page++) {
+        let url = `${base}/api/v4/leads?limit=250&page=${page}` +
+            `&filter[created_at][from]=${opts.fromUnix}` +
+            `&filter[created_at][to]=${opts.toUnix}` +
+            `&order[created_at]=asc`;
+        if (opts.pipelineId) {
+            url += `&filter[pipeline_id]=${opts.pipelineId}`;
+        }
+        const res = await fetch(url, {
+            headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: "application/json",
+            },
+        });
+        if (res.status === 204)
+            break;
+        const data = (await readJsonOrThrow(res, `Kommo leads created page ${page}`));
+        const batch = data._embedded?.leads || [];
+        if (!batch.length)
+            break;
+        out.push(...batch);
+        if (batch.length < 250)
+            break;
+    }
+    return out;
+}
+/**
+ * Eventos de correo saliente en rango (para contar cotizaciones).
+ * Prueba types típicos de Kommo/amoCRM.
+ */
+async function fetchOutgoingMailEvents(opts) {
+    const { base, token } = kommoAuth_();
+    const maxPages = Math.min(Math.max(opts.maxPages || 30, 1), 60);
+    const types = ["outgoing_mail", "mail_message", "outgoing_email"];
+    const out = [];
+    const seen = new Set();
+    for (const type of types) {
+        for (let page = 1; page <= maxPages; page++) {
+            const url = `${base}/api/v4/events?limit=100&page=${page}` +
+                `&filter[type]=${encodeURIComponent(type)}` +
+                `&filter[created_at][from]=${opts.fromUnix}` +
+                `&filter[created_at][to]=${opts.toUnix}`;
+            const res = await fetch(url, {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    Accept: "application/json",
+                },
+            });
+            if (res.status === 204 || res.status === 400 || res.status === 404)
+                break;
+            if (!res.ok) {
+                // type no soportado → siguiente
+                break;
+            }
+            const data = (await readJsonOrThrow(res, `Kommo events ${type} p${page}`));
+            const batch = data._embedded?.events || [];
+            if (!batch.length)
+                break;
+            for (const ev of batch) {
+                const id = String(ev.id ?? `${type}-${ev.created_at}-${ev.entity_id}`);
+                if (seen.has(id))
+                    continue;
+                seen.add(id);
+                const subject = extractMailSubject_(ev);
+                out.push({
+                    id: Number(ev.id) || undefined,
+                    type: String(ev.type || type),
+                    entity_id: Number(ev.entity_id) || undefined,
+                    entity_type: ev.entity_type ? String(ev.entity_type) : undefined,
+                    created_at: Number(ev.created_at) || undefined,
+                    value_after: ev.value_after,
+                    subject,
+                    raw: ev,
+                });
+            }
+            if (batch.length < 100)
+                break;
+        }
+    }
+    // Fallback: notes tipo mail en leads
+    if (!out.length) {
+        for (let page = 1; page <= maxPages; page++) {
+            const url = `${base}/api/v4/leads/notes?limit=250&page=${page}` +
+                `&filter[note_type]=mail_message` +
+                `&filter[updated_at][from]=${opts.fromUnix}` +
+                `&filter[updated_at][to]=${opts.toUnix}`;
+            const res = await fetch(url, {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    Accept: "application/json",
+                },
+            });
+            if (res.status === 204 || res.status === 400 || res.status === 404)
+                break;
+            if (!res.ok)
+                break;
+            const data = (await readJsonOrThrow(res, `Kommo mail notes p${page}`));
+            const batch = data._embedded?.notes || [];
+            if (!batch.length)
+                break;
+            for (const note of batch) {
+                const id = String(note.id ?? `note-${note.created_at}`);
+                if (seen.has(id))
+                    continue;
+                seen.add(id);
+                const params = (note.params || {});
+                const subject = String(params.subject || params.topic || params.title || "");
+                const created = Number(note.created_at || note.updated_at || 0);
+                if (created && (created < opts.fromUnix || created > opts.toUnix)) {
+                    continue;
+                }
+                out.push({
+                    id: Number(note.id) || undefined,
+                    type: "mail_message_note",
+                    entity_id: Number(note.entity_id) || undefined,
+                    created_at: created || undefined,
+                    subject,
+                    raw: note,
+                });
+            }
+            if (batch.length < 250)
+                break;
+        }
+    }
+    return out;
+}
+function extractMailSubject_(ev) {
+    const tryObj = (v) => {
+        if (!v)
+            return "";
+        if (typeof v === "string")
+            return v;
+        if (Array.isArray(v)) {
+            for (const item of v) {
+                const s = tryObj(item);
+                if (s)
+                    return s;
+            }
+            return "";
+        }
+        if (typeof v === "object") {
+            const o = v;
+            for (const k of ["subject", "topic", "title", "mail_subject", "name"]) {
+                if (o[k] != null && String(o[k]).trim())
+                    return String(o[k]);
+            }
+            if (o.params)
+                return tryObj(o.params);
+            if (o.value)
+                return tryObj(o.value);
+        }
+        return "";
+    };
+    return (tryObj(ev.value_after) ||
+        tryObj(ev.value_before) ||
+        tryObj(ev) ||
+        "");
 }
 /**
  * Obtiene el deal completo + contacto embebido desde la API de Kommo.
