@@ -89,9 +89,10 @@ export function classifyStatusName_(
   ) {
     return "no_contestaron";
   }
-  // "Humano Trabaja", "Seguimiento…", typo "Seguimineto…", "Intención de paga"
+  // "Humano Trabaja", "Cotización realizada", "Seguimiento…", typo "Seguimineto…", "Intención de paga"
   if (
     n.includes("humano trabaja") ||
+    n.includes("cotizacion realizada") ||
     n.includes("seguim") || // seguimiento / seguimineto
     n.includes("intencion de pag") ||
     n.includes("intencion paga")
