@@ -5,6 +5,7 @@ exports.extractPartialLeadFromWebhook = extractPartialLeadFromWebhook;
 exports.kommoGetJson_ = kommoGetJson_;
 exports.fetchKommoPipelines = fetchKommoPipelines;
 exports.fetchLeadsCreatedBetween = fetchLeadsCreatedBetween;
+exports.probeKommoMailApis = probeKommoMailApis;
 exports.fetchOutgoingMailEvents = fetchOutgoingMailEvents;
 exports.fetchLeadWithContact = fetchLeadWithContact;
 exports.fetchRecentLeads = fetchRecentLeads;
@@ -161,6 +162,43 @@ async function fetchLeadsCreatedBetween(opts) {
             break;
     }
     return out;
+}
+/** Debug: prueba varias rutas de Mail/Events/Notes en Kommo. */
+async function probeKommoMailApis(opts) {
+    const { base, token } = kommoAuth_();
+    const to = opts?.toUnix || Math.floor(Date.now() / 1000);
+    const from = opts?.fromUnix || to - 14 * 86400;
+    const headers = {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+    };
+    const tryGet = async (path) => {
+        try {
+            const res = await fetch(`${base}${path}`, { headers });
+            const text = await res.text();
+            let body = text.slice(0, 500);
+            try {
+                body = JSON.parse(text);
+            }
+            catch {
+                // keep text
+            }
+            return { status: res.status, body };
+        }
+        catch (e) {
+            return { status: 0, error: e instanceof Error ? e.message : String(e) };
+        }
+    };
+    return {
+        events_outgoing_mail: await tryGet(`/api/v4/events?limit=5&filter[type]=outgoing_mail&filter[created_at][from]=${from}&filter[created_at][to]=${to}`),
+        events_mail_message: await tryGet(`/api/v4/events?limit=5&filter[type]=mail_message&filter[created_at][from]=${from}&filter[created_at][to]=${to}`),
+        events_any: await tryGet(`/api/v4/events?limit=5&filter[created_at][from]=${from}&filter[created_at][to]=${to}`),
+        notes_mail: await tryGet(`/api/v4/leads/notes?limit=5&filter[note_type]=mail_message&filter[updated_at][from]=${from}&filter[updated_at][to]=${to}`),
+        notes_common: await tryGet(`/api/v4/leads/notes?limit=5&filter[updated_at][from]=${from}&filter[updated_at][to]=${to}`),
+        mail_messages: await tryGet(`/api/v4/mail/messages?limit=5`),
+        mail_threads: await tryGet(`/api/v4/mail/threads?limit=5`),
+        account_mail: await tryGet(`/api/v4/account?with=mail`),
+    };
 }
 /**
  * Eventos de correo saliente en rango (para contar cotizaciones).

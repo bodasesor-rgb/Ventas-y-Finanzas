@@ -8,6 +8,7 @@ import {
   fetchKommoPipelines,
   fetchLeadsCreatedBetween,
   fetchOutgoingMailEvents,
+  probeKommoMailApis,
   type KommoPipeline,
 } from "./kommoApi";
 
@@ -308,17 +309,28 @@ function buildStatusMaps_(pipeline: KommoPipeline): {
   byId: Map<number, string>;
   noContestaronIds: Set<number>;
   llenadoIds: Set<number>;
+  correoStatusIds: Set<number>;
 } {
   const byId = new Map<number, string>();
   const noContestaronIds = new Set<number>();
   const llenadoIds = new Set<number>();
+  const correoStatusIds = new Set<number>();
   for (const s of pipeline.statuses) {
     byId.set(s.id, s.name);
     const c = classifyStatusName_(s.name);
     if (c === "no_contestaron") noContestaronIds.add(s.id);
     if (c === "llenado") llenadoIds.add(s.id);
+    // Cotización realizada / etapas post-cotización ≈ correo de cotización
+    const n = normLabel_(s.name);
+    if (
+      n.includes("cotizacion") ||
+      n.includes("seguim") ||
+      n.includes("intencion de pag")
+    ) {
+      correoStatusIds.add(s.id);
+    }
   }
-  return { byId, noContestaronIds, llenadoIds };
+  return { byId, noContestaronIds, llenadoIds, correoStatusIds };
 }
 
 export async function syncMetricasLeadsWa(opts?: {
@@ -426,11 +438,11 @@ export async function syncMetricasLeadsWa(opts?: {
   const mailSample = [
     ...new Set(
       allMails
-        .map((m) => (m.subject || "").trim())
-        .filter(Boolean)
+        .map((m) => (m.subject || "").trim() || `(sin asunto type=${m.type})`)
         .slice(0, 15)
     ),
   ];
+  const correoFromMailApi = cotizacionMails.length > 0;
 
   const weeks: WeekLeadsWa[] = [];
   for (const w of targetWeeks) {
@@ -446,16 +458,20 @@ export async function syncMetricasLeadsWa(opts?: {
     });
     let noContestaron = 0;
     let llenado = 0;
+    let correoByStatus = 0;
     for (const l of weekLeads) {
       const sid = Number(l.status_id);
       if (maps.noContestaronIds.has(sid)) noContestaron++;
       else if (maps.llenadoIds.has(sid)) llenado++;
+      if (maps.correoStatusIds.has(sid)) correoByStatus++;
     }
     const leads = weekLeads.length;
-    const correo = cotizacionMails.filter((m) => {
+    const correoMail = cotizacionMails.filter((m) => {
       const c = Number(m.created_at || 0);
       return c >= fromU && c <= toU;
     }).length;
+    // Preferir mails reales; si Kommo no expone asunto/API, usar etapa cotización/seguimiento
+    const correo = correoFromMailApi ? correoMail : correoByStatus;
     const porcentaje = leads > 0 ? llenado / leads : 0;
     weeks.push({
       weekStart: formatDmy_(w.date),
@@ -513,18 +529,18 @@ export async function syncMetricasLeadsWa(opts?: {
     updatedCells: data.length,
     weeks,
     mailSample,
-    hint:
-      cotizacionMails.length === 0 && allMails.length === 0
-        ? "No se leyeron correos desde Kommo (events/notes). Revisa permisos de Mail o avísame."
-        : cotizacionMails.length === 0 && allMails.length > 0
-          ? "Hay correos pero ninguno con 'cotización' en el asunto. Revisa mailSample."
-          : undefined,
+    hint: correoFromMailApi
+      ? undefined
+      : allMails.length === 0
+        ? "Correo: Kommo Mail API no devolvió mensajes; usé etapas Cotización/Seguimiento/Intención como proxy."
+        : "Correo: hay eventos de mail sin asunto 'cotización'; usé etapas Cotización/Seguimiento/Intención como proxy.",
   };
 }
 
 export async function leadsWaProbe() {
   const pipelines = await fetchKommoPipelines();
   const pipeline = pickWaPipeline_(pipelines);
+  const mail = await probeKommoMailApis();
   return {
     ok: true,
     pipelines: pipelines.map((p) => ({
@@ -540,5 +556,15 @@ export async function leadsWaProbe() {
     selected: pipeline
       ? { id: pipeline.id, name: pipeline.name }
       : null,
+    mailProbe: mail,
   };
+}
+
+/**
+ * Fallback Correo: leads creados en la semana cuya etapa actual es
+ * "Cotización realizada" o posterior de engagement (aprox. mails de cotización).
+ */
+export function isCotizacionStatus_(name: string): boolean {
+  const n = normLabel_(name);
+  return n.includes("cotizacion");
 }

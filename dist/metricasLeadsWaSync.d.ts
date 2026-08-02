@@ -49,4 +49,10 @@ export declare function leadsWaProbe(): Promise<{
         id: number;
         name: string;
     } | null;
+    mailProbe: Record<string, unknown>;
 }>;
+/**
+ * Fallback Correo: leads creados en la semana cuya etapa actual es
+ * "Cotización realizada" o posterior de engagement (aprox. mails de cotización).
+ */
+export declare function isCotizacionStatus_(name: string): boolean;

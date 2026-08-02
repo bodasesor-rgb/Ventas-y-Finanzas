@@ -4,6 +4,7 @@ exports.classifyStatusName_ = classifyStatusName_;
 exports.isCotizacionMail_ = isCotizacionMail_;
 exports.syncMetricasLeadsWa = syncMetricasLeadsWa;
 exports.leadsWaProbe = leadsWaProbe;
+exports.isCotizacionStatus_ = isCotizacionStatus_;
 const googleapis_1 = require("googleapis");
 const googleAuth_1 = require("./googleAuth");
 const kommoApi_1 = require("./kommoApi");
@@ -272,6 +273,7 @@ function buildStatusMaps_(pipeline) {
     const byId = new Map();
     const noContestaronIds = new Set();
     const llenadoIds = new Set();
+    const correoStatusIds = new Set();
     for (const s of pipeline.statuses) {
         byId.set(s.id, s.name);
         const c = classifyStatusName_(s.name);
@@ -279,8 +281,15 @@ function buildStatusMaps_(pipeline) {
             noContestaronIds.add(s.id);
         if (c === "llenado")
             llenadoIds.add(s.id);
+        // Cotización realizada / etapas post-cotización ≈ correo de cotización
+        const n = normLabel_(s.name);
+        if (n.includes("cotizacion") ||
+            n.includes("seguim") ||
+            n.includes("intencion de pag")) {
+            correoStatusIds.add(s.id);
+        }
     }
-    return { byId, noContestaronIds, llenadoIds };
+    return { byId, noContestaronIds, llenadoIds, correoStatusIds };
 }
 async function syncMetricasLeadsWa(opts) {
     const force = Boolean(opts?.force);
@@ -358,10 +367,10 @@ async function syncMetricasLeadsWa(opts) {
     const cotizacionMails = allMails.filter((m) => isCotizacionMail_(m.subject || ""));
     const mailSample = [
         ...new Set(allMails
-            .map((m) => (m.subject || "").trim())
-            .filter(Boolean)
+            .map((m) => (m.subject || "").trim() || `(sin asunto type=${m.type})`)
             .slice(0, 15)),
     ];
+    const correoFromMailApi = cotizacionMails.length > 0;
     const weeks = [];
     for (const w of targetWeeks) {
         const weekStartMs = w.date.getTime();
@@ -376,18 +385,23 @@ async function syncMetricasLeadsWa(opts) {
         });
         let noContestaron = 0;
         let llenado = 0;
+        let correoByStatus = 0;
         for (const l of weekLeads) {
             const sid = Number(l.status_id);
             if (maps.noContestaronIds.has(sid))
                 noContestaron++;
             else if (maps.llenadoIds.has(sid))
                 llenado++;
+            if (maps.correoStatusIds.has(sid))
+                correoByStatus++;
         }
         const leads = weekLeads.length;
-        const correo = cotizacionMails.filter((m) => {
+        const correoMail = cotizacionMails.filter((m) => {
             const c = Number(m.created_at || 0);
             return c >= fromU && c <= toU;
         }).length;
+        // Preferir mails reales; si Kommo no expone asunto/API, usar etapa cotización/seguimiento
+        const correo = correoFromMailApi ? correoMail : correoByStatus;
         const porcentaje = leads > 0 ? llenado / leads : 0;
         weeks.push({
             weekStart: formatDmy_(w.date),
@@ -441,16 +455,17 @@ async function syncMetricasLeadsWa(opts) {
         updatedCells: data.length,
         weeks,
         mailSample,
-        hint: cotizacionMails.length === 0 && allMails.length === 0
-            ? "No se leyeron correos desde Kommo (events/notes). Revisa permisos de Mail o avísame."
-            : cotizacionMails.length === 0 && allMails.length > 0
-                ? "Hay correos pero ninguno con 'cotización' en el asunto. Revisa mailSample."
-                : undefined,
+        hint: correoFromMailApi
+            ? undefined
+            : allMails.length === 0
+                ? "Correo: Kommo Mail API no devolvió mensajes; usé etapas Cotización/Seguimiento/Intención como proxy."
+                : "Correo: hay eventos de mail sin asunto 'cotización'; usé etapas Cotización/Seguimiento/Intención como proxy.",
     };
 }
 async function leadsWaProbe() {
     const pipelines = await (0, kommoApi_1.fetchKommoPipelines)();
     const pipeline = pickWaPipeline_(pipelines);
+    const mail = await (0, kommoApi_1.probeKommoMailApis)();
     return {
         ok: true,
         pipelines: pipelines.map((p) => ({
@@ -466,6 +481,15 @@ async function leadsWaProbe() {
         selected: pipeline
             ? { id: pipeline.id, name: pipeline.name }
             : null,
+        mailProbe: mail,
     };
+}
+/**
+ * Fallback Correo: leads creados en la semana cuya etapa actual es
+ * "Cotización realizada" o posterior de engagement (aprox. mails de cotización).
+ */
+function isCotizacionStatus_(name) {
+    const n = normLabel_(name);
+    return n.includes("cotizacion");
 }
 //# sourceMappingURL=metricasLeadsWaSync.js.map

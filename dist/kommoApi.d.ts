@@ -41,6 +41,11 @@ export type KommoMailEvent = {
     subject?: string;
     raw?: unknown;
 };
+/** Debug: prueba varias rutas de Mail/Events/Notes en Kommo. */
+export declare function probeKommoMailApis(opts?: {
+    fromUnix?: number;
+    toUnix?: number;
+}): Promise<Record<string, unknown>>;
 /**
  * Eventos de correo saliente en rango (para contar cotizaciones).
  * Prueba types típicos de Kommo/amoCRM.
