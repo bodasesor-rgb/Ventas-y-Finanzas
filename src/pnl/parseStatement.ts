@@ -87,23 +87,46 @@ function parseMoneyToken(tok: string): number | null {
 }
 
 /**
- * Extrae montos; soporta saldo negativo Banamex escrito como "329.95-".
- * Orden: quitar T.C./POS → separar montos pegados → aplicar signo −.
+ * Separa montos Banamex pegados y quita basura de folios/POS/T.C.
+ * Casos típicos:
+ *   500.003,169.72      → 500.00 + 3,169.72
+ *   400.00785,432.10    → 400.00 + 785,432.10
+ *   9000/00126,000.00   → 6,000.00
  */
-export function collectMoney(s: string): number[] {
-  let t = s
-    .replace(/900[01]\/001\d(?=\d{1,3}(?:,\d{3})*\.\d{2})/gi, " ")
-    .replace(/\b20\d{6}\b/g, " ")
+export function unglueMoneyText(s: string): string {
+  let t = String(s || "")
+    .replace(/\r/g, " ")
     .replace(/U\.S\.\s*Dollar\s*T\.C\.\s*\d+\.\d{4,6}/gi, " ")
     .replace(/Mexican Peso T\.C\.[^\d]*/gi, " ")
     .replace(/T\.C\.1\s*\.\d+/gi, " ")
     .replace(/T\.C\.\s*\d+\.\d{4,6}/gi, " ")
+    // POS Banamex: 9000/0012 + dígito basura, sin comerse el monto
+    //   9000/00126,000.00 → 6,000.00
+    .replace(/900[01]\/001\d(?=\d{1,3}(?:,\d{3})*\.\d{2})/gi, " ")
+    // Fechas AAAAMMDD sueltas
+    .replace(/\b20\d{6}\b/g, " ")
+    // Folios largos pegados delante de monto con coma de miles
+    .replace(/\d{8,}(?=\d{1,3}(?:,\d{3})+\.\d{2})/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
-  t = t.replace(/(\d{1,3}(?:,\d{3})*\.\d{2})(?=\d)/g, "$1 ");
-  t = t.replace(/((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})-/g, " -$1 ");
+  // Clave: partir SIEMPRE tras los centavos si sigue un dígito
+  //   400.00785,432.10 → 400.00 785,432.10
+  //   500.003,169.72   → 500.00 3,169.72
+  //   214600.00785,400 → 214600.00 785,400.00
+  t = t.replace(/(\.\d{2})(?=\d)/g, "$1 ");
 
+  // Saldo negativo Banamex: 329.95-
+  t = t.replace(/((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})-/g, " -$1 ");
+  return t.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Extrae montos; soporta saldo negativo Banamex escrito como "329.95-".
+ * Orden: quitar T.C./POS → separar montos pegados → aplicar signo −.
+ */
+export function collectMoney(s: string): number[] {
+  const t = unglueMoneyText(s);
   const out: number[] = [];
   const re = /-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}/g;
   let m: RegExpExecArray | null;
@@ -115,20 +138,59 @@ export function collectMoney(s: string): number[] {
 }
 
 /**
+ * Variantes típicas por puntos/comas o dígitos de folio pegados.
+ * Sirve para revisión automática de descuadres grandes.
+ */
+export function moneyTypoVariants(
+  amount: number
+): { value: number; label: string }[] {
+  const sign = amount < 0 ? -1 : 1;
+  const abs = Math.abs(amount);
+  if (!(abs > 0)) return [];
+  const seen = new Set<number>();
+  const out: { value: number; label: string }[] = [];
+  const add = (v: number, label: string) => {
+    const r = Math.round(v * 100) / 100;
+    if (!Number.isFinite(r) || r === 0) return;
+    if (Math.abs(r) === abs) return;
+    if (seen.has(r)) return;
+    seen.add(r);
+    out.push({ value: r, label });
+  };
+
+  for (const f of [10, 100, 1000, 10_000, 100_000]) {
+    add(sign * abs * f, `coma/punto ×${f}`);
+    add(sign * (abs / f), `coma/punto ÷${f}`);
+  }
+
+  // Quitar 1–4 dígitos basura al inicio (folio pegado: 785400.00 → 400.00)
+  const cents = Math.round(abs * 100);
+  const digits = String(cents);
+  for (let cut = 1; cut <= Math.min(4, digits.length - 3); cut++) {
+    const rest = Number(digits.slice(cut)) / 100;
+    if (rest >= 0.01) add(sign * rest, `sin ${cut} dígito(s) de folio al inicio`);
+  }
+  // Quedar solo con los últimos 3–6 dígitos enteros + centavos
+  for (const keep of [3, 4, 5, 6]) {
+    if (digits.length > keep + 2) {
+      const rest = Number(digits.slice(-(keep + 2))) / 100;
+      if (rest >= 0.01) add(sign * rest, `últimos ${keep} dígitos + centavos`);
+    }
+  }
+
+  return out;
+}
+
+/**
  * Banamex pega código POS + dígito basura + monto:
  *   9000/00126,000.00  →  6,000.00
  */
 function stripBanamexPosJunk(body: string): string {
-  return body.replace(
-    /900[01]\/001\d(?=\d{1,3}(?:,\d{3})*\.\d{2})/gi,
-    " "
-  );
+  return unglueMoneyText(body);
 }
 
 function softClean(body: string): string {
   return stripBanamexPosJunk(body)
-    .replace(/\b20\d{6}\b/g, " ")
-    .replace(/(\d{10,})(\d,\d{3}\.\d{2})/g, " $2 ")
     .replace(/\b\d{12,}\b/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -245,7 +307,7 @@ interface RawRow {
 }
 
 /** Cómo calcular el monto de cada movimiento Banamex. */
-export type AmountStrategy = "delta" | "printed" | "hybrid";
+export type AmountStrategy = "delta" | "printed" | "hybrid" | "rebased";
 
 export interface ParseOptions {
   amountStrategy?: AmountStrategy;
@@ -394,9 +456,10 @@ function extractBanamex(
     }
 
     const delta = Math.round((row.saldo - prevSaldo) * 100) / 100;
-    prevSaldo = row.saldo;
-
-    if (Math.abs(delta) < 0.005) continue;
+    if (Math.abs(delta) < 0.005) {
+      prevSaldo = row.saldo;
+      continue;
+    }
 
     const deltaAbs = Math.abs(delta);
     const printedAbs =
@@ -404,39 +467,91 @@ function extractBanamex(
     const printedMismatch =
       printedAbs != null && Math.abs(printedAbs - deltaAbs) > 0.05;
 
+    /**
+     * Saldo contaminado por dígitos pegados (ej. cargo $400 + basura → Δ $785,400).
+     * Si el Δ es mucho mayor que el impreso, confiar en el impreso y rebasar la cadena.
+     * No rebasar con impresos irrisorios ($0.01): suelen ser basura de parseo.
+     */
+    const saldoPolluted =
+      printedMismatch &&
+      printedAbs != null &&
+      printedAbs >= 1 &&
+      deltaAbs >= Math.max(printedAbs * 8, printedAbs + 500);
+
+    /** Impreso contaminado (POS/folio); el Δsaldo es más creíble. */
+    const printedPolluted =
+      printedMismatch &&
+      printedAbs != null &&
+      deltaAbs > 0 &&
+      printedAbs >= Math.max(deltaAbs * 8, deltaAbs + 500);
+
     let amount = deltaAbs;
     let direction: BankLine["direction"] = delta > 0 ? "abono" : "cargo";
     let reviewNote: string | undefined;
+    let rebaseChain = false;
 
-    if (strategy === "printed" && printedAbs != null) {
+    if (strategy === "rebased" && printedAbs != null && printedMismatch) {
       amount = printedAbs;
-      // Signo del Δsaldo (más confiable que el texto)
+      direction = detectDirection(row.desc);
+      if (direction === "unknown") {
+        direction = delta > 0 ? "abono" : "cargo";
+      }
+      rebaseChain = true;
+      reviewNote = `Relectura rebasada: impreso $${printedAbs.toFixed(
+        2
+      )} (Δsaldo era $${deltaAbs.toFixed(2)}; posible punto/coma/folio)`;
+    } else if (strategy === "printed" && printedAbs != null) {
+      amount = printedAbs;
       direction = delta > 0 ? "abono" : "cargo";
       if (printedMismatch) {
         reviewNote = `Monto impreso $${printedAbs.toFixed(
           2
         )} ≠ Δsaldo $${deltaAbs.toFixed(2)}; se usó el impreso`;
       }
-    } else if (strategy === "hybrid" && printedMismatch && printedAbs != null) {
-      // Cuando impreso y Δ discrepan, probar con el impreso
+    } else if (
+      (strategy === "hybrid" || strategy === "delta") &&
+      saldoPolluted &&
+      printedAbs != null
+    ) {
+      // Reparación por defecto: no arrastrar un saldo basura al resto del mes
+      amount = printedAbs;
+      direction = detectDirection(row.desc);
+      if (direction === "unknown") {
+        direction = delta > 0 ? "abono" : "cargo";
+      }
+      rebaseChain = true;
+      reviewNote = `Saldo con dígitos pegados: se usó $${printedAbs.toFixed(
+        2
+      )} (Δ leído $${deltaAbs.toFixed(2)})`;
+    } else if (strategy === "hybrid" && printedMismatch && printedAbs != null && !printedPolluted) {
       amount = printedAbs;
       direction = delta > 0 ? "abono" : "cargo";
-      reviewNote = `Discrepancia impreso/Δsaldo; estrategia híbrida usó $${printedAbs.toFixed(
+      reviewNote = `Discrepancia impreso/Δsaldo; híbrida usó $${printedAbs.toFixed(
         2
       )} (Δ era $${deltaAbs.toFixed(2)})`;
     } else if (printedMismatch && printedAbs != null) {
-      reviewNote = `Impreso $${printedAbs.toFixed(
-        2
-      )} ≠ Δsaldo $${deltaAbs.toFixed(2)}; prevalece Δsaldo`;
+      reviewNote = printedPolluted
+        ? `Impreso $${printedAbs.toFixed(
+            2
+          )} parece folio/POS; prevalece Δsaldo $${deltaAbs.toFixed(2)}`
+        : `Impreso $${printedAbs.toFixed(
+            2
+          )} ≠ Δsaldo $${deltaAbs.toFixed(2)}; prevalece Δsaldo`;
     }
 
     const signed = direction === "abono" ? amount : -amount;
     const desc = row.desc;
-    // No dedupe por monto+fecha: Banamex repite cargos idénticos (ej. 2× STP $1,000)
+
+    if (rebaseChain) {
+      prevSaldo = Math.round((prevSaldo + signed) * 100) / 100;
+    } else {
+      prevSaldo = row.saldo;
+    }
 
     const cat = categorizeLine(desc, signed, direction, rules);
     const suspicious =
       printedMismatch ||
+      Boolean(reviewNote) ||
       amount > 150_000 ||
       (direction === "abono" &&
         !/^(PAGO RECIBIDO|ABONO|DEP[OÓ]SITO|PROMOCI[OÓ]N)/i.test(desc.trim()));

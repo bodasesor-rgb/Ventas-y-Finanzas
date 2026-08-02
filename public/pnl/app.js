@@ -250,7 +250,7 @@ function renderAutoReviewUi(run) {
       statusEl.textContent = report.message;
     } else if (needsReviewBtn) {
       statusEl.textContent =
-        "El sistema releerá el PDF varias veces hasta encontrar la cuenta que no cuadra.";
+        "Relee el PDF buscando errores de puntos/comas o dígitos de folio pegados al monto (causa más común).";
     } else {
       statusEl.textContent = "";
     }

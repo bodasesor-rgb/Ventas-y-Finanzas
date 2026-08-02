@@ -12,7 +12,7 @@ export interface AutoReviewResult {
     autoReview: AutoReviewReport;
 }
 /**
- * Lee el texto del estado varias veces y localiza la cuenta distinta.
+ * Lee el texto del estado varias veces y localiza errores de monto.
  */
 export declare function runAutoReview(text: string, rules: RecurringRule[]): AutoReviewResult;
 /** Aplica el resultado de auto-review sobre un StatementRun (mutación). */
