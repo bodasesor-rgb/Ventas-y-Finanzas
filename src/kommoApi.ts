@@ -184,12 +184,18 @@ export async function fetchLeadsCreatedBetween(opts: {
     if (opts.pipelineId) {
       url += `&filter[pipeline_id]=${opts.pipelineId}`;
     }
-    const res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/json",
-      },
-    });
+    let res: Response | null = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        },
+      });
+      if (res.status !== 429) break;
+      await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+    }
+    if (!res) break;
     if (res.status === 204) break;
     const data = (await readJsonOrThrow(
       res,
@@ -202,6 +208,8 @@ export async function fetchLeadsCreatedBetween(opts: {
     if (!batch.length) break;
     out.push(...batch);
     if (batch.length < 250) break;
+    // suavizar rate limit
+    await new Promise((r) => setTimeout(r, 200));
   }
   return out;
 }
