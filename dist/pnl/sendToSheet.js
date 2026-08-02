@@ -28,16 +28,33 @@ async function sendRunToBancoSheet(run) {
     }
     const year = Number(periodKey.slice(0, 4));
     const month = Number(periodKey.slice(5, 7));
-    // Preferir Depósitos / Otros cargos del resumen del PDF (inicio del estado)
+    // Totales ya resueltos en buildOfficialAwareTotals:
+    // si no cuadra → ingreso = líneas (no inflar); gasto absorbe el neto del PDF
     const oficial = run.reconciliation?.oficial;
     const totals = run.totals || { ingresos: 0, gastos: 0, neto: 0 };
-    const ingresos = oficial?.ingresosOficiales != null
-        ? oficial.ingresosOficiales
-        : totals.ingresos;
-    const gastosSigned = oficial?.gastosOficiales != null ? oficial.gastosOficiales : totals.gastos;
-    const neto = oficial?.saldoCorte != null && oficial?.saldoAnterior != null
-        ? Math.round((oficial.saldoCorte - oficial.saldoAnterior) * 100) / 100
-        : Math.round((ingresos + gastosSigned) * 100) / 100;
+    const match = Boolean(run.reconciliation?.matchCompleto);
+    let ingresos = totals.ingresos;
+    let gastosSigned = totals.gastos;
+    let neto = totals.neto;
+    if (match && oficial?.ingresosOficiales != null) {
+        ingresos = oficial.ingresosOficiales;
+    }
+    if (match && oficial?.gastosOficiales != null) {
+        gastosSigned = oficial.gastosOficiales;
+    }
+    if (oficial?.saldoCorte != null && oficial?.saldoAnterior != null) {
+        neto =
+            Math.round((oficial.saldoCorte - oficial.saldoAnterior) * 100) / 100;
+        if (!match) {
+            // Sin cuadre: no inflar ingreso; el gasto cierra el neto del estado
+            ingresos = totals.parseado?.ingresos ?? totals.ingresos;
+            gastosSigned = Math.round((neto - ingresos) * 100) / 100;
+        }
+    }
+    else if (!match) {
+        ingresos = totals.parseado?.ingresos ?? totals.ingresos;
+        gastosSigned = Math.round((neto - ingresos) * 100) / 100;
+    }
     const summary = run.summaryByCategory || {};
     const cats = (0, store_1.loadCategories)();
     const labelOf = (id) => cats.find((c) => c.id === id)?.label || id;

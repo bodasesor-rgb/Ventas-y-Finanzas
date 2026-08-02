@@ -161,34 +161,43 @@ function renderTotals(run) {
     run.totals?.parseado ||
     rec?.parseado ||
     computeTotals(run.lines);
-  // Totales grandes = resumen del inicio del PDF (no la suma de líneas)
   const oficialIng = of.ingresosOficiales;
   const oficialGas = of.gastosOficiales;
-  const t = {
-    ingresos:
-      oficialIng != null
-        ? oficialIng
-        : run.totals?.ingresos ?? parseado.ingresos,
-    gastos:
-      oficialGas != null
-        ? oficialGas
-        : run.totals?.gastos ?? parseado.gastos,
-    neto: 0,
-  };
-  // Neto siempre desde montos reales del resumen (no desde suma dañada de líneas)
+  const match = Boolean(rec?.matchCompleto);
+  // Neto del resumen PDF
+  let netoResumen = null;
   if (of.saldoCorte != null && of.saldoAnterior != null) {
-    t.neto =
+    netoResumen =
       Math.round((Number(of.saldoCorte) - Number(of.saldoAnterior)) * 100) /
       100;
+  } else if (oficialIng != null && oficialGas != null) {
+    netoResumen = Math.round((oficialIng + oficialGas) * 100) / 100;
+  }
+  const t = { ingresos: 0, gastos: 0, neto: 0 };
+  if (match && (oficialIng != null || oficialGas != null)) {
+    // Cuadra: mostrar resumen oficial
+    t.ingresos = oficialIng != null ? oficialIng : parseado.ingresos;
+    t.gastos = oficialGas != null ? oficialGas : parseado.gastos;
+    t.neto =
+      netoResumen != null
+        ? netoResumen
+        : Math.round((t.ingresos + t.gastos) * 100) / 100;
+  } else if (netoResumen != null) {
+    // NO cuadra: no inflar ingreso — solo el gasto absorbe el neto del estado
+    t.ingresos = parseado.ingresos;
+    t.neto = netoResumen;
+    t.gastos = Math.round((t.neto - t.ingresos) * 100) / 100;
   } else {
+    t.ingresos = run.totals?.ingresos ?? parseado.ingresos;
+    t.gastos = run.totals?.gastos ?? parseado.gastos;
     t.neto = Math.round((t.ingresos + t.gastos) * 100) / 100;
   }
-  // Mantener run.totals en sync en pantalla
   if (run.totals) {
     run.totals.ingresos = t.ingresos;
     run.totals.gastos = t.gastos;
     run.totals.neto = t.neto;
-    run.totals.source = oficialIng != null || oficialGas != null ? "oficial" : "parseado";
+    run.totals.source =
+      oficialIng != null || oficialGas != null ? "oficial" : "parseado";
   }
 
   bar.hidden = false;
@@ -226,20 +235,26 @@ function renderTotals(run) {
         : Math.round((parseado.gastos - t.gastos) * 100) / 100;
 
     if (oIng) {
-      oIng.textContent =
-        oficialIng != null
-          ? `Suma movimientos: ${money(parseado.ingresos)}${
-              Math.abs(diffIng) > 1 ? ` · dañado ${money(diffIng)}` : " · ok"
-            }`
-          : "No se leyó Depósitos del resumen";
+      if (oficialIng != null) {
+        oIng.textContent = match
+          ? `Resumen PDF: ${money(oficialIng)} · ok`
+          : `Sin inflar (líneas): ${money(parseado.ingresos)} · PDF ${money(
+              oficialIng
+            )}${Math.abs(diffIng) > 1 ? ` · diff ${money(diffIng)}` : ""}`;
+      } else {
+        oIng.textContent = "No se leyó Depósitos del resumen";
+      }
     }
     if (oGas) {
-      oGas.textContent =
-        oficialGas != null
-          ? `Suma movimientos: ${money(parseado.gastos)}${
-              Math.abs(diffGas) > 1 ? ` · dañado ${money(diffGas)}` : " · ok"
-            }`
-          : "No se leyó Otros cargos del resumen";
+      if (oficialGas != null) {
+        oGas.textContent = match
+          ? `Resumen PDF: ${money(oficialGas)} · ok`
+          : `Ajustado al neto (PDF cargos ${money(oficialGas)}) · líneas ${money(
+              parseado.gastos
+            )}`;
+      } else {
+        oGas.textContent = "No se leyó Otros cargos del resumen";
+      }
     }
     if (ingCard) {
       ingCard.classList.add(

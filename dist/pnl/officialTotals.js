@@ -36,28 +36,62 @@ function buildOfficialAwareTotals(lines, textOrOficial) {
     const parseado = (0, parseStatement_1.summarizeTotals)(lines);
     const reconciliation = (0, statementSummary_1.reconcileTotals)(oficial, parseado, 1);
     const hasOficial = oficial.ingresosOficiales != null || oficial.gastosOficiales != null;
-    const ingresos = oficial.ingresosOficiales != null
-        ? oficial.ingresosOficiales
-        : parseado.ingresos;
-    const gastos = oficial.gastosOficiales != null
-        ? oficial.gastosOficiales
-        : parseado.gastos;
-    // Neto real del estado: preferir Saldo al corte − Saldo anterior (resumen PDF).
-    // Si no hay saldos, Depósitos + Otros cargos del mismo resumen.
-    let neto;
+    // Neto del resumen PDF (corte − anterior, o depósitos + cargos oficiales)
+    let netoOficial = null;
     if (oficial.saldoCorte != null && oficial.saldoAnterior != null) {
-        neto =
+        netoOficial =
             Math.round((oficial.saldoCorte - oficial.saldoAnterior) * 100) / 100;
     }
+    else if (oficial.ingresosOficiales != null &&
+        oficial.gastosOficiales != null) {
+        netoOficial =
+            Math.round((oficial.ingresosOficiales + oficial.gastosOficiales) * 100) / 100;
+    }
+    let ingresos;
+    let gastos;
+    let neto;
+    let source;
+    if (reconciliation.matchCompleto && hasOficial) {
+        // Cuadra: usar resumen oficial tal cual
+        ingresos =
+            oficial.ingresosOficiales != null
+                ? oficial.ingresosOficiales
+                : parseado.ingresos;
+        gastos =
+            oficial.gastosOficiales != null
+                ? oficial.gastosOficiales
+                : parseado.gastos;
+        neto =
+            netoOficial != null
+                ? netoOficial
+                : Math.round((ingresos + gastos) * 100) / 100;
+        source = "oficial";
+    }
+    else if (hasOficial && netoOficial != null) {
+        // NO cuadra: no inflar ingreso — solo ajustar gasto para cerrar el neto
+        ingresos = parseado.ingresos;
+        neto = netoOficial;
+        gastos = Math.round((neto - ingresos) * 100) / 100;
+        source = "oficial";
+    }
     else {
-        neto = Math.round((ingresos + gastos) * 100) / 100;
+        ingresos = parseado.ingresos;
+        gastos = parseado.gastos;
+        neto = parseado.neto;
+        source = "parseado";
     }
     const summaryByCategory = (0, parseStatement_1.summarizeByCategory)(lines);
-    // Diferencia líneas vs resumen → categoría "revisar" para que el Sheet
-    // refleje el total oficial sin perder el desglose aproximado.
-    if (hasOficial) {
-        const gapIng = Math.round((ingresos - parseado.ingresos) * 100) / 100;
+    // Solo meter en "revisar" el hueco de GASTOS (nunca inflar ingreso vía categorías)
+    if (hasOficial && !reconciliation.matchCompleto) {
         const gapGas = Math.round((gastos - parseado.gastos) * 100) / 100;
+        if (Math.abs(gapGas) > 0.009) {
+            summaryByCategory.revisar =
+                Math.round(((summaryByCategory.revisar || 0) + gapGas) * 100) / 100;
+        }
+    }
+    else if (hasOficial && reconciliation.matchCompleto) {
+        const gapGas = Math.round((gastos - parseado.gastos) * 100) / 100;
+        const gapIng = Math.round((ingresos - parseado.ingresos) * 100) / 100;
         const gap = Math.round((gapIng + gapGas) * 100) / 100;
         if (Math.abs(gap) > 0.009) {
             summaryByCategory.revisar =
@@ -72,7 +106,7 @@ function buildOfficialAwareTotals(lines, textOrOficial) {
             ingresos,
             gastos,
             neto,
-            source: hasOficial ? "oficial" : "parseado",
+            source,
             parseado,
         },
     };
