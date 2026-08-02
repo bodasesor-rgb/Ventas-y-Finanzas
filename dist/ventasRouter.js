@@ -14,6 +14,7 @@ const metricasVisitasSync_1 = require("./metricasVisitasSync");
 const metricasSeguidoresSync_1 = require("./metricasSeguidoresSync");
 const metricasFacebookAdsSync_1 = require("./metricasFacebookAdsSync");
 const metricasGoogleAdsSync_1 = require("./metricasGoogleAdsSync");
+const metricasLeadsWaSync_1 = require("./metricasLeadsWaSync");
 const googleAdsClient_1 = require("./googleAdsClient");
 const metaSocialClient_1 = require("./metaSocialClient");
 const metaAdsClient_1 = require("./metaAdsClient");
@@ -221,10 +222,12 @@ let lastVisitasTickAt = 0;
 let lastSeguidoresTickAt = 0;
 let lastFacebookAdsTickAt = 0;
 let lastGoogleAdsTickAt = 0;
+let lastLeadsWaTickAt = 0;
 const VISITAS_TICK_EVERY_MS = 6 * 60 * 60_000;
 const SEGUIDORES_TICK_EVERY_MS = 12 * 60 * 60_000;
 const FACEBOOK_ADS_TICK_EVERY_MS = 6 * 60 * 60_000;
 const GOOGLE_ADS_TICK_EVERY_MS = 6 * 60 * 60_000;
+const LEADS_WA_TICK_EVERY_MS = 6 * 60 * 60_000;
 async function handleTick(_req, res) {
     try {
         const result = await (0, pollClosedDeals_1.runPollTick)();
@@ -232,6 +235,7 @@ async function handleTick(_req, res) {
         let seguidores = null;
         let facebookAds = null;
         let googleAds = null;
+        let leadsWa = null;
         const ga4 = (0, metricasVisitasSync_1.metricasVisitasStatus)().ga4;
         if (ga4.ok && Date.now() - lastVisitasTickAt > VISITAS_TICK_EVERY_MS) {
             lastVisitasTickAt = Date.now();
@@ -273,6 +277,15 @@ async function handleTick(_req, res) {
                 console.warn("[tick] sync google ads", err instanceof Error ? err.message : err);
             }
         }
+        if (Date.now() - lastLeadsWaTickAt > LEADS_WA_TICK_EVERY_MS) {
+            lastLeadsWaTickAt = Date.now();
+            try {
+                leadsWa = await (0, metricasLeadsWaSync_1.syncMetricasLeadsWa)({ lookbackDays: 45 });
+            }
+            catch (err) {
+                console.warn("[tick] sync leads wa", err instanceof Error ? err.message : err);
+            }
+        }
         res.status(200).json({
             ok: true,
             at: new Date().toISOString(),
@@ -282,6 +295,7 @@ async function handleTick(_req, res) {
             seguidores,
             facebookAds,
             googleAds,
+            leadsWa,
             message: "Tick OK — cierres faltantes de la ventana sincronizados",
         });
     }
@@ -601,6 +615,42 @@ async function handleSyncGoogleAds(req, res) {
 }
 exports.ventasRouter.post("/api/ventas/sync-google-ads", handleSyncGoogleAds);
 exports.ventasRouter.get("/api/ventas/sync-google-ads", handleSyncGoogleAds);
+/** Probe pipelines/etapas Kommo para Leads WA. */
+exports.ventasRouter.get("/api/ventas/leads-wa-status", async (_req, res) => {
+    try {
+        const probe = await (0, metricasLeadsWaSync_1.leadsWaProbe)();
+        res.status(200).json(probe);
+    }
+    catch (err) {
+        res.status(502).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+});
+async function handleSyncLeadsWa(req, res) {
+    try {
+        const body = (req.body || {});
+        const force = String(req.query.force || body.force || "") === "1" ||
+            body.force === true;
+        const lookbackDays = Number(req.query.lookbackDays || body.lookbackDays || 45);
+        const pipelineId = Number(req.query.pipelineId || body.pipelineId || 0);
+        const result = await (0, metricasLeadsWaSync_1.syncMetricasLeadsWa)({
+            force,
+            lookbackDays,
+            pipelineId: pipelineId > 0 ? pipelineId : undefined,
+        });
+        res.status(result.ok ? 200 : 502).json(result);
+    }
+    catch (err) {
+        res.status(502).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+}
+exports.ventasRouter.post("/api/ventas/sync-leads-wa", handleSyncLeadsWa);
+exports.ventasRouter.get("/api/ventas/sync-leads-wa", handleSyncLeadsWa);
 /** Estado anti-duplicados: cuántas huellas hay en Sheet + cache. */
 exports.ventasRouter.get("/api/ventas/dedupe-status", async (_req, res) => {
     try {
