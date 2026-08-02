@@ -55,6 +55,11 @@ export declare function fetchOutgoingMailEvents(opts: {
     toUnix: number;
     maxPages?: number;
 }): Promise<KommoMailEvent[]>;
+/** ¿Es un evento/nota de correo saliente? */
+export declare function isOutgoingMailEvent_(m: {
+    type?: string;
+    subject?: string;
+}): boolean;
 /**
  * Obtiene el deal completo + contacto embebido desde la API de Kommo.
  */

@@ -328,12 +328,62 @@ export async function fetchOutgoingMailEvents(opts: {
     }
   }
 
-  // Fallback: notes tipo mail en leads
-  if (!out.length) {
-    for (let page = 1; page <= maxPages; page++) {
+  // Notes mail_message
+  for (let page = 1; page <= maxPages; page++) {
+    const url =
+      `${base}/api/v4/leads/notes?limit=250&page=${page}` +
+      `&filter[note_type]=mail_message` +
+      `&filter[updated_at][from]=${opts.fromUnix}` +
+      `&filter[updated_at][to]=${opts.toUnix}`;
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
+    });
+    if (res.status === 204 || res.status === 400 || res.status === 404) break;
+    if (!res.ok) break;
+    const data = (await readJsonOrThrow(
+      res,
+      `Kommo mail notes p${page}`
+    )) as {
+      _embedded?: { notes?: Array<Record<string, unknown>> };
+    };
+    const batch = data._embedded?.notes || [];
+    if (!batch.length) break;
+    for (const note of batch) {
+      const id = String(note.id ?? `note-${note.created_at}`);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const params = (note.params || {}) as Record<string, unknown>;
+      const subject = String(
+        params.subject ||
+          params.topic ||
+          params.title ||
+          params.text ||
+          ""
+      );
+      const created = Number(note.created_at || note.updated_at || 0);
+      if (created && (created < opts.fromUnix || created > opts.toUnix)) {
+        continue;
+      }
+      out.push({
+        id: Number(note.id) || undefined,
+        type: "mail_message_note",
+        entity_id: Number(note.entity_id) || undefined,
+        created_at: created || undefined,
+        subject,
+        raw: note,
+      });
+    }
+    if (batch.length < 250) break;
+  }
+
+  // Notes comunes cuyo texto menciona cotización (a veces el mail queda como nota)
+  if (out.length < 10) {
+    for (let page = 1; page <= Math.min(maxPages, 20); page++) {
       const url =
         `${base}/api/v4/leads/notes?limit=250&page=${page}` +
-        `&filter[note_type]=mail_message` +
         `&filter[updated_at][from]=${opts.fromUnix}` +
         `&filter[updated_at][to]=${opts.toUnix}`;
       const res = await fetch(url, {
@@ -342,34 +392,43 @@ export async function fetchOutgoingMailEvents(opts: {
           Accept: "application/json",
         },
       });
-      if (res.status === 204 || res.status === 400 || res.status === 404) break;
+      if (res.status === 204) break;
       if (!res.ok) break;
       const data = (await readJsonOrThrow(
         res,
-        `Kommo mail notes p${page}`
+        `Kommo notes scan p${page}`
       )) as {
         _embedded?: { notes?: Array<Record<string, unknown>> };
       };
       const batch = data._embedded?.notes || [];
       if (!batch.length) break;
       for (const note of batch) {
-        const id = String(note.id ?? `note-${note.created_at}`);
-        if (seen.has(id)) continue;
-        seen.add(id);
         const params = (note.params || {}) as Record<string, unknown>;
-        const subject = String(
-          params.subject || params.topic || params.title || ""
+        const text = String(
+          params.subject || params.text || params.message || ""
         );
-        const created = Number(note.created_at || note.updated_at || 0);
-        if (created && (created < opts.fromUnix || created > opts.toUnix)) {
+        const norm = text
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/\p{M}/gu, "");
+        if (!norm.includes("cotizacion")) continue;
+        if (
+          norm.includes("publicidad") ||
+          norm.includes("newsletter") ||
+          norm.includes("marketing")
+        ) {
           continue;
         }
+        const id = `cotiz-note-${note.id}`;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const created = Number(note.created_at || note.updated_at || 0);
         out.push({
           id: Number(note.id) || undefined,
-          type: "mail_message_note",
+          type: "cotizacion_note",
           entity_id: Number(note.entity_id) || undefined,
           created_at: created || undefined,
-          subject,
+          subject: text.slice(0, 200),
           raw: note,
         });
       }
@@ -393,11 +452,20 @@ function extractMailSubject_(ev: Record<string, unknown>): string {
     }
     if (typeof v === "object") {
       const o = v as Record<string, unknown>;
-      for (const k of ["subject", "topic", "title", "mail_subject", "name"]) {
+      for (const k of [
+        "subject",
+        "topic",
+        "title",
+        "mail_subject",
+        "name",
+        "text",
+      ]) {
         if (o[k] != null && String(o[k]).trim()) return String(o[k]);
       }
       if (o.params) return tryObj(o.params);
       if (o.value) return tryObj(o.value);
+      if (o.note) return tryObj(o.note);
+      if (o.message) return tryObj(o.message);
     }
     return "";
   };
@@ -406,6 +474,20 @@ function extractMailSubject_(ev: Record<string, unknown>): string {
     tryObj(ev.value_before) ||
     tryObj(ev) ||
     ""
+  );
+}
+
+/** ¿Es un evento/nota de correo saliente? */
+export function isOutgoingMailEvent_(m: {
+  type?: string;
+  subject?: string;
+}): boolean {
+  const t = String(m.type || "").toLowerCase();
+  return (
+    t.includes("outgoing_mail") ||
+    t.includes("outgoing_email") ||
+    t === "mail_message" ||
+    t === "mail_message_note"
   );
 }
 

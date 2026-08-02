@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.classifyStatusName_ = classifyStatusName_;
-exports.isCotizacionMail_ = isCotizacionMail_;
+exports.countsAsCotizacionMail_ = countsAsCotizacionMail_;
 exports.syncMetricasLeadsWa = syncMetricasLeadsWa;
 exports.leadsWaProbe = leadsWaProbe;
 exports.isCotizacionStatus_ = isCotizacionStatus_;
@@ -79,21 +79,25 @@ function classifyStatusName_(name) {
     }
     return "other";
 }
-/** Correo cuenta solo si el asunto habla de cotización (no publicidad). */
-function isCotizacionMail_(subject) {
-    const n = normLabel_(subject);
-    if (!n)
-        return false;
+/**
+ * Correo: si hay asunto, solo cotización (excluye publicidad).
+ * Si Kommo no manda asunto (muy frecuente en events), cuenta el outgoing_mail.
+ */
+function countsAsCotizacionMail_(opts) {
+    const n = normLabel_(opts.subject);
     if (n.includes("publicidad") ||
-        n.includes("promo") ||
         n.includes("newsletter") ||
         n.includes("marketing") ||
-        n.includes("descuento")) {
-        // si igual dice cotización, sí cuenta
-        if (!n.includes("cotizacion"))
-            return false;
+        (n.includes("promo") && !n.includes("cotizacion"))) {
+        return false;
     }
-    return n.includes("cotizacion");
+    if (n.includes("cotizacion"))
+        return true;
+    // Sin asunto legible: Kommo events outgoing_mail no traen subject
+    if (!n && (0, kommoApi_1.isOutgoingMailEvent_)({ type: opts.type, subject: opts.subject })) {
+        return true;
+    }
+    return false;
 }
 function pickWaPipeline_(pipelines) {
     if (!pipelines.length)
@@ -364,7 +368,7 @@ async function syncMetricasLeadsWa(opts) {
             toUnix: rangeTo,
         }),
     ]);
-    const cotizacionMails = allMails.filter((m) => isCotizacionMail_(m.subject || ""));
+    const cotizacionMails = allMails.filter((m) => countsAsCotizacionMail_({ subject: m.subject || "", type: m.type }));
     const mailSample = [
         ...new Set(allMails
             .map((m) => (m.subject || "").trim() || `(sin asunto type=${m.type})`)
@@ -392,7 +396,9 @@ async function syncMetricasLeadsWa(opts) {
                 noContestaron++;
             else if (maps.llenadoIds.has(sid))
                 llenado++;
-            if (maps.correoStatusIds.has(sid))
+            // Solo etapa "Cotización realizada" como proxy (no seguimientos)
+            const stName = maps.byId.get(sid) || "";
+            if (isCotizacionStatus_(stName))
                 correoByStatus++;
         }
         const leads = weekLeads.length;
@@ -400,7 +406,6 @@ async function syncMetricasLeadsWa(opts) {
             const c = Number(m.created_at || 0);
             return c >= fromU && c <= toU;
         }).length;
-        // Preferir mails reales; si Kommo no expone asunto/API, usar etapa cotización/seguimiento
         const correo = correoFromMailApi ? correoMail : correoByStatus;
         const porcentaje = leads > 0 ? llenado / leads : 0;
         weeks.push({
@@ -456,10 +461,10 @@ async function syncMetricasLeadsWa(opts) {
         weeks,
         mailSample,
         hint: correoFromMailApi
-            ? undefined
-            : allMails.length === 0
-                ? "Correo: Kommo Mail API no devolvió mensajes; usé etapas Cotización/Seguimiento/Intención como proxy."
-                : "Correo: hay eventos de mail sin asunto 'cotización'; usé etapas Cotización/Seguimiento/Intención como proxy.",
+            ? allMails.some((m) => !(m.subject || "").trim())
+                ? `Correo: ${cotizacionMails.length} mails salientes (Kommo no envía asunto; excluidos solo si el asunto dice publicidad).`
+                : undefined
+            : "Correo: sin events outgoing_mail; proxy = etapa Cotización realizada.",
     };
 }
 async function leadsWaProbe() {

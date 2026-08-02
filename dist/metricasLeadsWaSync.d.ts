@@ -1,7 +1,13 @@
 /** Clasificación de etapa según nombre (reglas Bodasesor). */
 export declare function classifyStatusName_(name: string): "no_contestaron" | "llenado" | "other";
-/** Correo cuenta solo si el asunto habla de cotización (no publicidad). */
-export declare function isCotizacionMail_(subject: string): boolean;
+/**
+ * Correo: si hay asunto, solo cotización (excluye publicidad).
+ * Si Kommo no manda asunto (muy frecuente en events), cuenta el outgoing_mail.
+ */
+export declare function countsAsCotizacionMail_(opts: {
+    subject: string;
+    type?: string;
+}): boolean;
 export type WeekLeadsWa = {
     weekStart: string;
     leads: number;
