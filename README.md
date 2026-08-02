@@ -20,6 +20,7 @@
 - Env: `KOMMO_BASE_URL`, `KOMMO_ACCESS_TOKEN`, `URL_BODASESOR_DIRECCION_SHEETS`
 - **GA4 visitas** → Metricas: [`docs/GA4_METRICAS.md`](docs/GA4_METRICAS.md)
 - **Seguidores IG/FB** → Metricas: [`docs/META_SEGUIDORES.md`](docs/META_SEGUIDORES.md) (`POST /api/ventas/meta-setup` + `sync-seguidores`)
+- **Facebook Ads** (Inversión, Conversión, CPL, CPC, Clics, Alcance, CPM) → Metricas: [`docs/META_ADS_METRICAS.md`](docs/META_ADS_METRICAS.md) (`POST /api/ventas/sync-facebook-ads`)
 
 ## Sheet (Apps Script) — OBLIGATORIO v6
 

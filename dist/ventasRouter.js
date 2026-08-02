@@ -12,7 +12,9 @@ const eventFingerprint_1 = require("./eventFingerprint");
 const sheetEventosReader_1 = require("./sheetEventosReader");
 const metricasVisitasSync_1 = require("./metricasVisitasSync");
 const metricasSeguidoresSync_1 = require("./metricasSeguidoresSync");
+const metricasFacebookAdsSync_1 = require("./metricasFacebookAdsSync");
 const metaSocialClient_1 = require("./metaSocialClient");
+const metaAdsClient_1 = require("./metaAdsClient");
 const googleAuth_1 = require("./googleAuth");
 function publicBaseUrl_(req) {
     const env = (process.env.PUBLIC_BASE_URL ||
@@ -215,13 +217,16 @@ exports.ventasRouter.get("/api/ventas/poll-now", async (_req, res) => {
  */
 let lastVisitasTickAt = 0;
 let lastSeguidoresTickAt = 0;
+let lastFacebookAdsTickAt = 0;
 const VISITAS_TICK_EVERY_MS = 6 * 60 * 60_000;
 const SEGUIDORES_TICK_EVERY_MS = 12 * 60 * 60_000;
+const FACEBOOK_ADS_TICK_EVERY_MS = 6 * 60 * 60_000;
 async function handleTick(_req, res) {
     try {
         const result = await (0, pollClosedDeals_1.runPollTick)();
         let visitas = null;
         let seguidores = null;
+        let facebookAds = null;
         const ga4 = (0, metricasVisitasSync_1.metricasVisitasStatus)().ga4;
         if (ga4.ok && Date.now() - lastVisitasTickAt > VISITAS_TICK_EVERY_MS) {
             lastVisitasTickAt = Date.now();
@@ -243,6 +248,16 @@ async function handleTick(_req, res) {
                 console.warn("[tick] sync seguidores", err instanceof Error ? err.message : err);
             }
         }
+        if (metaOk &&
+            Date.now() - lastFacebookAdsTickAt > FACEBOOK_ADS_TICK_EVERY_MS) {
+            lastFacebookAdsTickAt = Date.now();
+            try {
+                facebookAds = await (0, metricasFacebookAdsSync_1.syncMetricasFacebookAds)({ lookbackDays: 45 });
+            }
+            catch (err) {
+                console.warn("[tick] sync facebook ads", err instanceof Error ? err.message : err);
+            }
+        }
         res.status(200).json({
             ok: true,
             at: new Date().toISOString(),
@@ -250,6 +265,7 @@ async function handleTick(_req, res) {
             poll: (0, pollClosedDeals_1.getPollStatus)(),
             visitas,
             seguidores,
+            facebookAds,
             message: "Tick OK — cierres faltantes de la ventana sincronizados",
         });
     }
@@ -365,8 +381,8 @@ exports.ventasRouter.get("/api/ventas/meta-status", (_req, res) => {
     res.status(200).json({ ok: true, ...(0, metricasSeguidoresSync_1.seguidoresStatus)() });
 });
 /**
- * Guarda Page Access Token de Meta (y opcional page_id / ig_user_id).
- * Body: { access_token, page_id?, ig_user_id? }
+ * Guarda Page Access Token de Meta (y opcional page_id / ig_user_id / ad_account_id).
+ * Body: { access_token, page_id?, ig_user_id?, ad_account_id? }
  */
 exports.ventasRouter.post("/api/ventas/meta-setup", async (req, res) => {
     try {
@@ -384,8 +400,10 @@ exports.ventasRouter.post("/api/ventas/meta-setup", async (req, res) => {
             access_token,
             page_id: body.page_id,
             ig_user_id: body.ig_user_id,
+            ad_account_id: body.ad_account_id,
         });
         let discovery = null;
+        let adAccounts = null;
         try {
             discovery = await (0, metaSocialClient_1.discoverMetaAccounts)(access_token);
         }
@@ -394,16 +412,26 @@ exports.ventasRouter.post("/api/ventas/meta-setup", async (req, res) => {
                 error: err instanceof Error ? err.message : String(err),
             };
         }
+        try {
+            adAccounts = await (0, metaAdsClient_1.listMetaAdAccounts)(access_token);
+        }
+        catch (err) {
+            adAccounts = {
+                error: err instanceof Error ? err.message : String(err),
+            };
+        }
         res.status(200).json({
             ok: true,
             saved: {
                 page_id: saved.page_id || null,
                 ig_user_id: saved.ig_user_id || null,
+                ad_account_id: saved.ad_account_id || null,
                 hasToken: true,
             },
             discovery,
+            adAccounts,
             status: (0, metricasSeguidoresSync_1.seguidoresStatus)(),
-            message: "Token guardado. Ahora POST /api/ventas/sync-seguidores",
+            message: "Token guardado. Ahora POST /api/ventas/sync-seguidores o /api/ventas/sync-facebook-ads",
         });
     }
     catch (err) {
@@ -431,6 +459,39 @@ async function handleSyncSeguidores(req, res) {
 }
 exports.ventasRouter.post("/api/ventas/sync-seguidores", handleSyncSeguidores);
 exports.ventasRouter.get("/api/ventas/sync-seguidores", handleSyncSeguidores);
+/** Estado Meta Ads → sección Facebook Ads en Metricas. */
+exports.ventasRouter.get("/api/ventas/meta-ads-status", async (_req, res) => {
+    try {
+        const probe = await (0, metricasFacebookAdsSync_1.facebookAdsProbe)();
+        res.status(200).json(probe);
+    }
+    catch (err) {
+        res.status(502).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+            status: (0, metricasFacebookAdsSync_1.facebookAdsSyncStatus)(),
+        });
+    }
+});
+async function handleSyncFacebookAds(req, res) {
+    try {
+        const body = (req.body || {});
+        const force = String(req.query.force || body.force || "") === "1" ||
+            body.force === true;
+        const lookbackDays = Number(req.query.lookbackDays || body.lookbackDays || 45);
+        const result = await (0, metricasFacebookAdsSync_1.syncMetricasFacebookAds)({ force, lookbackDays });
+        res.status(result.ok ? 200 : 502).json(result);
+    }
+    catch (err) {
+        res.status(502).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+            status: (0, metricasFacebookAdsSync_1.facebookAdsSyncStatus)(),
+        });
+    }
+}
+exports.ventasRouter.post("/api/ventas/sync-facebook-ads", handleSyncFacebookAds);
+exports.ventasRouter.get("/api/ventas/sync-facebook-ads", handleSyncFacebookAds);
 /** Estado anti-duplicados: cuántas huellas hay en Sheet + cache. */
 exports.ventasRouter.get("/api/ventas/dedupe-status", async (_req, res) => {
     try {

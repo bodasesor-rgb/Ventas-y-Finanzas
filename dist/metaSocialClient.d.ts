@@ -4,6 +4,8 @@ export interface MetaTokenStore {
     ig_user_id?: string;
     page_name?: string;
     ig_username?: string;
+    /** act_XXXX o solo dígitos */
+    ad_account_id?: string;
 }
 export interface SocialFollowers {
     facebookFollowers: number;

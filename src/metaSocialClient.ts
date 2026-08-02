@@ -10,6 +10,8 @@ export interface MetaTokenStore {
   ig_user_id?: string;
   page_name?: string;
   ig_username?: string;
+  /** act_XXXX o solo dígitos */
+  ad_account_id?: string;
 }
 
 export interface SocialFollowers {
@@ -42,6 +44,8 @@ export function saveMetaTokenStore(
     ig_user_id: String(raw.ig_user_id || prev.ig_user_id || "").trim() || undefined,
     page_name: raw.page_name || prev.page_name,
     ig_username: raw.ig_username || prev.ig_username,
+    ad_account_id:
+      String(raw.ad_account_id || prev.ad_account_id || "").trim() || undefined,
   };
   if (!next.access_token) {
     throw new Error("Falta access_token de Meta");
