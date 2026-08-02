@@ -16,6 +16,7 @@ const statementFiles_1 = require("./statementFiles");
 const autoCategories_1 = require("./autoCategories");
 const categoryColors_1 = require("./categoryColors");
 const statementSummary_1 = require("./statementSummary");
+const autoReview_1 = require("./autoReview");
 const driveArchive_1 = require("./driveArchive");
 const counterparties_1 = require("./counterparties");
 const providerAnalysis_1 = require("./providerAnalysis");
@@ -422,6 +423,52 @@ exports.pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
         },
     });
 });
+/**
+ * Cuando no cuadra: relee el PDF varias veces (Δsaldo / impreso / híbrido)
+ * y localiza la(s) cuenta(s) que provocan la diferencia.
+ */
+exports.pnlRouter.post("/api/pnl/runs/:id/auto-review", (req, res) => {
+    const runs = (0, store_1.loadRuns)();
+    const idx = runs.findIndex((r) => r.id === req.params.id);
+    if (idx < 0) {
+        res.status(404).json({ ok: false, error: "Run no encontrado" });
+        return;
+    }
+    const run = runs[idx];
+    const text = run.textFull || run.textPreview || "";
+    if (!text || text.length < 50) {
+        res.status(400).json({
+            ok: false,
+            error: "Texto incompleto. Vuelve a soltar el PDF.",
+        });
+        return;
+    }
+    (0, autoCategories_1.pruneMerchantCategories)();
+    const rules = (0, store_1.loadRules)();
+    const result = (0, autoReview_1.applyAutoReviewToRun)(run, rules);
+    const period = (0, period_1.detectPeriodFromText)(text);
+    run.periodKey = period.key;
+    run.periodLabel = period.label;
+    runs[idx] = run;
+    (0, store_1.saveRuns)(runs);
+    res.json({
+        ok: true,
+        run: runPublic(run),
+        categories: (0, store_1.loadCategories)(),
+        rules: (0, store_1.loadRules)(),
+        autoReview: result.autoReview,
+        stats: {
+            lines: run.lines.length,
+            needsReview: run.lines.filter((l) => l.needsReview).length,
+            suspects: result.autoReview.suspects.length,
+            matched: result.autoReview.matched,
+            bestStrategy: result.autoReview.bestStrategy,
+            period: period.label,
+            totals: run.totals,
+            reconciliation: run.reconciliation,
+        },
+    });
+});
 /** Estado de Resultados en página (matriz mes × concepto) desde PDFs cargados. */
 exports.pnlRouter.get("/api/pnl/estado-resultados", (req, res) => {
     const runs = (0, store_1.loadRuns)();
@@ -744,12 +791,18 @@ exports.pnlRouter.patch("/api/pnl/runs/:runId/lines/:lineId", (req, res) => {
     }
     run.summaryByCategory = (0, parseStatement_1.summarizeByCategory)(run.lines);
     run.totals = (0, parseStatement_1.summarizeTotals)(run.lines);
+    const text = run.textFull || run.textPreview || "";
+    if (text.length >= 50) {
+        const oficial = (0, statementSummary_1.extractStatementOfficialTotals)(text);
+        run.reconciliation = (0, statementSummary_1.reconcileTotals)(oficial, run.totals);
+    }
     (0, store_1.saveRuns)(runs);
     res.json({
         ok: true,
         line,
         summaryByCategory: run.summaryByCategory,
         totals: run.totals,
+        reconciliation: run.reconciliation,
     });
 });
 exports.pnlRouter.post("/api/pnl/test-rule", (req, res) => {

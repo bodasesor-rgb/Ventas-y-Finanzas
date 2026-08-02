@@ -18,7 +18,12 @@ export declare function extractMoveAndSaldo(body: string): {
     suspicious: boolean;
 } | null;
 export declare function detectDirection(desc: string): BankLine["direction"];
-export declare function extractLinesFromText(text: string, rules: RecurringRule[]): BankLine[];
+/** Cómo calcular el monto de cada movimiento Banamex. */
+export type AmountStrategy = "delta" | "printed" | "hybrid";
+export interface ParseOptions {
+    amountStrategy?: AmountStrategy;
+}
+export declare function extractLinesFromText(text: string, rules: RecurringRule[], options?: ParseOptions): BankLine[];
 export declare function summarizeByCategory(lines: BankLine[]): Record<string, number>;
 export declare function summarizeTotals(lines: BankLine[]): {
     ingresos: number;

@@ -34,10 +34,38 @@ export interface BankLine {
     category: PnlCategory;
     matchedRuleId?: string;
     needsReview: boolean;
+    /** Por qué la revisión automática marcó esta línea */
+    reviewNote?: string;
     /** Beneficiario SPEI/traspaso (si se detectó) */
     counterparty?: string;
     /** socio = Luis/Alejandro Zorrilla; proveedor = resto */
     counterpartyKind?: "socio" | "proveedor";
+}
+export interface AutoReviewSuspect {
+    lineId: string;
+    date?: string;
+    description: string;
+    amount: number;
+    reason: string;
+    suggestedAmount?: number;
+}
+export interface AutoReviewPass {
+    strategy: string;
+    label: string;
+    lineCount: number;
+    matchCompleto: boolean;
+    matchIngresos: boolean;
+    matchGastos: boolean;
+    diffIngresos: number | null;
+    diffGastos: number | null;
+}
+export interface AutoReviewReport {
+    ranAt: string;
+    matched: boolean;
+    bestStrategy: string;
+    passes: AutoReviewPass[];
+    suspects: AutoReviewSuspect[];
+    message: string;
 }
 export interface StatementRun {
     id: string;
@@ -94,6 +122,8 @@ export interface StatementRun {
         matchCompleto: boolean;
         tolerancia: number;
     };
+    /** Última revisión automática de cuadre */
+    autoReview?: AutoReviewReport;
     /** Última vez que se envió al Sheet (Banco / P&L) */
     sentToSheetAt?: string;
     sentToSheet?: {

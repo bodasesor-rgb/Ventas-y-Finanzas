@@ -609,6 +609,73 @@ input.desc-edit:focus {
   color: #9a3412;
   border: 1px solid #c2410c;
 }
+.auto-review-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1rem;
+  margin: 0 0 0.85rem;
+}
+.btn-auto-review {
+  background: #9a3412;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.55rem 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-auto-review:hover { filter: brightness(1.06); }
+.btn-auto-review:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+.auto-review-findings {
+  border: 1px solid #c2410c;
+  background: #fff8f5;
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  margin: 0 0 0.85rem;
+  font-size: 0.88rem;
+}
+.auto-review-findings h4 {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+  color: #9a3412;
+}
+.auto-review-findings ol {
+  margin: 0.35rem 0 0;
+  padding-left: 1.2rem;
+}
+.auto-review-findings li {
+  margin: 0.25rem 0;
+}
+.auto-review-findings button.linkish {
+  background: none;
+  border: none;
+  color: #9a3412;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+}
+.review-note {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.78rem;
+  color: #9a3412;
+  line-height: 1.3;
+}
+tr.suspect {
+  outline: 2px solid #c2410c;
+  outline-offset: -2px;
+  background: #ffe8e0 !important;
+  animation: suspectPulse 1.2s ease-in-out 2;
+}
+@keyframes suspectPulse {
+  0%, 100% { outline-color: #c2410c; }
+  50% { outline-color: #f97316; }
+}
 @media (max-width: 700px) {
   .totals-bar { grid-template-columns: 1fr; }
 }

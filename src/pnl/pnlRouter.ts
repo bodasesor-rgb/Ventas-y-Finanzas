@@ -21,6 +21,7 @@ import {
   extractStatementOfficialTotals,
   reconcileTotals,
 } from "./statementSummary";
+import { applyAutoReviewToRun } from "./autoReview";
 import {
   archiveStatementToDrive,
   deleteDriveArchive,
@@ -481,6 +482,53 @@ pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
   });
 });
 
+/**
+ * Cuando no cuadra: relee el PDF varias veces (Δsaldo / impreso / híbrido)
+ * y localiza la(s) cuenta(s) que provocan la diferencia.
+ */
+pnlRouter.post("/api/pnl/runs/:id/auto-review", (req, res) => {
+  const runs = loadRuns();
+  const idx = runs.findIndex((r) => r.id === req.params.id);
+  if (idx < 0) {
+    res.status(404).json({ ok: false, error: "Run no encontrado" });
+    return;
+  }
+  const run = runs[idx];
+  const text = run.textFull || run.textPreview || "";
+  if (!text || text.length < 50) {
+    res.status(400).json({
+      ok: false,
+      error: "Texto incompleto. Vuelve a soltar el PDF.",
+    });
+    return;
+  }
+  pruneMerchantCategories();
+  const rules = loadRules();
+  const result = applyAutoReviewToRun(run, rules);
+  const period = detectPeriodFromText(text);
+  run.periodKey = period.key;
+  run.periodLabel = period.label;
+  runs[idx] = run;
+  saveRuns(runs);
+  res.json({
+    ok: true,
+    run: runPublic(run),
+    categories: loadCategories(),
+    rules: loadRules(),
+    autoReview: result.autoReview,
+    stats: {
+      lines: run.lines.length,
+      needsReview: run.lines.filter((l) => l.needsReview).length,
+      suspects: result.autoReview.suspects.length,
+      matched: result.autoReview.matched,
+      bestStrategy: result.autoReview.bestStrategy,
+      period: period.label,
+      totals: run.totals,
+      reconciliation: run.reconciliation,
+    },
+  });
+});
+
 /** Estado de Resultados en página (matriz mes × concepto) desde PDFs cargados. */
 pnlRouter.get("/api/pnl/estado-resultados", (req, res) => {
   const runs = loadRuns();
@@ -823,12 +871,18 @@ pnlRouter.patch("/api/pnl/runs/:runId/lines/:lineId", (req, res) => {
 
   run.summaryByCategory = summarizeByCategory(run.lines);
   run.totals = summarizeTotals(run.lines);
+  const text = run.textFull || run.textPreview || "";
+  if (text.length >= 50) {
+    const oficial = extractStatementOfficialTotals(text);
+    run.reconciliation = reconcileTotals(oficial, run.totals);
+  }
   saveRuns(runs);
   res.json({
     ok: true,
     line,
     summaryByCategory: run.summaryByCategory,
     totals: run.totals,
+    reconciliation: run.reconciliation,
   });
 });
 

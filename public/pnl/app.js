@@ -220,13 +220,146 @@ function renderTotals(run) {
             rec.oficial.ingresosOficiales || 0
           )} vs parseado ${money(t.ingresos)}. Cargos estado ${money(
             rec.oficial.gastosOficiales || 0
-          )} vs parseado ${money(t.gastos)}. Corrige montos marcados en Revisar.`;
+          )} vs parseado ${money(t.gastos)}. Usa «Revisar automáticamente» para localizar la cuenta distinta.`;
     }
   } else {
     if (oIng) oIng.textContent = "";
     if (oGas) oGas.textContent = "";
     if (status) status.textContent = "";
     if (msg) msg.hidden = true;
+  }
+
+  renderAutoReviewUi(run);
+}
+
+function renderAutoReviewUi(run) {
+  const bar = document.getElementById("autoReviewBar");
+  const findings = document.getElementById("autoReviewFindings");
+  const statusEl = document.getElementById("autoReviewStatus");
+  if (!bar) return;
+
+  const rec = run?.reconciliation;
+  const report = run?.autoReview;
+  const needsReviewBtn = rec && !rec.matchCompleto;
+  bar.hidden = !needsReviewBtn && !report;
+  const btn = document.getElementById("autoReviewBtn");
+  if (btn) btn.hidden = !needsReviewBtn;
+
+  if (statusEl && !statusEl.dataset.busy) {
+    if (report?.message) {
+      statusEl.textContent = report.message;
+    } else if (needsReviewBtn) {
+      statusEl.textContent =
+        "El sistema releerá el PDF varias veces hasta encontrar la cuenta que no cuadra.";
+    } else {
+      statusEl.textContent = "";
+    }
+  }
+
+  if (!findings) return;
+  const suspects = report?.suspects || [];
+  if (!suspects.length) {
+    findings.hidden = true;
+    findings.innerHTML = "";
+    return;
+  }
+  findings.hidden = false;
+  findings.innerHTML = `
+    <h4>Cuentas distintas / sospechosas (${suspects.length})</h4>
+    <p class="muted" style="margin:0">Clic en una fila para saltar al movimiento marcado.</p>
+    <ol>
+      ${suspects
+        .map(
+          (s) => `
+        <li>
+          <button type="button" class="linkish" data-suspect="${escapeAttr(
+            s.lineId
+          )}">${escapeHtml(s.date || "?")} · ${escapeHtml(
+            (s.description || "").slice(0, 70)
+          )} · ${money(s.amount)}</button>
+          <div class="review-note">${escapeHtml(s.reason)}${
+            s.suggestedAmount != null
+              ? ` · sugerido: ${money(s.suggestedAmount)}`
+              : ""
+          }</div>
+        </li>`
+        )
+        .join("")}
+    </ol>
+  `;
+  findings.querySelectorAll("[data-suspect]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      highlightSuspectLine(btn.getAttribute("data-suspect"));
+    });
+  });
+}
+
+function highlightSuspectLine(lineId) {
+  if (!lineId) return;
+  const tbody = document.querySelector("#linesTable tbody");
+  if (!tbody) return;
+  tbody.querySelectorAll("tr.suspect").forEach((tr) =>
+    tr.classList.remove("suspect")
+  );
+  let tr = tbody.querySelector(`tr[data-line-id="${lineId}"]`);
+  if (!tr) {
+    const input = [...tbody.querySelectorAll("[data-line]")].find(
+      (el) => el.getAttribute("data-line") === lineId
+    );
+    tr = input?.closest("tr");
+  }
+  if (!tr) return;
+  tr.classList.add("suspect");
+  tr.scrollIntoView({ behavior: "smooth", block: "center" });
+  const amount = tr.querySelector("input.amount-edit");
+  if (amount) amount.focus();
+}
+
+async function runAutoReview() {
+  if (!currentRun?.id) {
+    alert("Abre o sube un estado de cuenta primero.");
+    return;
+  }
+  const btn = document.getElementById("autoReviewBtn");
+  const statusEl = document.getElementById("autoReviewStatus");
+  if (btn) btn.disabled = true;
+  if (statusEl) {
+    statusEl.dataset.busy = "1";
+    statusEl.textContent =
+      "Releyendo el documento (Δsaldo → impreso → híbrido) y buscando la cuenta distinta…";
+  }
+  try {
+    const data = await api(
+      `/api/pnl/runs/${encodeURIComponent(currentRun.id)}/auto-review`,
+      { method: "POST" }
+    );
+    if (data.categories) {
+      categories = data.categories;
+      renderCategories();
+    }
+    if (data.rules) {
+      rules = data.rules;
+      renderRules();
+    }
+    renderRun(data.run);
+    await refreshLibrary();
+    const first = data.autoReview?.suspects?.[0]?.lineId;
+    if (first) {
+      setTimeout(() => highlightSuspectLine(first), 120);
+    }
+    if (statusEl) {
+      statusEl.textContent =
+        data.autoReview?.message ||
+        (data.stats?.matched
+          ? "✓ Cuadró tras la revisión automática"
+          : "Revisión terminada — revisa los movimientos marcados");
+    }
+  } catch (e) {
+    if (statusEl) statusEl.textContent = e.message;
+    else alert(e.message);
+  } finally {
+    if (btn) btn.disabled = false;
+    if (statusEl) delete statusEl.dataset.busy;
   }
 }
 
@@ -677,14 +810,19 @@ function renderRun(run) {
 
   const tbody = document.querySelector("#linesTable tbody");
   tbody.innerHTML = "";
+  const suspectIds = new Set(
+    (run.autoReview?.suspects || []).map((s) => s.lineId)
+  );
   for (const line of run.lines || []) {
     const tr = document.createElement("tr");
     const income = lineIsIncome(line);
     const color = categoryColor(line.category);
     if (line.needsReview) tr.classList.add("review");
+    if (suspectIds.has(line.id)) tr.classList.add("suspect");
     if (income) tr.classList.add("income");
     tr.style.background = tintBg(color, income ? 0.18 : 0.1);
     tr.style.boxShadow = `inset 4px 0 0 ${color}`;
+    tr.dataset.lineId = line.id;
     tr.innerHTML = `
       <td>${escapeAttr(line.date || "")}</td>
       <td>
@@ -696,6 +834,11 @@ function renderRun(run) {
             ? `<span class="cp-tag">${escapeHtml(
                 line.counterpartyKind === "socio" ? "socio" : "proveedor"
               )}: ${escapeHtml(line.counterparty)}</span>`
+            : ""
+        }
+        ${
+          line.reviewNote
+            ? `<span class="review-note">${escapeHtml(line.reviewNote)}</span>`
             : ""
         }
       </td>
@@ -1817,6 +1960,11 @@ async function init() {
         status.textContent = e.message;
       }
     };
+  }
+
+  const autoReviewBtn = document.getElementById("autoReviewBtn");
+  if (autoReviewBtn) {
+    autoReviewBtn.onclick = () => runAutoReview();
   }
   } // end upload controls
 }

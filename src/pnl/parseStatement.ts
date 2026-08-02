@@ -244,11 +244,24 @@ interface RawRow {
   skipTx?: boolean;
 }
 
+/** Cómo calcular el monto de cada movimiento Banamex. */
+export type AmountStrategy = "delta" | "printed" | "hybrid";
+
+export interface ParseOptions {
+  amountStrategy?: AmountStrategy;
+}
+
 /**
  * Parser Banamex por cadena de saldos:
  * monto = Δsaldo (fuente de verdad). Así Depósitos/Retiros cuadran con el PDF.
+ * Estrategias alternativas sirven para revisión automática cuando no cuadra.
  */
-function extractBanamex(text: string, rules: RecurringRule[]): BankLine[] {
+function extractBanamex(
+  text: string,
+  rules: RecurringRule[],
+  options: ParseOptions = {}
+): BankLine[] {
+  const strategy: AmountStrategy = options.amountStrategy || "delta";
   const detail = isolateDetailSection(text);
   const cleaned = mergeUsdContinuations(stripPageNoise(detail));
   const out: BankLine[] = [];
@@ -385,16 +398,39 @@ function extractBanamex(text: string, rules: RecurringRule[]): BankLine[] {
 
     if (Math.abs(delta) < 0.005) continue;
 
-    const amount = Math.abs(delta);
-    const direction: BankLine["direction"] = delta > 0 ? "abono" : "cargo";
-    const signed = direction === "abono" ? amount : -amount;
-
-    // Impreso vs Δ: si no cuadra, el Δ manda (folios/POS pegados)
+    const deltaAbs = Math.abs(delta);
     const printedAbs =
       row.printedMove == null ? null : Math.abs(row.printedMove);
     const printedMismatch =
-      printedAbs != null && Math.abs(printedAbs - amount) > 0.05;
+      printedAbs != null && Math.abs(printedAbs - deltaAbs) > 0.05;
 
+    let amount = deltaAbs;
+    let direction: BankLine["direction"] = delta > 0 ? "abono" : "cargo";
+    let reviewNote: string | undefined;
+
+    if (strategy === "printed" && printedAbs != null) {
+      amount = printedAbs;
+      // Signo del Δsaldo (más confiable que el texto)
+      direction = delta > 0 ? "abono" : "cargo";
+      if (printedMismatch) {
+        reviewNote = `Monto impreso $${printedAbs.toFixed(
+          2
+        )} ≠ Δsaldo $${deltaAbs.toFixed(2)}; se usó el impreso`;
+      }
+    } else if (strategy === "hybrid" && printedMismatch && printedAbs != null) {
+      // Cuando impreso y Δ discrepan, probar con el impreso
+      amount = printedAbs;
+      direction = delta > 0 ? "abono" : "cargo";
+      reviewNote = `Discrepancia impreso/Δsaldo; estrategia híbrida usó $${printedAbs.toFixed(
+        2
+      )} (Δ era $${deltaAbs.toFixed(2)})`;
+    } else if (printedMismatch && printedAbs != null) {
+      reviewNote = `Impreso $${printedAbs.toFixed(
+        2
+      )} ≠ Δsaldo $${deltaAbs.toFixed(2)}; prevalece Δsaldo`;
+    }
+
+    const signed = direction === "abono" ? amount : -amount;
     const desc = row.desc;
     // No dedupe por monto+fecha: Banamex repite cargos idénticos (ej. 2× STP $1,000)
 
@@ -415,6 +451,7 @@ function extractBanamex(text: string, rules: RecurringRule[]): BankLine[] {
       category: cat.category,
       matchedRuleId: cat.matchedRuleId,
       needsReview: Boolean(cat.needsReview || suspicious),
+      reviewNote,
     });
   }
 
@@ -423,13 +460,14 @@ function extractBanamex(text: string, rules: RecurringRule[]): BankLine[] {
 
 export function extractLinesFromText(
   text: string,
-  rules: RecurringRule[]
+  rules: RecurringRule[],
+  options: ParseOptions = {}
 ): BankLine[] {
   const banamexHits = (
     text.match(new RegExp(`\\d{1,2}(?:${MONTH_RE})`, "gi")) || []
   ).length;
   if (banamexHits >= 5) {
-    const lines = extractBanamex(text, rules);
+    const lines = extractBanamex(text, rules, options);
     if (lines.length > 0) return lines;
   }
   return extractGeneric(text, rules);
