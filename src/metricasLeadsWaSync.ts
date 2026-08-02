@@ -77,17 +77,19 @@ export function classifyStatusName_(
   name: string
 ): "no_contestaron" | "llenado" | "other" {
   const n = normLabel_(name);
+  // "Datos e Interesess del cliente", "Datos de clientes", "Cliente no contesta"
   if (
-    n.includes("datos de cliente") ||
-    n.includes("dato de cliente") ||
-    n === "datos clientes" ||
-    n.includes("datos clientes")
+    (n.includes("datos") && n.includes("cliente")) ||
+    n.includes("no contesta") ||
+    n.includes("no contestaron") ||
+    n.includes("no contestado")
   ) {
     return "no_contestaron";
   }
+  // "Humano Trabaja", "Seguimiento…", typo "Seguimineto…", "Intención de paga"
   if (
     n.includes("humano trabaja") ||
-    n.includes("seguimiento") ||
+    n.includes("seguim") || // seguimiento / seguimineto
     n.includes("intencion de pag") ||
     n.includes("intencion paga")
   ) {
@@ -115,33 +117,40 @@ export function isCotizacionMail_(subject: string): boolean {
 
 function pickWaPipeline_(pipelines: KommoPipeline[]): KommoPipeline | null {
   if (!pipelines.length) return null;
-  const scored = pipelines.map((p) => {
+  const envId = Number(
+    process.env.KOMMO_WA_PIPELINE_ID || process.env.KOMMO_PIPELINE_ID || 0
+  );
+  if (envId > 0) {
+    const hit = pipelines.find((p) => p.id === envId);
+    if (hit) return hit;
+  }
+  // Preferir el embudo que tenga Datos+Humano/Seguimiento (Embudo de ventas)
+  let best: KommoPipeline | null = null;
+  let bestScore = -1;
+  for (const p of pipelines) {
     const n = normLabel_(p.name);
     let score = 0;
-    if (n.includes("whatsapp") || n.includes("wa ") || n.endsWith(" wa") || n === "wa")
-      score += 10;
-    if (n.includes("lead")) score += 3;
-    if (n.includes("bodasesor")) score += 2;
-    if (p.is_main) score += 1;
-    return { p, score };
-  });
-  scored.sort((a, b) => b.score - a.score);
-  if (scored[0].score > 0) return scored[0].p;
-  // Si no hay WA explícito, usar el pipeline con más statuses “datos/humano”
-  let best: KommoPipeline | null = null;
-  let bestHits = -1;
-  for (const p of pipelines) {
-    let hits = 0;
+    let hasNo = false;
+    let hasLlenado = false;
     for (const s of p.statuses) {
       const c = classifyStatusName_(s.name);
-      if (c !== "other") hits++;
+      if (c === "no_contestaron") hasNo = true;
+      if (c === "llenado") hasLlenado = true;
     }
-    if (hits > bestHits) {
-      bestHits = hits;
+    if (hasNo && hasLlenado) score += 50;
+    else if (hasNo || hasLlenado) score += 15;
+    if (n.includes("embudo")) score += 20;
+    if (n.includes("venta")) score += 10;
+    if (n.includes("whatsapp") || /\bwa\b/.test(n)) score += 10;
+    if (p.is_main) score += 5;
+    // Evitar forms/shopify
+    if (n.includes("shopify") || n.includes("forms-entrantes")) score -= 40;
+    if (score > bestScore) {
+      bestScore = score;
       best = p;
     }
   }
-  return best || pipelines[0];
+  return best || pipelines.find((p) => p.is_main) || pipelines[0];
 }
 
 interface LeadsRows {
