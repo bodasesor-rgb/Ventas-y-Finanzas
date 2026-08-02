@@ -9,12 +9,11 @@ export declare function parsePdfToLines(buffer: Buffer, rules: RecurringRule[]):
  */
 export declare function stripConceptNumbers(concept: string): string;
 /**
- * Prepara la línea para leer SOLO columnas Retiros/Depósitos/Saldo.
- * - Saca POS/T.C.
- * - Separa letras↔dígitos del concepto
- * - Borra enteros del concepto (folios/CLABE/refs) — nunca tienen .centavos
- * - Despega montos de columna pegados (.xx pegado a otro monto)
- * No parte montos válidos con coma (100,500.00).
+ * Regla de oro del usuario:
+ * - Número PEGADO a letras → CONCEPTO (se elimina, nunca es monto)
+ * - Número SOLO (separado por espacios) con .centavos → columna Retiros/Depósitos/Saldo
+ *
+ * No separamos letra|dígito para “arreglar” folios: eso convertía REF785 en monto.
  */
 export declare function unglueMoneyText(s: string): string;
 export interface AmountColumns {
@@ -27,8 +26,7 @@ export interface AmountColumns {
 }
 /**
  * Banamex: FECHA | CONCEPTO | RETIROS | DEPÓSITOS | SALDO
- * En texto plano solo existen 1–2 montos al FINAL (retiro XOR depósito + saldo).
- * Cualquier número anterior es del concepto y se IGNORA por completo.
+ * Solo montos SOLOS con .centavos al final. Números pegados a letras = concepto.
  */
 export declare function extractAmountColumns(body: string): AmountColumns;
 /**

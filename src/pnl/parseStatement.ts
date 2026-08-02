@@ -103,12 +103,11 @@ export function stripConceptNumbers(concept: string): string {
 }
 
 /**
- * Prepara la línea para leer SOLO columnas Retiros/Depósitos/Saldo.
- * - Saca POS/T.C.
- * - Separa letras↔dígitos del concepto
- * - Borra enteros del concepto (folios/CLABE/refs) — nunca tienen .centavos
- * - Despega montos de columna pegados (.xx pegado a otro monto)
- * No parte montos válidos con coma (100,500.00).
+ * Regla de oro del usuario:
+ * - Número PEGADO a letras → CONCEPTO (se elimina, nunca es monto)
+ * - Número SOLO (separado por espacios) con .centavos → columna Retiros/Depósitos/Saldo
+ *
+ * No separamos letra|dígito para “arreglar” folios: eso convertía REF785 en monto.
  */
 export function unglueMoneyText(s: string): string {
   let t = String(s || "")
@@ -117,28 +116,38 @@ export function unglueMoneyText(s: string): string {
     .replace(/Mexican Peso T\.C\.[^\d]*/gi, " ")
     .replace(/T\.C\.1\s*\.\d+/gi, " ")
     .replace(/T\.C\.\s*\d+\.\d{4,6}/gi, " ")
-    // POS Banamex: 9000/0012 + dígito basura → deja el monto intacto
+    // POS Banamex pegado al monto de columna: deja el monto solo
     .replace(/900[01]\/001\d(?=\d{1,3}(?:,\d{3})*\.\d{2})/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
 
-  // PERIODO MAY29500.00 → MAY29 500.00 (día pegado al monto de comisión)
+  // Comisión: MAY29500.00 → deja "500.00" solo (día+mes eran concepto)
   t = t.replace(
     new RegExp(
       `\\b(${MONTH_RE})([0-2]\\d|3[01])(\\d{1,3}(?:,\\d{3})*\\.\\d{2})`,
       "gi"
     ),
-    "$1$2 $3"
+    " $3 "
   );
 
-  // REF785400.00 → REF 785400.00 (el folio queda como entero o monto aparte)
-  t = t.replace(/([A-Za-zÁÉÍÓÚÑáéíóúñ])(\d)/g, "$1 $2");
-  t = t.replace(/(\d)([A-Za-zÁÉÍÓÚÑáéíóúñ])/g, "$1 $2");
+  // CONCEPTO: letras+números pegados (y al revés) → fuera completo
+  // REF785400.00 / SPEI01234 / ABC1,234.56 / 12ABC
+  t = t.replace(
+    /[A-Za-zÁÉÍÓÚÑáéíóúñ]+[\d,]+(?:\.\d{2})?/gi,
+    " "
+  );
+  t = t.replace(
+    /[\d,]+(?:\.\d{2})?[A-Za-zÁÉÍÓÚÑáéíóúñ]+/gi,
+    " "
+  );
+  // Códigos con barra del concepto: 001/123456 (no columnas)
+  t = t.replace(/\b\d{2,}\/\d{2,}\b/g, " ");
+  t = t.replace(/[#*]\d+/g, " ");
 
-  // Enteros del concepto (sin .centavos): folios, CLABE, fechas, refs
+  // Enteros solos sin .centavos → folios/CLABE/refs (no son Retiros/Depósitos/Saldo)
   t = t.replace(/\b\d{3,}(?![,\d]*\.\d{2})\b/g, " ");
 
-  // Columnas pegadas: 400.00785,432.10 → 400.00 785,432.10
+  // Dos columnas de monto pegadas: 400.00785,432.10 → 400.00 785,432.10
   t = t.replace(/(\.\d{2})(?=\d)/g, "$1 ");
   t = t.replace(/((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})-/g, " -$1 ");
   return t.replace(/\s+/g, " ").trim();
@@ -153,10 +162,18 @@ export interface AmountColumns {
   saldo: number | null;
 }
 
+/** true si el token está solo (espacios / bordes), no pegado a letras ni otros dígitos. */
+function isStandaloneToken(s: string, start: number, end: number): boolean {
+  const before = start <= 0 ? " " : s[start - 1];
+  const after = end >= s.length ? " " : s[end];
+  const okBefore = /[\s(\-]/.test(before);
+  const okAfter = /[\s)\-]/.test(after) || end >= s.length;
+  return okBefore && okAfter;
+}
+
 /**
  * Banamex: FECHA | CONCEPTO | RETIROS | DEPÓSITOS | SALDO
- * En texto plano solo existen 1–2 montos al FINAL (retiro XOR depósito + saldo).
- * Cualquier número anterior es del concepto y se IGNORA por completo.
+ * Solo montos SOLOS con .centavos al final. Números pegados a letras = concepto.
  */
 export function extractAmountColumns(body: string): AmountColumns {
   const prepared = unglueMoneyText(body);
@@ -169,6 +186,9 @@ export function extractAmountColumns(body: string): AmountColumns {
   const re = new RegExp(MONEY_COL_RE.source, "g");
   let m: RegExpExecArray | null;
   while ((m = re.exec(prepared)) !== null) {
+    if (!isStandaloneToken(prepared, m.index, m.index + m[0].length)) {
+      continue; // pegado a algo → concepto, no columna
+    }
     const v = parseMoneyToken(m[0]);
     if (v == null) continue;
     hits.push({
@@ -181,13 +201,13 @@ export function extractAmountColumns(body: string): AmountColumns {
 
   if (!hits.length) {
     return {
-      concept: stripConceptNumbers(prepared),
+      concept: stripConceptNumbers(body),
       printedMove: null,
       saldo: null,
     };
   }
 
-  // Solo bloque contiguo al final: entre montos de columna solo espacios
+  // Solo bloque contiguo al final: entre columnas solo espacios
   const trailing: typeof hits = [hits[hits.length - 1]];
   for (let i = hits.length - 2; i >= 0 && trailing.length < 2; i--) {
     const prev = hits[i];
@@ -195,7 +215,6 @@ export function extractAmountColumns(body: string): AmountColumns {
     if (/^\s*$/.test(between)) {
       trailing.unshift(prev);
     } else {
-      // Hay letras/basura → ese monto está en el CONCEPTO: no capturar
       break;
     }
   }
@@ -205,7 +224,7 @@ export function extractAmountColumns(body: string): AmountColumns {
   let printedMove: number | null =
     trailing.length >= 2 ? Math.abs(trailing[trailing.length - 2].value) : null;
 
-  // Folio del concepto disfrazado de monto (785400.00 sin coma) junto a saldo real (214,600.00)
+  // Folio solo disfrazado (785400.00 sin coma) + saldo real con coma
   if (
     printedMove != null &&
     trailing.length >= 2 &&
@@ -216,13 +235,11 @@ export function extractAmountColumns(body: string): AmountColumns {
     printedMove = null;
   }
 
-  const cut =
-    printedMove == null && trailing.length >= 2
-      ? saldoHit.start
-      : trailing[0].start;
-  const concept = stripConceptNumbers(prepared.slice(0, cut));
-
-  return { concept, printedMove, saldo };
+  return {
+    concept: stripConceptNumbers(body),
+    printedMove,
+    saldo,
+  };
 }
 
 /**
