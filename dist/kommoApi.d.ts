@@ -41,6 +41,20 @@ export type KommoMailEvent = {
     subject?: string;
     raw?: unknown;
 };
+/**
+ * Eventos de cambio de etapa → cuántos pasaron a "Cotización realizada".
+ * Mejor proxy de correos de cotización cuando Mail API no trae asuntos.
+ */
+export declare function fetchLeadStatusChangedEvents(opts: {
+    fromUnix: number;
+    toUnix: number;
+    maxPages?: number;
+}): Promise<Array<{
+    created_at: number;
+    leadId: number;
+    statusAfterId: number | null;
+    statusBeforeId: number | null;
+}>>;
 /** Debug: prueba varias rutas de Mail/Events/Notes en Kommo. */
 export declare function probeKommoMailApis(opts?: {
     fromUnix?: number;

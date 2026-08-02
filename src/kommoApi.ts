@@ -218,6 +218,87 @@ export type KommoMailEvent = {
   raw?: unknown;
 };
 
+/**
+ * Eventos de cambio de etapa → cuántos pasaron a "Cotización realizada".
+ * Mejor proxy de correos de cotización cuando Mail API no trae asuntos.
+ */
+export async function fetchLeadStatusChangedEvents(opts: {
+  fromUnix: number;
+  toUnix: number;
+  maxPages?: number;
+}): Promise<
+  Array<{
+    created_at: number;
+    leadId: number;
+    statusAfterId: number | null;
+    statusBeforeId: number | null;
+  }>
+> {
+  const { base, token } = kommoAuth_();
+  const maxPages = Math.min(Math.max(opts.maxPages || 40, 1), 80);
+  const out: Array<{
+    created_at: number;
+    leadId: number;
+    statusAfterId: number | null;
+    statusBeforeId: number | null;
+  }> = [];
+
+  for (let page = 1; page <= maxPages; page++) {
+    const url =
+      `${base}/api/v4/events?limit=100&page=${page}` +
+      `&filter[type]=lead_status_changed` +
+      `&filter[created_at][from]=${opts.fromUnix}` +
+      `&filter[created_at][to]=${opts.toUnix}`;
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
+    });
+    if (res.status === 204) break;
+    if (!res.ok) break;
+    const data = (await readJsonOrThrow(
+      res,
+      `Kommo status events p${page}`
+    )) as {
+      _embedded?: { events?: Array<Record<string, unknown>> };
+    };
+    const batch = data._embedded?.events || [];
+    if (!batch.length) break;
+    for (const ev of batch) {
+      const after = extractStatusIdFromEventValue_(ev.value_after);
+      const before = extractStatusIdFromEventValue_(ev.value_before);
+      out.push({
+        created_at: Number(ev.created_at || 0),
+        leadId: Number(ev.entity_id || 0),
+        statusAfterId: after,
+        statusBeforeId: before,
+      });
+    }
+    if (batch.length < 100) break;
+  }
+  return out;
+}
+
+function extractStatusIdFromEventValue_(v: unknown): number | null {
+  if (!v) return null;
+  if (Array.isArray(v)) {
+    for (const item of v) {
+      const id = extractStatusIdFromEventValue_(item);
+      if (id != null) return id;
+    }
+    return null;
+  }
+  if (typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    if (o.status_id != null && Number(o.status_id) > 0) return Number(o.status_id);
+    if (o.id != null && o.name != null && Number(o.id) > 0) return Number(o.id);
+    if (o.status) return extractStatusIdFromEventValue_(o.status);
+    if (o.lead_status) return extractStatusIdFromEventValue_(o.lead_status);
+  }
+  return null;
+}
+
 /** Debug: prueba varias rutas de Mail/Events/Notes en Kommo. */
 export async function probeKommoMailApis(opts?: {
   fromUnix?: number;

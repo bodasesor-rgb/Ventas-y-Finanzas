@@ -7,6 +7,7 @@ import {
 import {
   fetchKommoPipelines,
   fetchLeadsCreatedBetween,
+  fetchLeadStatusChangedEvents,
   fetchOutgoingMailEvents,
   isOutgoingMailEvent_,
   probeKommoMailApis,
@@ -429,7 +430,7 @@ export async function syncMetricasLeadsWa(opts?: {
   if (rangeToMs > Date.now()) rangeToMs = Date.now();
   const rangeTo = Math.floor(rangeToMs / 1000);
 
-  const [allLeads, allMails] = await Promise.all([
+  const [allLeads, allMails, statusEvents] = await Promise.all([
     fetchLeadsCreatedBetween({
       fromUnix: rangeFrom,
       toUnix: rangeTo,
@@ -439,7 +440,16 @@ export async function syncMetricasLeadsWa(opts?: {
       fromUnix: rangeFrom,
       toUnix: rangeTo,
     }),
+    fetchLeadStatusChangedEvents({
+      fromUnix: rangeFrom,
+      toUnix: rangeTo,
+    }),
   ]);
+
+  const cotizacionStatusIds = new Set<number>();
+  for (const s of pipeline.statuses) {
+    if (isCotizacionStatus_(s.name)) cotizacionStatusIds.add(s.id);
+  }
 
   const cotizacionMails = allMails.filter((m) =>
     countsAsCotizacionMail_({ subject: m.subject || "", type: m.type })
@@ -451,7 +461,11 @@ export async function syncMetricasLeadsWa(opts?: {
         .slice(0, 15)
     ),
   ];
-  const correoFromMailApi = cotizacionMails.length > 0;
+  // Solo usar Mail API si hay asuntos con "cotización" (fiable).
+  // Si solo hay outgoing sin asunto, preferir transiciones a Cotización realizada.
+  const correoFromMailApi = cotizacionMails.some((m) =>
+    normLabel_(m.subject || "").includes("cotizacion")
+  );
 
   const weeks: WeekLeadsWa[] = [];
   for (const w of targetWeeks) {
@@ -467,21 +481,29 @@ export async function syncMetricasLeadsWa(opts?: {
     });
     let noContestaron = 0;
     let llenado = 0;
-    let correoByStatus = 0;
     for (const l of weekLeads) {
       const sid = Number(l.status_id);
       if (maps.noContestaronIds.has(sid)) noContestaron++;
       else if (maps.llenadoIds.has(sid)) llenado++;
-      // Solo etapa "Cotización realizada" como proxy (no seguimientos)
-      const stName = maps.byId.get(sid) || "";
-      if (isCotizacionStatus_(stName)) correoByStatus++;
     }
     const leads = weekLeads.length;
     const correoMail = cotizacionMails.filter((m) => {
       const c = Number(m.created_at || 0);
       return c >= fromU && c <= toU;
     }).length;
-    const correo = correoFromMailApi ? correoMail : correoByStatus;
+    // Leads que pasaron a etapa Cotización realizada esa semana
+    const correoByTransition = new Set(
+      statusEvents
+        .filter(
+          (e) =>
+            e.created_at >= fromU &&
+            e.created_at <= toU &&
+            e.statusAfterId != null &&
+            cotizacionStatusIds.has(e.statusAfterId)
+        )
+        .map((e) => e.leadId)
+    ).size;
+    const correo = correoFromMailApi ? correoMail : correoByTransition;
     const porcentaje = leads > 0 ? llenado / leads : 0;
     weeks.push({
       weekStart: formatDmy_(w.date),
@@ -540,10 +562,8 @@ export async function syncMetricasLeadsWa(opts?: {
     weeks,
     mailSample,
     hint: correoFromMailApi
-      ? allMails.some((m) => !(m.subject || "").trim())
-        ? `Correo: ${cotizacionMails.length} mails salientes (Kommo no envía asunto; excluidos solo si el asunto dice publicidad).`
-        : undefined
-      : "Correo: sin events outgoing_mail; proxy = etapa Cotización realizada.",
+      ? undefined
+      : `Correo: conté leads que pasaron a etapa Cotización realizada (${[...cotizacionStatusIds].join(",")}). Mail API no trae asuntos de cotización.`,
   };
 }
 
