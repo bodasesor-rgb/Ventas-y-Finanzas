@@ -1,19 +1,18 @@
-import { type Reconciliation } from "./statementSummary";
-import type { AutoReviewReport, BankLine, RecurringRule, StatementRun } from "./types";
-export interface AutoReviewResult {
-    lines: BankLine[];
-    summaryByCategory: Record<string, number>;
-    totals: {
-        ingresos: number;
-        gastos: number;
-        neto: number;
-    };
-    reconciliation: Reconciliation;
-    autoReview: AutoReviewReport;
-}
 /**
- * Lee el texto del estado varias veces y localiza errores de monto.
+ * Revisión automática / verificación de estados de cuenta.
+ * La lógica vive en verifyParse.ts (1ª lectura + forceSolve).
  */
-export declare function runAutoReview(text: string, rules: RecurringRule[]): AutoReviewResult;
-/** Aplica el resultado de auto-review sobre un StatementRun (mutación). */
-export declare function applyAutoReviewToRun(run: StatementRun, rules: RecurringRule[]): AutoReviewResult;
+import type { RecurringRule, StatementRun } from "./types";
+import { type VerifyResult } from "./verifyParse";
+export type AutoReviewResult = VerifyResult;
+/**
+ * 1ª lectura verificada (upload/reparse): corrige tipografía si puede;
+ * si no cuadra, deja listo para el botón de revisión.
+ */
+export declare function verifyOnFirstRead(text: string, rules: RecurringRule[]): VerifyResult;
+/**
+ * Revisión forzada: debe cuadrar sí o sí (incluye ajuste de conciliación).
+ */
+export declare function runAutoReview(text: string, rules: RecurringRule[]): VerifyResult;
+export declare function applyAutoReviewToRun(run: StatementRun, rules: RecurringRule[]): VerifyResult;
+export declare function applyVerifiedParseToRun(run: StatementRun, rules: RecurringRule[]): VerifyResult;

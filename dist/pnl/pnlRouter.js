@@ -18,7 +18,6 @@ const categoryColors_1 = require("./categoryColors");
 const statementSummary_1 = require("./statementSummary");
 const autoReview_1 = require("./autoReview");
 const driveArchive_1 = require("./driveArchive");
-const counterparties_1 = require("./counterparties");
 const providerAnalysis_1 = require("./providerAnalysis");
 const appsScriptClient_1 = require("../appsScriptClient");
 const appsScriptClient_2 = require("../appsScriptClient");
@@ -290,16 +289,18 @@ exports.pnlRouter.post("/api/pnl/upload", upload.single("statement"), async (req
         const buffer = fs_1.default.readFileSync(req.file.path);
         (0, autoCategories_1.pruneMerchantCategories)();
         const rules = (0, store_1.loadRules)();
-        const { text, lines: parsed } = await (0, parseStatement_1.parsePdfToLines)(buffer, rules);
-        const { lines: autoLines, rulesCreated } = (0, autoCategories_1.autoCreateCategoriesFromLines)(parsed);
-        const lines = (0, counterparties_1.applyCounterpartyCategories)(autoLines);
-        const summaryByCategory = (0, parseStatement_1.summarizeByCategory)(lines);
-        const totals = (0, parseStatement_1.summarizeTotals)(lines);
-        const oficial = (0, statementSummary_1.extractStatementOfficialTotals)(text);
-        const reconciliation = (0, statementSummary_1.reconcileTotals)(oficial, totals);
+        // Extrae texto; la verificación multi-pasada decide montos (no “números a lo tonto”)
+        const { text } = await (0, parseStatement_1.parsePdfToLines)(buffer, rules);
+        const verified = (0, autoReview_1.verifyOnFirstRead)(text, rules);
+        const lines = verified.lines;
+        const summaryByCategory = verified.summaryByCategory;
+        const totals = verified.totals;
+        const reconciliation = verified.reconciliation;
         const period = (0, period_1.detectPeriodFromText)(text);
         const saved = (0, statementFiles_1.saveStatementPdf)(req.file.path, period);
         const mid = Math.max(0, Math.floor(text.length / 2) - 400);
+        // Categorías/reglas nuevas creadas durante prepare() dentro de verify
+        (0, autoCategories_1.pruneMerchantCategories)();
         // Un solo estado por mes: reutilizar id si ya existía
         const prev = (0, store_1.loadRuns)().find((r) => r.periodKey === period.key);
         const run = {
@@ -321,6 +322,7 @@ exports.pnlRouter.post("/api/pnl/upload", upload.single("statement"), async (req
             summaryByCategory,
             totals,
             reconciliation,
+            autoReview: verified.autoReview,
             sentToSheetAt: prev?.sentToSheetAt,
             sentToSheet: prev?.sentToSheet,
         };
@@ -360,9 +362,11 @@ exports.pnlRouter.post("/api/pnl/upload", upload.single("statement"), async (req
                 matched: lines.filter((l) => l.matchedRuleId).length,
                 period: period.label,
                 savedAs: saved.storedName,
-                rulesCreated,
+                rulesCreated: [],
                 totals,
                 reconciliation,
+                verified: verified.verified,
+                autoReview: verified.autoReview,
                 archive,
             },
         });
@@ -393,15 +397,13 @@ exports.pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
     }
     (0, autoCategories_1.pruneMerchantCategories)();
     const rules = (0, store_1.loadRules)();
-    const parsed = (0, parseStatement_1.extractLinesFromText)(text, rules);
-    const { lines: autoLines, rulesCreated } = (0, autoCategories_1.autoCreateCategoriesFromLines)(parsed);
-    const lines = (0, counterparties_1.applyCounterpartyCategories)(autoLines);
+    const verified = (0, autoReview_1.verifyOnFirstRead)(text, rules);
     const period = (0, period_1.detectPeriodFromText)(text);
-    run.lines = lines;
-    run.summaryByCategory = (0, parseStatement_1.summarizeByCategory)(lines);
-    run.totals = (0, parseStatement_1.summarizeTotals)(lines);
-    const oficial = (0, statementSummary_1.extractStatementOfficialTotals)(text);
-    run.reconciliation = (0, statementSummary_1.reconcileTotals)(oficial, run.totals);
+    run.lines = verified.lines;
+    run.summaryByCategory = verified.summaryByCategory;
+    run.totals = verified.totals;
+    run.reconciliation = verified.reconciliation;
+    run.autoReview = verified.autoReview;
     run.periodKey = period.key;
     run.periodLabel = period.label;
     runs[idx] = run;
@@ -412,14 +414,16 @@ exports.pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
         categories: (0, store_1.loadCategories)(),
         rules: (0, store_1.loadRules)(),
         stats: {
-            lines: lines.length,
-            needsReview: lines.filter((l) => l.needsReview).length,
-            matched: lines.filter((l) => l.matchedRuleId).length,
+            lines: verified.lines.length,
+            needsReview: verified.lines.filter((l) => l.needsReview).length,
+            matched: verified.lines.filter((l) => l.matchedRuleId).length,
             textLength: text.length,
             period: period.label,
-            rulesCreated,
+            rulesCreated: [],
             totals: run.totals,
             reconciliation: run.reconciliation,
+            verified: verified.verified,
+            autoReview: verified.autoReview,
         },
     });
 });

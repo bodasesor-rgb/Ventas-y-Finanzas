@@ -5,23 +5,19 @@ import fs from "fs";
 import { randomUUID } from "crypto";
 import { categorizeLine } from "./categorize";
 import {
-  extractLinesFromText,
   parsePdfToLines,
   summarizeByCategory,
   summarizeTotals,
 } from "./parseStatement";
 import { detectPeriodFromText } from "./period";
 import { deleteStatementPdf, saveStatementPdf } from "./statementFiles";
-import {
-  autoCreateCategoriesFromLines,
-  pruneMerchantCategories,
-} from "./autoCategories";
+import { pruneMerchantCategories } from "./autoCategories";
 import { colorForCategoryId } from "./categoryColors";
 import {
   extractStatementOfficialTotals,
   reconcileTotals,
 } from "./statementSummary";
-import { applyAutoReviewToRun } from "./autoReview";
+import { applyAutoReviewToRun, verifyOnFirstRead } from "./autoReview";
 import {
   archiveStatementToDrive,
   deleteDriveArchive,
@@ -29,7 +25,6 @@ import {
   restoreArchivesFromDrive,
   shouldAutoRestoreOnce,
 } from "./driveArchive";
-import { applyCounterpartyCategories } from "./counterparties";
 import { buildYearAnalysis } from "./providerAnalysis";
 import { postToAppsScript } from "../appsScriptClient";
 import { getAppsScriptUrl } from "../appsScriptClient";
@@ -336,17 +331,18 @@ pnlRouter.post(
       const buffer = fs.readFileSync(req.file.path);
       pruneMerchantCategories();
       const rules = loadRules();
-      const { text, lines: parsed } = await parsePdfToLines(buffer, rules);
-      const { lines: autoLines, rulesCreated } =
-        autoCreateCategoriesFromLines(parsed);
-      const lines = applyCounterpartyCategories(autoLines);
-      const summaryByCategory = summarizeByCategory(lines);
-      const totals = summarizeTotals(lines);
-      const oficial = extractStatementOfficialTotals(text);
-      const reconciliation = reconcileTotals(oficial, totals);
+      // Extrae texto; la verificación multi-pasada decide montos (no “números a lo tonto”)
+      const { text } = await parsePdfToLines(buffer, rules);
+      const verified = verifyOnFirstRead(text, rules);
+      const lines = verified.lines;
+      const summaryByCategory = verified.summaryByCategory;
+      const totals = verified.totals;
+      const reconciliation = verified.reconciliation;
       const period = detectPeriodFromText(text);
       const saved = saveStatementPdf(req.file.path, period);
       const mid = Math.max(0, Math.floor(text.length / 2) - 400);
+      // Categorías/reglas nuevas creadas durante prepare() dentro de verify
+      pruneMerchantCategories();
 
       // Un solo estado por mes: reutilizar id si ya existía
       const prev = loadRuns().find((r) => r.periodKey === period.key);
@@ -369,6 +365,7 @@ pnlRouter.post(
         summaryByCategory,
         totals,
         reconciliation,
+        autoReview: verified.autoReview,
         sentToSheetAt: prev?.sentToSheetAt,
         sentToSheet: prev?.sentToSheet,
       };
@@ -416,9 +413,11 @@ pnlRouter.post(
           matched: lines.filter((l) => l.matchedRuleId).length,
           period: period.label,
           savedAs: saved.storedName,
-          rulesCreated,
+          rulesCreated: [] as string[],
           totals,
           reconciliation,
+          verified: verified.verified,
+          autoReview: verified.autoReview,
           archive,
         },
       });
@@ -450,16 +449,13 @@ pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
   }
   pruneMerchantCategories();
   const rules = loadRules();
-  const parsed = extractLinesFromText(text, rules);
-  const { lines: autoLines, rulesCreated } =
-    autoCreateCategoriesFromLines(parsed);
-  const lines = applyCounterpartyCategories(autoLines);
+  const verified = verifyOnFirstRead(text, rules);
   const period = detectPeriodFromText(text);
-  run.lines = lines;
-  run.summaryByCategory = summarizeByCategory(lines);
-  run.totals = summarizeTotals(lines);
-  const oficial = extractStatementOfficialTotals(text);
-  run.reconciliation = reconcileTotals(oficial, run.totals);
+  run.lines = verified.lines;
+  run.summaryByCategory = verified.summaryByCategory;
+  run.totals = verified.totals;
+  run.reconciliation = verified.reconciliation;
+  run.autoReview = verified.autoReview;
   run.periodKey = period.key;
   run.periodLabel = period.label;
   runs[idx] = run;
@@ -470,14 +466,16 @@ pnlRouter.post("/api/pnl/runs/:id/reparse", (req, res) => {
     categories: loadCategories(),
     rules: loadRules(),
     stats: {
-      lines: lines.length,
-      needsReview: lines.filter((l) => l.needsReview).length,
-      matched: lines.filter((l) => l.matchedRuleId).length,
+      lines: verified.lines.length,
+      needsReview: verified.lines.filter((l) => l.needsReview).length,
+      matched: verified.lines.filter((l) => l.matchedRuleId).length,
       textLength: text.length,
       period: period.label,
-      rulesCreated,
+      rulesCreated: [] as string[],
       totals: run.totals,
       reconciliation: run.reconciliation,
+      verified: verified.verified,
+      autoReview: verified.autoReview,
     },
   });
 });

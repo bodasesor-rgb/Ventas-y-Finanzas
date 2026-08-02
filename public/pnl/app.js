@@ -215,12 +215,12 @@ function renderTotals(run) {
       msg.className =
         "reconcile-msg " + (rec.matchCompleto ? "ok" : "bad");
       msg.textContent = rec.matchCompleto
-        ? "Los totales parseados coinciden con Depósitos y Otros cargos del estado de cuenta."
-        : `Falta cuadrar con el PDF. Depósitos estado ${money(
+        ? "Verificado: los totales coinciden con Depósitos y Otros cargos del estado de cuenta."
+        : `La 1ª lectura ya verificó y aún no cuadra. Depósitos estado ${money(
             rec.oficial.ingresosOficiales || 0
           )} vs parseado ${money(t.ingresos)}. Cargos estado ${money(
             rec.oficial.gastosOficiales || 0
-          )} vs parseado ${money(t.gastos)}. Usa «Revisar automáticamente» para localizar la cuenta distinta.`;
+          )} vs parseado ${money(t.gastos)}. Pulsa «Revisar automáticamente (forzar cuadre)».`;
     }
   } else {
     if (oIng) oIng.textContent = "";
@@ -250,7 +250,7 @@ function renderAutoReviewUi(run) {
       statusEl.textContent = report.message;
     } else if (needsReviewBtn) {
       statusEl.textContent =
-        "Relee el PDF buscando errores de puntos/comas o dígitos de folio pegados al monto (causa más común).";
+        "La 1ª lectura ya verificó y no halló la falla. Este botón fuerza el cuadre (corrige montos o añade ajuste de conciliación).";
     } else {
       statusEl.textContent = "";
     }
@@ -326,7 +326,7 @@ async function runAutoReview() {
   if (statusEl) {
     statusEl.dataset.busy = "1";
     statusEl.textContent =
-      "Releyendo el documento (Δsaldo → impreso → híbrido) y buscando la cuenta distinta…";
+      "Revisión forzada: releer → corregir puntos/comas → garantizar cuadre…";
   }
   try {
     const data = await api(
@@ -348,10 +348,11 @@ async function runAutoReview() {
       setTimeout(() => highlightSuspectLine(first), 120);
     }
     if (statusEl) {
+      const ok = data.run?.reconciliation?.matchCompleto || data.stats?.matched;
       statusEl.textContent =
         data.autoReview?.message ||
-        (data.stats?.matched
-          ? "✓ Cuadró tras la revisión automática"
+        (ok
+          ? "✓ Cuadre forzado listo"
           : "Revisión terminada — revisa los movimientos marcados");
     }
   } catch (e) {
@@ -1680,9 +1681,10 @@ async function init() {
     }
     if (uploading) return;
     uploading = true;
-    status.textContent = "Procesando PDF…";
+    status.textContent =
+      "Leyendo PDF y verificando cuadre (varias pasadas, puntos/comas)…";
     processBtn.disabled = true;
-    processBtn.textContent = "Procesando…";
+    processBtn.textContent = "Verificando…";
     const fd = new FormData();
     fd.append("statement", file);
     try {
@@ -1693,7 +1695,11 @@ async function init() {
       const savedAs = data.stats.savedAs || data.run.storedName || "";
       const rulesNew = (data.stats.rulesCreated || []).join(", ");
       const rec = data.stats.reconciliation;
-      const quadra = rec?.matchCompleto ? " · ✓ cuadra con PDF" : " · ✗ no cuadra aún";
+      const verifyMsg = data.stats.autoReview?.message
+        ? ` · ${data.stats.autoReview.message}`
+        : rec?.matchCompleto
+          ? " · ✓ verificado, cuadra con PDF"
+          : " · ✗ verificado, aún no cuadra — usa Revisar automáticamente";
       const arch = data.stats.archive;
       let driveMsg = "";
       if (arch?.ok) {
@@ -1707,7 +1713,7 @@ async function init() {
       }
       status.textContent = `OK: ${data.stats.lines} movs · mes ${period} · ${savedAs} · ${data.stats.needsReview} a revisar${
         rulesNew ? ` · reglas/match: ${rulesNew}` : ""
-      }${quadra}${driveMsg}`;
+      }${verifyMsg}${driveMsg}`;
       if (data.categories) {
         categories = data.categories;
         renderCategories();
