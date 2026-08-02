@@ -77,7 +77,16 @@ export function buildOfficialAwareTotals(
     oficial.gastosOficiales != null
       ? oficial.gastosOficiales
       : parseado.gastos;
-  const neto = Math.round((ingresos + gastos) * 100) / 100;
+
+  // Neto real del estado: preferir Saldo al corte − Saldo anterior (resumen PDF).
+  // Si no hay saldos, Depósitos + Otros cargos del mismo resumen.
+  let neto: number;
+  if (oficial.saldoCorte != null && oficial.saldoAnterior != null) {
+    neto =
+      Math.round((oficial.saldoCorte - oficial.saldoAnterior) * 100) / 100;
+  } else {
+    neto = Math.round((ingresos + gastos) * 100) / 100;
+  }
 
   const summaryByCategory = summarizeByCategory(lines);
 

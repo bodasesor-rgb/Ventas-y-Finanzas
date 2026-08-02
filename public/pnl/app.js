@@ -156,13 +156,14 @@ function renderTotals(run) {
   const bar = document.getElementById("totalsBar");
   if (!bar) return;
   const rec = run.reconciliation;
+  const of = rec?.oficial || {};
   const parseado =
     run.totals?.parseado ||
     rec?.parseado ||
     computeTotals(run.lines);
   // Totales grandes = resumen del inicio del PDF (no la suma de líneas)
-  const oficialIng = rec?.oficial?.ingresosOficiales;
-  const oficialGas = rec?.oficial?.gastosOficiales;
+  const oficialIng = of.ingresosOficiales;
+  const oficialGas = of.gastosOficiales;
   const t = {
     ingresos:
       oficialIng != null
@@ -172,8 +173,23 @@ function renderTotals(run) {
       oficialGas != null
         ? oficialGas
         : run.totals?.gastos ?? parseado.gastos,
+    neto: 0,
   };
-  t.neto = Math.round((t.ingresos + t.gastos) * 100) / 100;
+  // Neto siempre desde montos reales del resumen (no desde suma dañada de líneas)
+  if (of.saldoCorte != null && of.saldoAnterior != null) {
+    t.neto =
+      Math.round((Number(of.saldoCorte) - Number(of.saldoAnterior)) * 100) /
+      100;
+  } else {
+    t.neto = Math.round((t.ingresos + t.gastos) * 100) / 100;
+  }
+  // Mantener run.totals en sync en pantalla
+  if (run.totals) {
+    run.totals.ingresos = t.ingresos;
+    run.totals.gastos = t.gastos;
+    run.totals.neto = t.neto;
+    run.totals.source = oficialIng != null || oficialGas != null ? "oficial" : "parseado";
+  }
 
   bar.hidden = false;
   renderSendSheetStatus(run);
@@ -194,8 +210,10 @@ function renderTotals(run) {
 
   const ingCard = ing?.closest(".total-card");
   const gasCard = gas?.closest(".total-card");
+  const netCard = net?.closest(".total-card");
   ingCard?.classList.remove("ok-match", "bad-match");
   gasCard?.classList.remove("ok-match", "bad-match");
+  netCard?.classList.remove("ok-match", "bad-match");
 
   if (rec?.oficial) {
     const diffIng =
@@ -223,7 +241,6 @@ function renderTotals(run) {
             }`
           : "No se leyó Otros cargos del resumen";
     }
-    // Verde = tenemos resumen oficial; rojo en sublínea si movimientos no suman
     if (ingCard) {
       ingCard.classList.add(
         oficialIng != null
@@ -242,12 +259,24 @@ function renderTotals(run) {
           : "bad-match"
       );
     }
+    if (netCard) {
+      netCard.classList.add(
+        of.saldoCorte != null || (oficialIng != null && oficialGas != null)
+          ? "ok-match"
+          : "bad-match"
+      );
+    }
     if (status) {
-      if (oficialIng != null && oficialGas != null) {
-        status.textContent = rec.matchCompleto
-          ? "✓ Resumen + movimientos cuadran"
-          : "Resumen OK · movimientos con daño";
-        status.style.color = rec.matchCompleto ? "#0b6b3a" : "#9a3412";
+      if (of.saldoAnterior != null && of.saldoCorte != null) {
+        status.textContent = `Corte ${money(of.saldoCorte)} − ant. ${money(
+          of.saldoAnterior
+        )}`;
+        status.style.color = "#0b6b3a";
+      } else if (oficialIng != null && oficialGas != null) {
+        status.textContent = `Depósitos ${money(t.ingresos)} + cargos ${money(
+          t.gastos
+        )}`;
+        status.style.color = "#0b6b3a";
       } else {
         status.textContent = "Sin resumen del PDF";
         status.style.color = "#9a3412";
@@ -258,8 +287,8 @@ function renderTotals(run) {
       msg.className =
         "reconcile-msg " + (rec.matchCompleto ? "ok" : "bad");
       msg.textContent = rec.matchCompleto
-        ? "Los totales grandes son del resumen del estado (inicio del PDF). La suma de movimientos también coincide."
-        : `Los totales grandes son del resumen del estado (Depósitos / Otros cargos del inicio). La suma de movimientos no coincide — ahí están las líneas dañadas (diff dep ${money(
+        ? "Totales del resumen del estado (inicio del PDF). Neto = saldo al corte − saldo anterior. La suma de movimientos también coincide."
+        : `Totales y neto del resumen del PDF (no de la suma de líneas). Movimientos aún dañados (diff dep ${money(
             diffIng
           )}, cargos ${money(
             diffGas
@@ -268,7 +297,7 @@ function renderTotals(run) {
   } else {
     if (oIng) oIng.textContent = "Suma de movimientos (sin resumen)";
     if (oGas) oGas.textContent = "Suma de movimientos (sin resumen)";
-    if (status) status.textContent = "";
+    if (status) status.textContent = "Neto = ingresos + gastos parseados";
     if (msg) msg.hidden = true;
   }
 

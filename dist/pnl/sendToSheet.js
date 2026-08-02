@@ -35,7 +35,9 @@ async function sendRunToBancoSheet(run) {
         ? oficial.ingresosOficiales
         : totals.ingresos;
     const gastosSigned = oficial?.gastosOficiales != null ? oficial.gastosOficiales : totals.gastos;
-    const neto = Math.round((ingresos + gastosSigned) * 100) / 100;
+    const neto = oficial?.saldoCorte != null && oficial?.saldoAnterior != null
+        ? Math.round((oficial.saldoCorte - oficial.saldoAnterior) * 100) / 100
+        : Math.round((ingresos + gastosSigned) * 100) / 100;
     const summary = run.summaryByCategory || {};
     const cats = (0, store_1.loadCategories)();
     const labelOf = (id) => cats.find((c) => c.id === id)?.label || id;

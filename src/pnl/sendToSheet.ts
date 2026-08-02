@@ -49,7 +49,10 @@ export async function sendRunToBancoSheet(run: StatementRun): Promise<{
       : totals.ingresos;
   const gastosSigned =
     oficial?.gastosOficiales != null ? oficial.gastosOficiales : totals.gastos;
-  const neto = Math.round((ingresos + gastosSigned) * 100) / 100;
+  const neto =
+    oficial?.saldoCorte != null && oficial?.saldoAnterior != null
+      ? Math.round((oficial.saldoCorte - oficial.saldoAnterior) * 100) / 100
+      : Math.round((ingresos + gastosSigned) * 100) / 100;
 
   const summary = run.summaryByCategory || {};
   const cats = loadCategories();

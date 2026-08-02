@@ -225,6 +225,23 @@ exports.pnlRouter.get("/api/pnl/runs/:id", (req, res) => {
         });
         return;
     }
+    // Refrescar totales/neto desde el resumen del PDF (evita neto viejo en disco)
+    const text = run.textFull || run.textPreview || "";
+    if (text.length >= 50) {
+        const finalized = (0, officialTotals_1.buildOfficialAwareTotals)(run.lines, text);
+        const before = JSON.stringify(run.totals || {});
+        run.totals = finalized.totals;
+        run.summaryByCategory = finalized.summaryByCategory;
+        run.reconciliation = finalized.reconciliation;
+        if (before !== JSON.stringify(run.totals || {})) {
+            const runs = (0, store_1.loadRuns)();
+            const idx = runs.findIndex((r) => r.id === run.id);
+            if (idx >= 0) {
+                runs[idx] = run;
+                (0, store_1.saveRuns)(runs);
+            }
+        }
+    }
     res.json({ ok: true, run: runPublic(run) });
 });
 /** Elimina run + PDF local (+ Drive si está autorizado) */
