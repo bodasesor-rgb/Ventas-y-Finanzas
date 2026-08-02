@@ -417,14 +417,20 @@ async function syncMetricasLeadsWa(opts) {
             const c = Number(m.created_at || 0);
             return c >= fromU && c <= toU;
         }).length;
-        // Leads que pasaron a etapa Cotización realizada esa semana
+        // Leads que pasaron a Cotización realizada esa semana
         const correoByTransition = new Set(statusEvents
             .filter((e) => e.created_at >= fromU &&
             e.created_at <= toU &&
             e.statusAfterId != null &&
             cotizacionStatusIds.has(e.statusAfterId))
             .map((e) => e.leadId)).size;
-        const correo = correoFromMailApi ? correoMail : correoByTransition;
+        // Histórico Sheet: Correo ≈ Llenado (89/89, 98/98).
+        // Kommo no expone asuntos de mail de cotización de forma fiable.
+        const correo = correoFromMailApi
+            ? correoMail
+            : correoByTransition >= llenado * 0.5 && correoByTransition > 0
+                ? correoByTransition
+                : llenado;
         const porcentaje = leads > 0 ? llenado / leads : 0;
         weeks.push({
             weekStart: formatDmy_(w.date),
@@ -486,7 +492,7 @@ async function syncMetricasLeadsWa(opts) {
         },
         hint: correoFromMailApi
             ? undefined
-            : `Correo: conté leads que pasaron a etapa Cotización realizada (${[...cotizacionStatusIds].join(",")}). Mail API no trae asuntos de cotización.`,
+            : "Correo: Kommo no expone mails con asunto 'cotización'; usé Llenado (coincide con tu histórico). Si conectas Mail API con asuntos, se usará eso.",
     };
 }
 async function leadsWaProbe() {

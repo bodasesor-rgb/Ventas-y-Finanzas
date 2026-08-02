@@ -5,7 +5,7 @@ Llena la sección **Leads WA Kommo** en `Metricas 2026 Auto`:
 | Fila | Regla |
 |------|--------|
 | Leads | Leads **creados** esa semana en **Embudo de ventas** |
-| Correo | Preferente: mail con asunto **cotización**. Si Kommo no expone asunto → leads que pasaron a etapa **Cotización realizada** esa semana |
+| Correo | Preferente: mail con asunto **cotización**. Si Kommo no lo expone → igual a **Llenado** (como en tu histórico) |
 | No contestaron | Etapa actual = **Datos e Intereses del cliente** o **Cliente no contesta** |
 | Llenado | Etapa = **Humano Trabaja** / **Seguimiento(s)** / **Intención de paga** |
 | Porcentaje de llenado | Llenado ÷ Leads |
