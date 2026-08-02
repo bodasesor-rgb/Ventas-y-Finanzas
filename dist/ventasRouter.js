@@ -15,6 +15,8 @@ const metricasSeguidoresSync_1 = require("./metricasSeguidoresSync");
 const metricasFacebookAdsSync_1 = require("./metricasFacebookAdsSync");
 const metricasGoogleAdsSync_1 = require("./metricasGoogleAdsSync");
 const metricasLeadsWaSync_1 = require("./metricasLeadsWaSync");
+const metricasBrevoSync_1 = require("./metricasBrevoSync");
+const brevoClient_1 = require("./brevoClient");
 const googleAdsClient_1 = require("./googleAdsClient");
 const metaSocialClient_1 = require("./metaSocialClient");
 const metaAdsClient_1 = require("./metaAdsClient");
@@ -223,11 +225,13 @@ let lastSeguidoresTickAt = 0;
 let lastFacebookAdsTickAt = 0;
 let lastGoogleAdsTickAt = 0;
 let lastLeadsWaTickAt = 0;
+let lastBrevoTickAt = 0;
 const VISITAS_TICK_EVERY_MS = 6 * 60 * 60_000;
 const SEGUIDORES_TICK_EVERY_MS = 12 * 60 * 60_000;
 const FACEBOOK_ADS_TICK_EVERY_MS = 6 * 60 * 60_000;
 const GOOGLE_ADS_TICK_EVERY_MS = 6 * 60 * 60_000;
 const LEADS_WA_TICK_EVERY_MS = 6 * 60 * 60_000;
+const BREVO_TICK_EVERY_MS = 6 * 60 * 60_000;
 async function handleTick(_req, res) {
     try {
         const result = await (0, pollClosedDeals_1.runPollTick)();
@@ -236,6 +240,7 @@ async function handleTick(_req, res) {
         let facebookAds = null;
         let googleAds = null;
         let leadsWa = null;
+        let brevo = null;
         const ga4 = (0, metricasVisitasSync_1.metricasVisitasStatus)().ga4;
         if (ga4.ok && Date.now() - lastVisitasTickAt > VISITAS_TICK_EVERY_MS) {
             lastVisitasTickAt = Date.now();
@@ -286,6 +291,16 @@ async function handleTick(_req, res) {
                 console.warn("[tick] sync leads wa", err instanceof Error ? err.message : err);
             }
         }
+        if ((0, metricasBrevoSync_1.brevoSyncStatus)().configured &&
+            Date.now() - lastBrevoTickAt > BREVO_TICK_EVERY_MS) {
+            lastBrevoTickAt = Date.now();
+            try {
+                brevo = await (0, metricasBrevoSync_1.syncMetricasBrevo)({ lookbackDays: 45 });
+            }
+            catch (err) {
+                console.warn("[tick] sync brevo", err instanceof Error ? err.message : err);
+            }
+        }
         res.status(200).json({
             ok: true,
             at: new Date().toISOString(),
@@ -296,6 +311,7 @@ async function handleTick(_req, res) {
             facebookAds,
             googleAds,
             leadsWa,
+            brevo,
             message: "Tick OK — cierres faltantes de la ventana sincronizados",
         });
     }
@@ -651,6 +667,71 @@ async function handleSyncLeadsWa(req, res) {
 }
 exports.ventasRouter.post("/api/ventas/sync-leads-wa", handleSyncLeadsWa);
 exports.ventasRouter.get("/api/ventas/sync-leads-wa", handleSyncLeadsWa);
+/** Estado Brevo → sección Brevo Bodasesor en Metricas. */
+exports.ventasRouter.get("/api/ventas/brevo-status", async (_req, res) => {
+    try {
+        const probe = await (0, metricasBrevoSync_1.brevoProbe)();
+        res.status(probe.ok ? 200 : 502).json(probe);
+    }
+    catch (err) {
+        res.status(502).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+            status: (0, metricasBrevoSync_1.brevoSyncStatus)(),
+        });
+    }
+});
+/**
+ * Guarda API key de Brevo.
+ * Body: { api_key: "xkeysib-..." }
+ */
+exports.ventasRouter.post("/api/ventas/brevo-setup", (req, res) => {
+    try {
+        const body = (req.body || {});
+        const api_key = String(body.api_key || body.apiKey || body.key || "").trim();
+        if (!api_key) {
+            res.status(400).json({
+                ok: false,
+                error: "Falta api_key",
+                hint: 'Body: { "api_key": "xkeysib-..." }',
+            });
+            return;
+        }
+        (0, brevoClient_1.saveBrevoApiKey)(api_key);
+        res.status(200).json({
+            ok: true,
+            saved: true,
+            path: "data/brevo.json",
+            status: (0, metricasBrevoSync_1.brevoSyncStatus)(),
+            message: "API key guardada. Ahora POST /api/ventas/sync-brevo",
+        });
+    }
+    catch (err) {
+        res.status(400).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+});
+async function handleSyncBrevo(req, res) {
+    try {
+        const body = (req.body || {});
+        const force = String(req.query.force || body.force || "") === "1" ||
+            body.force === true;
+        const lookbackDays = Number(req.query.lookbackDays || body.lookbackDays || 45);
+        const result = await (0, metricasBrevoSync_1.syncMetricasBrevo)({ force, lookbackDays });
+        res.status(result.ok ? 200 : 502).json(result);
+    }
+    catch (err) {
+        res.status(502).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+            status: (0, metricasBrevoSync_1.brevoSyncStatus)(),
+        });
+    }
+}
+exports.ventasRouter.post("/api/ventas/sync-brevo", handleSyncBrevo);
+exports.ventasRouter.get("/api/ventas/sync-brevo", handleSyncBrevo);
 /** Estado anti-duplicados: cuántas huellas hay en Sheet + cache. */
 exports.ventasRouter.get("/api/ventas/dedupe-status", async (_req, res) => {
     try {

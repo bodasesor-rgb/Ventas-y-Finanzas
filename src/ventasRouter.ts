@@ -51,6 +51,12 @@ import {
   leadsWaProbe,
   syncMetricasLeadsWa,
 } from "./metricasLeadsWaSync";
+import {
+  brevoProbe,
+  brevoSyncStatus,
+  syncMetricasBrevo,
+} from "./metricasBrevoSync";
+import { saveBrevoApiKey } from "./brevoClient";
 import { saveGoogleAdsCredentials } from "./googleAdsClient";
 import {
   discoverMetaAccounts,
@@ -283,11 +289,13 @@ let lastSeguidoresTickAt = 0;
 let lastFacebookAdsTickAt = 0;
 let lastGoogleAdsTickAt = 0;
 let lastLeadsWaTickAt = 0;
+let lastBrevoTickAt = 0;
 const VISITAS_TICK_EVERY_MS = 6 * 60 * 60_000;
 const SEGUIDORES_TICK_EVERY_MS = 12 * 60 * 60_000;
 const FACEBOOK_ADS_TICK_EVERY_MS = 6 * 60 * 60_000;
 const GOOGLE_ADS_TICK_EVERY_MS = 6 * 60 * 60_000;
 const LEADS_WA_TICK_EVERY_MS = 6 * 60 * 60_000;
+const BREVO_TICK_EVERY_MS = 6 * 60 * 60_000;
 
 async function handleTick(_req: Request, res: Response): Promise<void> {
   try {
@@ -304,6 +312,7 @@ async function handleTick(_req: Request, res: Response): Promise<void> {
     > | null = null;
     let leadsWa: Awaited<ReturnType<typeof syncMetricasLeadsWa>> | null =
       null;
+    let brevo: Awaited<ReturnType<typeof syncMetricasBrevo>> | null = null;
     const ga4 = metricasVisitasStatus().ga4;
     if (ga4.ok && Date.now() - lastVisitasTickAt > VISITAS_TICK_EVERY_MS) {
       lastVisitasTickAt = Date.now();
@@ -370,6 +379,20 @@ async function handleTick(_req: Request, res: Response): Promise<void> {
         );
       }
     }
+    if (
+      brevoSyncStatus().configured &&
+      Date.now() - lastBrevoTickAt > BREVO_TICK_EVERY_MS
+    ) {
+      lastBrevoTickAt = Date.now();
+      try {
+        brevo = await syncMetricasBrevo({ lookbackDays: 45 });
+      } catch (err) {
+        console.warn(
+          "[tick] sync brevo",
+          err instanceof Error ? err.message : err
+        );
+      }
+    }
     res.status(200).json({
       ok: true,
       at: new Date().toISOString(),
@@ -380,6 +403,7 @@ async function handleTick(_req: Request, res: Response): Promise<void> {
       facebookAds,
       googleAds,
       leadsWa,
+      brevo,
       message: "Tick OK — cierres faltantes de la ventana sincronizados",
     });
   } catch (err) {
@@ -782,6 +806,83 @@ async function handleSyncLeadsWa(
 }
 ventasRouter.post("/api/ventas/sync-leads-wa", handleSyncLeadsWa);
 ventasRouter.get("/api/ventas/sync-leads-wa", handleSyncLeadsWa);
+
+/** Estado Brevo → sección Brevo Bodasesor en Metricas. */
+ventasRouter.get("/api/ventas/brevo-status", async (_req, res) => {
+  try {
+    const probe = await brevoProbe();
+    res.status(probe.ok ? 200 : 502).json(probe);
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+      status: brevoSyncStatus(),
+    });
+  }
+});
+
+/**
+ * Guarda API key de Brevo.
+ * Body: { api_key: "xkeysib-..." }
+ */
+ventasRouter.post("/api/ventas/brevo-setup", (req, res) => {
+  try {
+    const body = (req.body || {}) as {
+      api_key?: string;
+      apiKey?: string;
+      key?: string;
+    };
+    const api_key = String(
+      body.api_key || body.apiKey || body.key || ""
+    ).trim();
+    if (!api_key) {
+      res.status(400).json({
+        ok: false,
+        error: "Falta api_key",
+        hint: 'Body: { "api_key": "xkeysib-..." }',
+      });
+      return;
+    }
+    saveBrevoApiKey(api_key);
+    res.status(200).json({
+      ok: true,
+      saved: true,
+      path: "data/brevo.json",
+      status: brevoSyncStatus(),
+      message: "API key guardada. Ahora POST /api/ventas/sync-brevo",
+    });
+  } catch (err) {
+    res.status(400).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+async function handleSyncBrevo(req: Request, res: Response): Promise<void> {
+  try {
+    const body = (req.body || {}) as {
+      force?: unknown;
+      lookbackDays?: unknown;
+    };
+    const force =
+      String(req.query.force || body.force || "") === "1" ||
+      body.force === true;
+    const lookbackDays = Number(
+      req.query.lookbackDays || body.lookbackDays || 45
+    );
+    const result = await syncMetricasBrevo({ force, lookbackDays });
+    res.status(result.ok ? 200 : 502).json(result);
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+      status: brevoSyncStatus(),
+    });
+  }
+}
+ventasRouter.post("/api/ventas/sync-brevo", handleSyncBrevo);
+ventasRouter.get("/api/ventas/sync-brevo", handleSyncBrevo);
 
 /** Estado anti-duplicados: cuántas huellas hay en Sheet + cache. */
 ventasRouter.get("/api/ventas/dedupe-status", async (_req, res) => {

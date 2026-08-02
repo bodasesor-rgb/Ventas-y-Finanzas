@@ -23,6 +23,7 @@
 - **Facebook Ads** (Inversión, Conversión, CPL, CPC, Clics, Alcance, CPM) → Metricas: [`docs/META_ADS_METRICAS.md`](docs/META_ADS_METRICAS.md) (`POST /api/ventas/sync-facebook-ads`)
 - **Google Ads** (Inversión, Conversión, CPL, CPC, Clics) → Metricas: [`docs/GOOGLE_ADS_METRICAS.md`](docs/GOOGLE_ADS_METRICAS.md) (`POST /api/ventas/sync-google-ads`)
 - **Leads WA Kommo** → Metricas: [`docs/LEADS_WA_KOMMO.md`](docs/LEADS_WA_KOMMO.md) (`POST /api/ventas/sync-leads-wa`)
+- **Brevo** (Contactos, Correos, Aperturas, Clicks, CTR) → Metricas: [`docs/BREVO_METRICAS.md`](docs/BREVO_METRICAS.md) (`POST /api/ventas/brevo-setup` + `sync-brevo`)
 
 ## Sheet (Apps Script) — OBLIGATORIO v6
 
