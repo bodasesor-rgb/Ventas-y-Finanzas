@@ -299,10 +299,21 @@ function extractStatusIdFromEventValue_(v: unknown): number | null {
   }
   if (typeof v === "object") {
     const o = v as Record<string, unknown>;
-    if (o.status_id != null && Number(o.status_id) > 0) return Number(o.status_id);
-    if (o.id != null && o.name != null && Number(o.id) > 0) return Number(o.id);
-    if (o.status) return extractStatusIdFromEventValue_(o.status);
-    if (o.lead_status) return extractStatusIdFromEventValue_(o.lead_status);
+    if (o.status_id != null && Number(o.status_id) > 0) {
+      return Number(o.status_id);
+    }
+    // lead_status: { id, pipeline_id } (sin name)
+    if (o.lead_status) {
+      const nested = extractStatusIdFromEventValue_(o.lead_status);
+      if (nested != null) return nested;
+    }
+    if (o.status) {
+      const nested = extractStatusIdFromEventValue_(o.status);
+      if (nested != null) return nested;
+    }
+    if (o.id != null && Number(o.id) > 0 && (o.pipeline_id != null || o.name != null)) {
+      return Number(o.id);
+    }
   }
   return null;
 }

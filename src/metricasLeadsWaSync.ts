@@ -360,6 +360,12 @@ export async function syncMetricasLeadsWa(opts?: {
   error?: string;
   hint?: string;
   mailSample?: string[];
+  correoDebug?: {
+    statusEvents: number;
+    cotizacionTransitions: number;
+    cotizacionStatusIds: number[];
+    sampleEvent?: unknown;
+  };
 }> {
   const force = Boolean(opts?.force);
   const lookbackDays = Math.max(7, Number(opts?.lookbackDays) || 45);
@@ -469,6 +475,10 @@ export async function syncMetricasLeadsWa(opts?: {
     normLabel_(m.subject || "").includes("cotizacion")
   );
 
+  const allCotizacionTransitions = statusEvents.filter(
+    (e) => e.statusAfterId != null && cotizacionStatusIds.has(e.statusAfterId)
+  );
+
   const weeks: WeekLeadsWa[] = [];
   for (const w of targetWeeks) {
     const weekStartMs = w.date.getTime();
@@ -563,6 +573,12 @@ export async function syncMetricasLeadsWa(opts?: {
     updatedCells: data.length,
     weeks,
     mailSample,
+    correoDebug: {
+      statusEvents: statusEvents.length,
+      cotizacionTransitions: allCotizacionTransitions.length,
+      cotizacionStatusIds: [...cotizacionStatusIds],
+      sampleEvent: statusEvents[0] || null,
+    },
     hint: correoFromMailApi
       ? undefined
       : `Correo: conté leads que pasaron a etapa Cotización realizada (${[...cotizacionStatusIds].join(",")}). Mail API no trae asuntos de cotización.`,

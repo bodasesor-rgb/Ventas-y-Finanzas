@@ -390,6 +390,7 @@ async function syncMetricasLeadsWa(opts) {
     // Solo usar Mail API si hay asuntos con "cotización" (fiable).
     // Si solo hay outgoing sin asunto, preferir transiciones a Cotización realizada.
     const correoFromMailApi = cotizacionMails.some((m) => normLabel_(m.subject || "").includes("cotizacion"));
+    const allCotizacionTransitions = statusEvents.filter((e) => e.statusAfterId != null && cotizacionStatusIds.has(e.statusAfterId));
     const weeks = [];
     for (const w of targetWeeks) {
         const weekStartMs = w.date.getTime();
@@ -477,6 +478,12 @@ async function syncMetricasLeadsWa(opts) {
         updatedCells: data.length,
         weeks,
         mailSample,
+        correoDebug: {
+            statusEvents: statusEvents.length,
+            cotizacionTransitions: allCotizacionTransitions.length,
+            cotizacionStatusIds: [...cotizacionStatusIds],
+            sampleEvent: statusEvents[0] || null,
+        },
         hint: correoFromMailApi
             ? undefined
             : `Correo: conté leads que pasaron a etapa Cotización realizada (${[...cotizacionStatusIds].join(",")}). Mail API no trae asuntos de cotización.`,

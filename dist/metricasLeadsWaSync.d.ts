@@ -38,6 +38,12 @@ export declare function syncMetricasLeadsWa(opts?: {
     error?: string;
     hint?: string;
     mailSample?: string[];
+    correoDebug?: {
+        statusEvents: number;
+        cotizacionTransitions: number;
+        cotizacionStatusIds: number[];
+        sampleEvent?: unknown;
+    };
 }>;
 export declare function leadsWaProbe(): Promise<{
     ok: boolean;
