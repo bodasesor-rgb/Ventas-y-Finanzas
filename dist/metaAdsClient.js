@@ -82,9 +82,21 @@ async function listMetaAdAccounts(token) {
 async function resolveAdAccount(token) {
     const t = token || (0, metaSocialClient_1.getMetaAccessToken)();
     const configured = getConfiguredAdAccountId();
-    const accounts = await listMetaAdAccounts(t);
-    if (!accounts.length) {
-        throw new Error("El token no ve ninguna cuenta publicitaria (me/adaccounts). Necesita permiso ads_read y acceso a la ad account.");
+    let accounts = [];
+    try {
+        accounts = await listMetaAdAccounts(t);
+    }
+    catch (err) {
+        // Token de página sin ads_read falla aquí; aún puede servir act_ configurado
+        if (!configured) {
+            throw new Error(`Meta Ads: ${err instanceof Error ? err.message : String(err)}. ` +
+                "Regenera el token con permiso ads_read o define META_AD_ACCOUNT_ID / POST meta-setup { ad_account_id }.");
+        }
+    }
+    if (!accounts.length && !configured) {
+        throw new Error("El token no ve ninguna cuenta publicitaria (me/adaccounts). " +
+            "En Graph API Explorer agrega permiso ads_read, regenera el Page Access Token, " +
+            "o define META_AD_ACCOUNT_ID=act_XXXX / POST /api/ventas/meta-setup { \"ad_account_id\": \"act_XXXX\" }.");
     }
     let chosen = (configured
         ? accounts.find((a) => a.id === configured ||

@@ -153,13 +153,35 @@ type Campaign = {
   };
 };
 
+/** Brevo: endDate no puede ser > hoy (a veces ni = hoy según zona). Máx = ayer UTC. */
+function clampBrevoDateRange_(
+  startDate: string,
+  endDate: string
+): { startDate: string; endDate: string } {
+  const today = new Date();
+  const yday = new Date(
+    Date.UTC(
+      today.getUTCFullYear(),
+      today.getUTCMonth(),
+      today.getUTCDate() - 1
+    )
+  );
+  const ydayIso = yday.toISOString().slice(0, 10);
+  let end = endDate;
+  if (end > ydayIso) end = ydayIso;
+  let start = startDate;
+  if (start > end) start = end;
+  return { startDate: start, endDate: end };
+}
+
 /** Campañas enviadas en rango (por sentDate). */
 export async function fetchBrevoSentCampaigns(opts: {
   startDate: string; // YYYY-MM-DD
   endDate: string;
 }): Promise<Campaign[]> {
-  const start = encodeURIComponent(`${opts.startDate}T00:00:00.000Z`);
-  const end = encodeURIComponent(`${opts.endDate}T23:59:59.999Z`);
+  const clamped = clampBrevoDateRange_(opts.startDate, opts.endDate);
+  const start = encodeURIComponent(`${clamped.startDate}T00:00:00.000Z`);
+  const end = encodeURIComponent(`${clamped.endDate}T23:59:59.999Z`);
   const out: Campaign[] = [];
   let offset = 0;
   const limit = 50;
@@ -196,8 +218,9 @@ export async function fetchBrevoSmtpAggregated(opts: {
   uniqueClicks?: number;
 }> {
   try {
+    const clamped = clampBrevoDateRange_(opts.startDate, opts.endDate);
     return await brevoGet_(
-      `/smtp/statistics/aggregatedReport?startDate=${opts.startDate}&endDate=${opts.endDate}&days=90`
+      `/smtp/statistics/aggregatedReport?startDate=${clamped.startDate}&endDate=${clamped.endDate}&days=90`
     );
   } catch {
     return {};

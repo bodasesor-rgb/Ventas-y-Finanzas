@@ -261,10 +261,12 @@ export async function syncMetricasBrevo(opts?: {
     today.getUTCMonth(),
     today.getUTCDate()
   );
+  // Brevo rechaza endDate >= "hoy" en su zona; usamos ayer UTC como máximo.
+  const maxUntilUtc = todayUtc - 86400000;
   const lookbackStart = todayUtc - lookbackDays * 86400000;
 
   const targetWeeks = layout.weekCols.filter((w) => {
-    if (w.date.getTime() > todayUtc) return false;
+    if (w.date.getTime() > maxUntilUtc) return false; // semana sin ni 1 día cerrado
     if (w.date.getTime() + 7 * 86400000 < lookbackStart) return false;
     const row =
       layout.values[
@@ -290,7 +292,7 @@ export async function syncMetricasBrevo(opts?: {
   const ranges = targetWeeks.map((w) => {
     const weekEndExclusive = w.date.getTime() + 7 * 86400000;
     let untilMs = weekEndExclusive - 86400000;
-    if (untilMs >= todayUtc) untilMs = todayUtc - 86400000;
+    if (untilMs > maxUntilUtc) untilMs = maxUntilUtc;
     if (untilMs < w.date.getTime()) untilMs = w.date.getTime();
     return {
       since: formatIso_(w.date),
