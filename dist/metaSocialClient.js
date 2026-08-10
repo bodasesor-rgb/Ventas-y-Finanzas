@@ -11,6 +11,7 @@ exports.discoverMetaAccounts = discoverMetaAccounts;
 exports.fetchSocialFollowers = fetchSocialFollowers;
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
+const hostSecretsArchive_1 = require("./hostSecretsArchive");
 const META_FILE = path_1.default.join(process.cwd(), "data", "meta-token.json");
 const GRAPH = "https://graph.facebook.com/v21.0";
 function readStore_() {
@@ -42,9 +43,16 @@ function saveMetaTokenStore(raw) {
         encoding: "utf8",
         mode: 0o600,
     });
+    void (0, hostSecretsArchive_1.persistHostSecret)("meta-token", next).catch((err) => {
+        console.warn("[meta] backup Drive token:", err instanceof Error ? err.message : err);
+    });
     return next;
 }
 function getMetaAccessToken() {
+    // Archivo primero: tras meta-setup / restore Drive debe ganar sobre FB_META vencido en env
+    const store = readStore_();
+    if (store?.access_token)
+        return store.access_token;
     const fromEnv = (process.env.FB_META ||
         process.env.META_PAGE_ACCESS_TOKEN ||
         process.env.META_ACCESS_TOKEN ||
@@ -52,9 +60,6 @@ function getMetaAccessToken() {
         "").trim();
     if (fromEnv)
         return fromEnv;
-    const store = readStore_();
-    if (store?.access_token)
-        return store.access_token;
     throw new Error("Falta token Meta: env FB_META / META_PAGE_ACCESS_TOKEN o POST /api/ventas/meta-setup");
 }
 function metaConfigured() {

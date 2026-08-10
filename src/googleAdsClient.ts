@@ -6,6 +6,7 @@ import {
   ga4PropertyId,
   loadServiceAccountJson,
 } from "./googleAuth";
+import { persistHostSecret } from "./hostSecretsArchive";
 
 const ADS_FILE = path.join(process.cwd(), "data", "google-ads.json");
 /** REST version — bump when Google deprecates. */
@@ -121,6 +122,12 @@ export function saveGoogleAdsCredentials(
   fs.writeFileSync(ADS_FILE, JSON.stringify(next, null, 2), {
     encoding: "utf8",
     mode: 0o600,
+  });
+  void persistHostSecret("google-ads", next).catch((err) => {
+    console.warn(
+      "[google-ads] backup Drive:",
+      err instanceof Error ? err.message : err
+    );
   });
   return next;
 }

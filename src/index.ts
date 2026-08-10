@@ -66,6 +66,18 @@ const phase = scriptUrl ? 2 : 1;
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`[ventas+pnl] 0.0.0.0:${PORT} | ventas phase=${phase} | UI=/pnl/`);
+
+  // Tras deploy Hostinger data/ queda vacío: restaura SA/Meta/Brevo desde Drive
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { restoreHostSecretsOnBoot } = require("./hostSecretsArchive") as typeof import("./hostSecretsArchive");
+    void restoreHostSecretsOnBoot().then((r) => {
+      console.log("[boot] host secrets restore", r);
+    });
+  } catch (err) {
+    console.warn("[boot] host secrets restore no arrancó", err);
+  }
+
   // Backup: si Kommo no dispara el webhook, igual subimos cierres al Sheet
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports

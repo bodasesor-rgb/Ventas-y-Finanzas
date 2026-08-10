@@ -18,6 +18,7 @@ const path_1 = __importDefault(require("path"));
 const google_auth_library_1 = require("google-auth-library");
 const data_1 = require("@google-analytics/data");
 const googleAuth_1 = require("./googleAuth");
+const hostSecretsArchive_1 = require("./hostSecretsArchive");
 const ADS_FILE = path_1.default.join(process.cwd(), "data", "google-ads.json");
 /** REST version — bump when Google deprecates. */
 /** Probar v20→v17 si Google depreca una. */
@@ -89,6 +90,9 @@ function saveGoogleAdsCredentials(raw) {
     fs_1.default.writeFileSync(ADS_FILE, JSON.stringify(next, null, 2), {
         encoding: "utf8",
         mode: 0o600,
+    });
+    void (0, hostSecretsArchive_1.persistHostSecret)("google-ads", next).catch((err) => {
+        console.warn("[google-ads] backup Drive:", err instanceof Error ? err.message : err);
     });
     return next;
 }

@@ -1,16 +1,16 @@
 /**
  * ============================================================
  * Apps Script — Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-08-01-v31
+ * VERSION: 2026-08-10-v32
  * ============================================================
  * PEGAR TODO ESTE ARCHIVO (borrar lo anterior -> pegar -> Guardar)
  *
- * REGLA v31:
- *   - upsertMetricasVisitas: llena Visitas (GA4) por semana
- *   - v30: no duplicar Eventos por huella cliente+fechas+horario+tipo
+ * REGLA v32:
+ *   - saveHostSecret / getHostSecret: SA+Meta sobreviven deploys Hostinger
+ *   - v31: upsertMetricasVisitas: llena Visitas (GA4) por semana
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-08-01-v31';
+var SCRIPT_VERSION = '2026-08-10-v32';
 /** Hostinger: tick cada minuto para que los cierres suban al Sheet al momento. */
 var VENTAS_TICK_URL =
   'https://lightcyan-reindeer-284498.hostingersite.com/api/ventas/tick';
@@ -1176,6 +1176,92 @@ function deleteStatementArchive_(data) {
   });
 }
 
+/* ===================== Host secrets (sobreviven deploy Hostinger) ===================== */
+
+var HOST_SECRET_KEYS = {
+  'google-service-account': true,
+  'meta-token': true,
+  brevo: true,
+  'google-ads': true,
+};
+
+function hostSecretFileName_(secretKey) {
+  return 'host_secret_' + secretKey + '.json';
+}
+
+function saveHostSecret_(data) {
+  var secretKey = String(data.secretKey || '').trim();
+  if (!HOST_SECRET_KEYS[secretKey]) {
+    return json_({
+      ok: false,
+      version: SCRIPT_VERSION,
+      error: 'saveHostSecret: secretKey no permitido',
+    });
+  }
+  if (!data.jsonBase64 && data.json == null) {
+    return json_({
+      ok: false,
+      version: SCRIPT_VERSION,
+      error: 'saveHostSecret: falta json / jsonBase64',
+    });
+  }
+  var payload =
+    data.jsonBase64 != null
+      ? Utilities.newBlob(
+          Utilities.base64Decode(String(data.jsonBase64)),
+          'application/json',
+          hostSecretFileName_(secretKey)
+        ).getDataAsString()
+      : typeof data.json === 'string'
+        ? data.json
+        : JSON.stringify(data.json);
+  var folder = getArchiveFolder_();
+  var name = hostSecretFileName_(secretKey);
+  removeFilesNamedInFolder_(folder, name);
+  var file = folder.createFile(
+    Utilities.newBlob(payload, 'application/json', name)
+  );
+  return json_({
+    ok: true,
+    version: SCRIPT_VERSION,
+    action: 'savedHostSecret',
+    secretKey: secretKey,
+    fileId: file.getId(),
+  });
+}
+
+function getHostSecret_(data) {
+  var secretKey = String(data.secretKey || '').trim();
+  if (!HOST_SECRET_KEYS[secretKey]) {
+    return json_({
+      ok: false,
+      version: SCRIPT_VERSION,
+      error: 'getHostSecret: secretKey no permitido',
+    });
+  }
+  var folder = getArchiveFolder_();
+  var name = hostSecretFileName_(secretKey);
+  var files = folder.getFilesByName(name);
+  if (!files.hasNext()) {
+    return json_({
+      ok: false,
+      version: SCRIPT_VERSION,
+      error: 'getHostSecret: no hay backup de ' + secretKey,
+      secretKey: secretKey,
+    });
+  }
+  var file = files.next();
+  return json_({
+    ok: true,
+    version: SCRIPT_VERSION,
+    action: 'fetchedHostSecret',
+    secretKey: secretKey,
+    fileId: file.getId(),
+    jsonBase64: Utilities.base64Encode(file.getBlob().getBytes()),
+    updatedAt: String(file.getLastUpdated()),
+  });
+}
+
 /* ===================== doPost ===================== */
 
 function doPost(e) {
@@ -1207,6 +1293,12 @@ function doPost(e) {
     }
     if (data && data.action === 'deleteStatementArchive') {
       return deleteStatementArchive_(data);
+    }
+    if (data && data.action === 'saveHostSecret') {
+      return saveHostSecret_(data);
+    }
+    if (data && data.action === 'getHostSecret') {
+      return getHostSecret_(data);
     }
     if (data && data.action === 'setupAll') {
       setupAllSilent_();

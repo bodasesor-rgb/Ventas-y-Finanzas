@@ -7,6 +7,7 @@ exports.SA_FILE_PATH = void 0;
 exports.listGaEnvKeysPresent = listGaEnvKeysPresent;
 exports.loadServiceAccountJson = loadServiceAccountJson;
 exports.saveServiceAccountJson = saveServiceAccountJson;
+exports.saveServiceAccountJsonDurable = saveServiceAccountJsonDurable;
 exports.hasGoogleCredentials = hasGoogleCredentials;
 exports.getGoogleAuthClient = getGoogleAuthClient;
 exports.ga4PropertyId = ga4PropertyId;
@@ -15,6 +16,7 @@ exports.metricasSheetName = metricasSheetName;
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const google_auth_library_1 = require("google-auth-library");
+const hostSecretsArchive_1 = require("./hostSecretsArchive");
 const SA_ENV_KEYS_ = [
     "GOOGLE_SERVICE_ACCOUNT_JSON",
     "GA4_SERVICE_ACCOUNT_JSON",
@@ -107,10 +109,28 @@ function saveServiceAccountJson(raw) {
         encoding: "utf8",
         mode: 0o600,
     });
+    // Drive backup (Hostinger borra data/ en cada deploy) — fire-and-forget
+    void (0, hostSecretsArchive_1.persistHostSecret)("google-service-account", sa).catch((err) => {
+        console.warn("[ga4] backup Drive SA:", err instanceof Error ? err.message : err);
+    });
     return {
         ok: true,
         client_email: sa.client_email,
         path: "data/google-service-account.json",
+    };
+}
+/** Igual que saveServiceAccountJson pero espera backup Drive. */
+async function saveServiceAccountJsonDurable(raw) {
+    const saved = saveServiceAccountJson(raw);
+    const sa = loadServiceAccountJson();
+    if (!sa) {
+        return { ...saved, driveOk: false, driveError: "no se pudo releer SA" };
+    }
+    const drive = await (0, hostSecretsArchive_1.persistHostSecret)("google-service-account", sa);
+    return {
+        ...saved,
+        driveOk: drive.driveOk,
+        driveError: drive.driveError,
     };
 }
 function hasGoogleCredentials() {

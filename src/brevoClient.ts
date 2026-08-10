@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { persistHostSecret } from "./hostSecretsArchive";
 
 const BREVO_FILE = path.join(process.cwd(), "data", "brevo.json");
 const BREVO_API = "https://api.brevo.com/v3";
@@ -54,6 +55,12 @@ export function saveBrevoApiKey(apiKey: string): BrevoStore {
   fs.writeFileSync(BREVO_FILE, JSON.stringify(next, null, 2), {
     encoding: "utf8",
     mode: 0o600,
+  });
+  void persistHostSecret("brevo", next).catch((err) => {
+    console.warn(
+      "[brevo] backup Drive:",
+      err instanceof Error ? err.message : err
+    );
   });
   return next;
 }

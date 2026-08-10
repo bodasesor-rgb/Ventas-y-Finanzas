@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { persistHostSecret } from "./hostSecretsArchive";
 
 const META_FILE = path.join(process.cwd(), "data", "meta-token.json");
 const GRAPH = "https://graph.facebook.com/v21.0";
@@ -55,10 +56,19 @@ export function saveMetaTokenStore(
     encoding: "utf8",
     mode: 0o600,
   });
+  void persistHostSecret("meta-token", next).catch((err) => {
+    console.warn(
+      "[meta] backup Drive token:",
+      err instanceof Error ? err.message : err
+    );
+  });
   return next;
 }
 
 export function getMetaAccessToken(): string {
+  // Archivo primero: tras meta-setup / restore Drive debe ganar sobre FB_META vencido en env
+  const store = readStore_();
+  if (store?.access_token) return store.access_token;
   const fromEnv = (
     process.env.FB_META ||
     process.env.META_PAGE_ACCESS_TOKEN ||
@@ -67,8 +77,6 @@ export function getMetaAccessToken(): string {
     ""
   ).trim();
   if (fromEnv) return fromEnv;
-  const store = readStore_();
-  if (store?.access_token) return store.access_token;
   throw new Error(
     "Falta token Meta: env FB_META / META_PAGE_ACCESS_TOKEN o POST /api/ventas/meta-setup"
   );

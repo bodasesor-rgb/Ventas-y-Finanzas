@@ -28,6 +28,11 @@ export interface AppsScriptWriteResult {
   run?: unknown;
   storedName?: string;
   periodLabel?: string;
+  /** Host secrets (v32+) */
+  secretKey?: string;
+  fileId?: string;
+  jsonBase64?: string;
+  updatedAt?: string;
 }
 
 function appsScriptUrl(): string {

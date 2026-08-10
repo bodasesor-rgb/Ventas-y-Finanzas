@@ -63,7 +63,8 @@ import {
   saveMetaTokenStore,
 } from "./metaSocialClient";
 import { listMetaAdAccounts } from "./metaAdsClient";
-import { saveServiceAccountJson } from "./googleAuth";
+import { saveServiceAccountJsonDurable } from "./googleAuth";
+import { restoreHostSecretsOnBoot } from "./hostSecretsArchive";
 
 function publicBaseUrl_(req?: { protocol?: string; get?: (h: string) => string | undefined }): string {
   const env = (
@@ -462,22 +463,22 @@ ventasRouter.get("/api/ventas/ga4-status", (_req, res) => {
 });
 
 /**
- * Guarda el service account como archivo en data/
- * (Hostinger suele truncar variables de entorno muy largas).
+ * Guarda el service account en data/ + backup Drive (sobrevive deploy Hostinger).
  * Body: el JSON completo del .json de Google Cloud.
  */
-ventasRouter.post("/api/ventas/ga4-setup-sa", (req, res) => {
+ventasRouter.post("/api/ventas/ga4-setup-sa", async (req, res) => {
   try {
     const body = req.body;
     const raw =
       typeof body === "string"
         ? body
         : body?.serviceAccount || body?.json || body;
-    const saved = saveServiceAccountJson(raw);
+    const saved = await saveServiceAccountJsonDurable(raw);
     res.status(200).json({
       ...saved,
-      message:
-        "Service account guardado en disco. Ahora POST /api/ventas/sync-visitas",
+      message: saved.driveOk
+        ? "Service account en disco + Drive. POST /api/ventas/sync-visitas"
+        : "Service account en disco. Drive backup falló (pega Apps Script v32). POST /api/ventas/sync-visitas",
       status: metricasVisitasStatus(),
     });
   } catch (err) {
@@ -490,6 +491,25 @@ ventasRouter.post("/api/ventas/ga4-setup-sa", (req, res) => {
   }
 });
 
+/** Diagnóstico: archivos locales vs restore Drive tras deploy. */
+ventasRouter.get("/api/ventas/secrets-status", async (_req, res) => {
+  try {
+    const restore = await restoreHostSecretsOnBoot();
+    res.status(200).json({
+      ok: true,
+      restore,
+      ga4: metricasVisitasStatus(),
+      meta: seguidoresStatus(),
+      hint: "Tras un deploy Hostinger, data/ se borra. Con Apps Script v32 las credenciales se restauran solas desde Drive.",
+    });
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
 /**
  * Llena Visitas al sitio / orgánicas / blogs / colecciones desde GA4
  * en Metricas Auto (solo celdas vacías de semanas ya empezadas).
@@ -497,6 +517,7 @@ ventasRouter.post("/api/ventas/ga4-setup-sa", (req, res) => {
  */
 async function handleSyncVisitas(req: Request, res: Response): Promise<void> {
   try {
+    await restoreHostSecretsOnBoot();
     const body = (req.body || {}) as { force?: unknown; days?: unknown };
     const force =
       String(req.query.force || body.force || "") === "1" ||
@@ -595,6 +616,7 @@ async function handleSyncSeguidores(
   res: Response
 ): Promise<void> {
   try {
+    await restoreHostSecretsOnBoot();
     const body = (req.body || {}) as { force?: unknown };
     const force =
       String(req.query.force || body.force || "") === "1" ||
@@ -631,6 +653,7 @@ async function handleSyncFacebookAds(
   res: Response
 ): Promise<void> {
   try {
+    await restoreHostSecretsOnBoot();
     const body = (req.body || {}) as {
       force?: unknown;
       lookbackDays?: unknown;
@@ -728,6 +751,7 @@ async function handleSyncGoogleAds(
   res: Response
 ): Promise<void> {
   try {
+    await restoreHostSecretsOnBoot();
     const body = (req.body || {}) as {
       force?: unknown;
       lookbackDays?: unknown;
@@ -777,6 +801,7 @@ async function handleSyncLeadsWa(
   res: Response
 ): Promise<void> {
   try {
+    await restoreHostSecretsOnBoot();
     const body = (req.body || {}) as {
       force?: unknown;
       lookbackDays?: unknown;
@@ -861,6 +886,7 @@ ventasRouter.post("/api/ventas/brevo-setup", (req, res) => {
 
 async function handleSyncBrevo(req: Request, res: Response): Promise<void> {
   try {
+    await restoreHostSecretsOnBoot();
     const body = (req.body || {}) as {
       force?: unknown;
       lookbackDays?: unknown;

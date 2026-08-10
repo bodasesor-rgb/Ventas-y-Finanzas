@@ -21,6 +21,7 @@ const googleAdsClient_1 = require("./googleAdsClient");
 const metaSocialClient_1 = require("./metaSocialClient");
 const metaAdsClient_1 = require("./metaAdsClient");
 const googleAuth_1 = require("./googleAuth");
+const hostSecretsArchive_1 = require("./hostSecretsArchive");
 function publicBaseUrl_(req) {
     const env = (process.env.PUBLIC_BASE_URL ||
         process.env.HOSTINGER_URL ||
@@ -369,20 +370,21 @@ exports.ventasRouter.get("/api/ventas/ga4-status", (_req, res) => {
     res.status(200).json({ ok: true, ...(0, metricasVisitasSync_1.metricasVisitasStatus)() });
 });
 /**
- * Guarda el service account como archivo en data/
- * (Hostinger suele truncar variables de entorno muy largas).
+ * Guarda el service account en data/ + backup Drive (sobrevive deploy Hostinger).
  * Body: el JSON completo del .json de Google Cloud.
  */
-exports.ventasRouter.post("/api/ventas/ga4-setup-sa", (req, res) => {
+exports.ventasRouter.post("/api/ventas/ga4-setup-sa", async (req, res) => {
     try {
         const body = req.body;
         const raw = typeof body === "string"
             ? body
             : body?.serviceAccount || body?.json || body;
-        const saved = (0, googleAuth_1.saveServiceAccountJson)(raw);
+        const saved = await (0, googleAuth_1.saveServiceAccountJsonDurable)(raw);
         res.status(200).json({
             ...saved,
-            message: "Service account guardado en disco. Ahora POST /api/ventas/sync-visitas",
+            message: saved.driveOk
+                ? "Service account en disco + Drive. POST /api/ventas/sync-visitas"
+                : "Service account en disco. Drive backup falló (pega Apps Script v32). POST /api/ventas/sync-visitas",
             status: (0, metricasVisitasSync_1.metricasVisitasStatus)(),
         });
     }
@@ -394,6 +396,25 @@ exports.ventasRouter.post("/api/ventas/ga4-setup-sa", (req, res) => {
         });
     }
 });
+/** Diagnóstico: archivos locales vs restore Drive tras deploy. */
+exports.ventasRouter.get("/api/ventas/secrets-status", async (_req, res) => {
+    try {
+        const restore = await (0, hostSecretsArchive_1.restoreHostSecretsOnBoot)();
+        res.status(200).json({
+            ok: true,
+            restore,
+            ga4: (0, metricasVisitasSync_1.metricasVisitasStatus)(),
+            meta: (0, metricasSeguidoresSync_1.seguidoresStatus)(),
+            hint: "Tras un deploy Hostinger, data/ se borra. Con Apps Script v32 las credenciales se restauran solas desde Drive.",
+        });
+    }
+    catch (err) {
+        res.status(500).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+});
 /**
  * Llena Visitas al sitio / orgánicas / blogs / colecciones desde GA4
  * en Metricas Auto (solo celdas vacías de semanas ya empezadas).
@@ -401,6 +422,7 @@ exports.ventasRouter.post("/api/ventas/ga4-setup-sa", (req, res) => {
  */
 async function handleSyncVisitas(req, res) {
     try {
+        await (0, hostSecretsArchive_1.restoreHostSecretsOnBoot)();
         const body = (req.body || {});
         const force = String(req.query.force || body.force || "") === "1" ||
             body.force === true;
@@ -489,6 +511,7 @@ exports.ventasRouter.post("/api/ventas/meta-setup", async (req, res) => {
 });
 async function handleSyncSeguidores(req, res) {
     try {
+        await (0, hostSecretsArchive_1.restoreHostSecretsOnBoot)();
         const body = (req.body || {});
         const force = String(req.query.force || body.force || "") === "1" ||
             body.force === true;
@@ -521,6 +544,7 @@ exports.ventasRouter.get("/api/ventas/meta-ads-status", async (_req, res) => {
 });
 async function handleSyncFacebookAds(req, res) {
     try {
+        await (0, hostSecretsArchive_1.restoreHostSecretsOnBoot)();
         const body = (req.body || {});
         const force = String(req.query.force || body.force || "") === "1" ||
             body.force === true;
@@ -608,6 +632,7 @@ exports.ventasRouter.post("/api/ventas/google-ads-setup", (req, res) => {
 });
 async function handleSyncGoogleAds(req, res) {
     try {
+        await (0, hostSecretsArchive_1.restoreHostSecretsOnBoot)();
         const body = (req.body || {});
         const force = String(req.query.force || body.force || "") === "1" ||
             body.force === true;
@@ -646,6 +671,7 @@ exports.ventasRouter.get("/api/ventas/leads-wa-status", async (_req, res) => {
 });
 async function handleSyncLeadsWa(req, res) {
     try {
+        await (0, hostSecretsArchive_1.restoreHostSecretsOnBoot)();
         const body = (req.body || {});
         const force = String(req.query.force || body.force || "") === "1" ||
             body.force === true;
@@ -715,6 +741,7 @@ exports.ventasRouter.post("/api/ventas/brevo-setup", (req, res) => {
 });
 async function handleSyncBrevo(req, res) {
     try {
+        await (0, hostSecretsArchive_1.restoreHostSecretsOnBoot)();
         const body = (req.body || {});
         const force = String(req.query.force || body.force || "") === "1" ||
             body.force === true;

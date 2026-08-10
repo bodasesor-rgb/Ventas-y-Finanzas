@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { GoogleAuth, JWT } from "google-auth-library";
+import { persistHostSecret } from "./hostSecretsArchive";
 
 export type ServiceAccountJson = {
   type?: string;
@@ -118,10 +119,40 @@ export function saveServiceAccountJson(
     encoding: "utf8",
     mode: 0o600,
   });
+  // Drive backup (Hostinger borra data/ en cada deploy) — fire-and-forget
+  void persistHostSecret("google-service-account", sa).catch((err) => {
+    console.warn(
+      "[ga4] backup Drive SA:",
+      err instanceof Error ? err.message : err
+    );
+  });
   return {
     ok: true,
     client_email: sa.client_email,
     path: "data/google-service-account.json",
+  };
+}
+
+/** Igual que saveServiceAccountJson pero espera backup Drive. */
+export async function saveServiceAccountJsonDurable(
+  raw: unknown
+): Promise<{
+  ok: true;
+  client_email: string;
+  path: string;
+  driveOk: boolean;
+  driveError?: string;
+}> {
+  const saved = saveServiceAccountJson(raw);
+  const sa = loadServiceAccountJson();
+  if (!sa) {
+    return { ...saved, driveOk: false, driveError: "no se pudo releer SA" };
+  }
+  const drive = await persistHostSecret("google-service-account", sa);
+  return {
+    ...saved,
+    driveOk: drive.driveOk,
+    driveError: drive.driveError,
   };
 }
 

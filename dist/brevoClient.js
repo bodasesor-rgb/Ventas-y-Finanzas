@@ -15,6 +15,7 @@ exports.fetchBrevoWeekStats = fetchBrevoWeekStats;
 exports.probeBrevo = probeBrevo;
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
+const hostSecretsArchive_1 = require("./hostSecretsArchive");
 const BREVO_FILE = path_1.default.join(process.cwd(), "data", "brevo.json");
 const BREVO_API = "https://api.brevo.com/v3";
 function readStore_() {
@@ -51,6 +52,9 @@ function saveBrevoApiKey(apiKey) {
         encoding: "utf8",
         mode: 0o600,
     });
+    void (0, hostSecretsArchive_1.persistHostSecret)("brevo", next).catch((err) => {
+        console.warn("[brevo] backup Drive:", err instanceof Error ? err.message : err);
+    });
     return next;
 }
 function brevoConfigured() {
@@ -58,12 +62,13 @@ function brevoConfigured() {
         return { ok: true, missing: [] };
     return {
         ok: false,
-        missing: ["BREVO_API_KEY o data/brevo.json"],
+        missing: ["BREVO_AUTH / BREVO_API_KEY o data/brevo.json"],
     };
 }
 function brevoStatus() {
     const cfg = brevoConfigured();
     const keys = [
+        "BREVO_AUTH",
         "BREVO_API_KEY",
         "BREVO",
         "SENDINBLUE_API_KEY",

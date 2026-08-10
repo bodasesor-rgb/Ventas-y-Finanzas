@@ -20,6 +20,14 @@ export declare function saveServiceAccountJson(raw: unknown): {
     client_email: string;
     path: string;
 };
+/** Igual que saveServiceAccountJson pero espera backup Drive. */
+export declare function saveServiceAccountJsonDurable(raw: unknown): Promise<{
+    ok: true;
+    client_email: string;
+    path: string;
+    driveOk: boolean;
+    driveError?: string;
+}>;
 export declare function hasGoogleCredentials(): boolean;
 /** Auth para GA4 Data API + Sheets. */
 export declare function getGoogleAuthClient(scopes: string[]): Promise<JWT | GoogleAuth>;
