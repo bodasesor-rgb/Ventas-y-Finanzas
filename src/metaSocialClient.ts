@@ -66,10 +66,11 @@ export function saveMetaTokenStore(
 }
 
 export function getMetaAccessToken(): string {
-  // Archivo primero: tras meta-setup / restore Drive debe ganar sobre FB_META vencido en env
+  // Archivo primero: tras meta-setup / restore Drive debe ganar sobre token vencido en env
   const store = readStore_();
   if (store?.access_token) return store.access_token;
   const fromEnv = (
+    process.env.FB_GRAPH ||
     process.env.FB_META ||
     process.env.META_PAGE_ACCESS_TOKEN ||
     process.env.META_ACCESS_TOKEN ||
@@ -78,7 +79,7 @@ export function getMetaAccessToken(): string {
   ).trim();
   if (fromEnv) return fromEnv;
   throw new Error(
-    "Falta token Meta: env FB_META / META_PAGE_ACCESS_TOKEN o POST /api/ventas/meta-setup"
+    "Falta token Meta: env FB_GRAPH / FB_META / META_PAGE_ACCESS_TOKEN o POST /api/ventas/meta-setup"
   );
 }
 
@@ -87,7 +88,7 @@ export function metaConfigured(): { ok: boolean; missing: string[] } {
   try {
     getMetaAccessToken();
   } catch {
-    missing.push("FB_META / META_PAGE_ACCESS_TOKEN o data/meta-token.json");
+    missing.push("FB_GRAPH / FB_META / META_PAGE_ACCESS_TOKEN o data/meta-token.json");
   }
   return { ok: missing.length === 0, missing };
 }
@@ -105,6 +106,7 @@ export function metaStatus(): {
   const store = readStore_();
   const cfg = metaConfigured();
   const envKeys = [
+    "FB_GRAPH",
     "FB_META",
     "META_PAGE_ACCESS_TOKEN",
     "META_ACCESS_TOKEN",
