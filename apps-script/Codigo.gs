@@ -1,16 +1,16 @@
 /**
  * ============================================================
- * Apps Script — Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-08-10-v32
+ * Apps Script - Bodasesor Ventas / Finanzas (UN solo /exec)
+ * VERSION: 2026-08-10-v32b
  * ============================================================
  * PEGAR TODO ESTE ARCHIVO (borrar lo anterior -> pegar -> Guardar)
  *
- * REGLA v32:
+ * REGLA v32b: sintaxis limpia para pegar en Apps Script
  *   - saveHostSecret / getHostSecret: SA+Meta sobreviven deploys Hostinger
  *   - v31: upsertMetricasVisitas: llena Visitas (GA4) por semana
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-08-10-v32';
+var SCRIPT_VERSION = '2026-08-10-v32b';
 /** Hostinger: tick cada minuto para que los cierres suban al Sheet al momento. */
 var VENTAS_TICK_URL =
   'https://lightcyan-reindeer-284498.hostingersite.com/api/ventas/tick';
@@ -37,7 +37,7 @@ var SEMANA_CIERRE_COL = 21; // U
 var MAX_CLIENT_SCAN = 500;
 var MAX_WEEKS = 53;
 
-// A–J + P–R + T (no toca K Costo, L Pagado, M/N/O fórmulas, S IVA)
+// A-J + P-R + T (no toca K Costo, L Pagado, M/N/O fórmulas, S IVA)
 var WRITE_COLS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 16, 17, 18, 20];
 
 var EVENTOS_HEADERS = [
@@ -103,7 +103,7 @@ function json_(obj) {
   );
 }
 
-/** 1→A, 2→B, … 27→AA */
+/** 1->A, 2->B, ... 27->AA */
 function columnToLetter_(col) {
   var n = Number(col);
   var s = '';
@@ -371,7 +371,7 @@ function applyCalcFormulas_(sheet, row) {
       '=IF(OR(J' + row + '="",J' + row + '=0),"",N' + row + '/J' + row + ')'
     );
   sheet.getRange(row, 15).setNumberFormat('0.00%');
-  // U Semana cierre (lunes=inicio, tipo 2) — alimenta resumen semanal
+  // U Semana cierre (lunes=inicio, tipo 2) - alimenta resumen semanal
   sheet
     .getRange(row, SEMANA_CIERRE_COL)
     .setFormula(
@@ -516,9 +516,9 @@ function upsertBanco_(data) {
     spreadsheetUrl: info.spreadsheetUrl,
     existingSheets: info.existingSheets,
     message:
-      'Enviado a Sheet «' +
+      'Enviado a Sheet "' +
       info.spreadsheetName +
-      '» → pestaña ' +
+      '" -> pestaña ' +
       ER_SHEET +
       ' (col ' +
       erCol +
@@ -551,7 +551,7 @@ function bringEstadoResultadosFront_(ss) {
 
 /**
  * Filas fijas del Estado de Resultados (igual que la web).
- * Columna del mes: B=enero … M=diciembre, N=TOTAL.
+ * Columna del mes: B=enero ... M=diciembre, N=TOTAL.
  * No cambiar sin bump de ER_MARKER.
  */
 var ER_ROW = {
@@ -603,7 +603,7 @@ function ensureEstadoResultadosLayout_(ss) {
 }
 
 /**
- * Pestaña Estado de Resultados YYYY — misma estructura que la web.
+ * Pestaña Estado de Resultados YYYY - misma estructura que la web.
  * Al Enviar se pega la columna del mes. Metricas no se toca.
  */
 function setupEstadoResultados_(ss) {
@@ -626,12 +626,12 @@ function setupEstadoResultados_(ss) {
     'diciembre',
   ];
 
-  sh.getRange('A1').setValue('ESTADO DE RESULTADOS · ' + YEAR + ' · Bodasesor');
+  sh.getRange('A1').setValue('ESTADO DE RESULTADOS - ' + YEAR + ' - Bodasesor');
   sh.getRange('A1').setFontWeight('bold').setFontSize(16);
-  sh.getRange('A2').setValue(ER_MARKER + ' · ' + SCRIPT_VERSION);
+  sh.getRange('A2').setValue(ER_MARKER + ' - ' + SCRIPT_VERSION);
   sh.getRange('A2').setFontColor('#666666');
   sh.getRange('A3').setValue(
-    'Esta es la pestaña principal. Se llena desde /pnl/ → Enviar. ' +
+    'Esta es la pestaña principal. Se llena desde /pnl/ -> Enviar. ' +
       'Banco queda oculto (respaldo). Metricas no se toca.'
   );
 
@@ -689,7 +689,7 @@ function setupEstadoResultados_(ss) {
     sh.getRange(row, 14).setNumberFormat('0.0%');
   }
 
-  // —— Ingreso ——
+  // -- Ingreso --
   section_(ER_ROW.ingresoHeader, 'Ingreso', '#d8f3dc');
   zeros_(ER_ROW.intereses, 'Intereses');
   zeros_(ER_ROW.venta, 'Venta / anticipo');
@@ -706,7 +706,7 @@ function setupEstadoResultados_(ss) {
     '#b7e4c7'
   );
 
-  // —— Egreso ——
+  // -- Egreso --
   section_(ER_ROW.egresoHeader, 'Egreso', '#fde2e1');
   zeros_(ER_ROW.proveedor, 'Proveedores');
   zeros_(ER_ROW.evento, 'Costo de evento');
@@ -726,7 +726,7 @@ function setupEstadoResultados_(ss) {
   diffRow_(ER_ROW.bruto, 'Ingreso Bruto', ER_ROW.totalIngreso, ER_ROW.totalEgreso, '#fff3bf');
   marginRow_(ER_ROW.margenB, 'Margen', ER_ROW.bruto, ER_ROW.totalIngreso);
 
-  // —— Gastos ——
+  // -- Gastos --
   section_(ER_ROW.gastosHeader, 'Gastos', '#e7f5ff');
   zeros_(ER_ROW.marketing, 'Marketing');
   zeros_(ER_ROW.rh, 'RH');
@@ -751,7 +751,7 @@ function setupEstadoResultados_(ss) {
   sh.getRange(ER_ROW.capital, 1, 1, 14).setBackground('#f3f0ff');
 
   sh.getRange(44, 1).setValue(
-    'PDF → /pnl/ → Enviar → se pega la columna del mes aquí. ' +
+    'PDF -> /pnl/ -> Enviar -> se pega la columna del mes aquí. ' +
       'Regenerar layout: restoreEstadoResultados_. Metricas intacta.'
   );
   sh.getRange(44, 1).setFontColor('#555555');
@@ -775,7 +775,7 @@ function setupEstadoResultados_(ss) {
 }
 
 /**
- * Pega en Estado de Resultados los montos del mes (columna B…M).
+ * Pega en Estado de Resultados los montos del mes (columna B...M).
  */
 function pasteMonthToEstadoResultados_(ss, month, by, totals) {
   var sh = ensureEstadoResultadosLayout_(ss);
@@ -847,7 +847,7 @@ function restoreEstadoResultados_() {
   } catch (e) {}
   setupEstadoResultados_(ss);
   var msg =
-    'Estado de Resultados listo — ' +
+    'Estado de Resultados listo - ' +
     SCRIPT_VERSION +
     '\n\nPestaña visible: ' +
     ER_SHEET +
@@ -879,13 +879,13 @@ function ensurePnLLayout_(ss) {
 }
 
 /**
- * Pega en P&L los resultados del mes en su columna (B=ene … M=dic).
- * Filas manuales (Intereses, Catering…, Impuestos) no se pisan.
+ * Pega en P&L los resultados del mes en su columna (B=ene ... M=dic).
+ * Filas manuales (Intereses, Catering..., Impuestos) no se pisan.
  * TOTAL / Bruto / Margen / Neto siguen siendo fórmulas.
  */
 function pasteMonthToPnL_(ss, month, by, totals) {
   var sh = ensurePnLLayout_(ss);
-  var col = Number(month) + 1; // mes 1 → col B (2)
+  var col = Number(month) + 1; // mes 1 -> col B (2)
   if (col < 2 || col > 13) return null;
 
   function abs_(n) {
@@ -1205,16 +1205,18 @@ function saveHostSecret_(data) {
       error: 'saveHostSecret: falta json / jsonBase64',
     });
   }
-  var payload =
-    data.jsonBase64 != null
-      ? Utilities.newBlob(
-          Utilities.base64Decode(String(data.jsonBase64)),
-          'application/json',
-          hostSecretFileName_(secretKey)
-        ).getDataAsString()
-      : typeof data.json === 'string'
-        ? data.json
-        : JSON.stringify(data.json);
+  var payload;
+  if (data.jsonBase64 != null) {
+    payload = Utilities.newBlob(
+      Utilities.base64Decode(String(data.jsonBase64)),
+      'application/json',
+      hostSecretFileName_(secretKey)
+    ).getDataAsString();
+  } else if (typeof data.json === 'string') {
+    payload = data.json;
+  } else {
+    payload = JSON.stringify(data.json);
+  }
   var folder = getArchiveFolder_();
   var name = hostSecretFileName_(secretKey);
   removeFilesNamedInFolder_(folder, name);
@@ -1329,9 +1331,9 @@ function doPost(e) {
         spreadsheetUrl: infoEr.spreadsheetUrl,
         existingSheets: infoEr.existingSheets,
         message:
-          'Pestaña creada en «' +
+          'Pestaña creada en "' +
           infoEr.spreadsheetName +
-          '»: ' +
+          '": ' +
           ER_SHEET +
           '. Ábrela abajo o con el link del Sheet.',
       });
@@ -1450,7 +1452,7 @@ function doPost(e) {
     var fingerprint = eventFingerprintFromValues_(values);
 
     if (existingRow !== -1) {
-      // Mismo Kommo Deal ID → actualizar esa fila (no es cliente nuevo)
+      // Mismo Kommo Deal ID -> actualizar esa fila (no es cliente nuevo)
       rowIndex = existingRow;
       writeRowValues_(sheet, rowIndex, values);
       action = 'updated';
@@ -1525,14 +1527,14 @@ function doPost(e) {
 /* ===================== SETUP (Metricas + P&L bien) ===================== */
 
 /**
- * OBLIGATORIO UNA VEZ: authorizeDrive_ → ▶ Ejecutar → Aceptar Drive.
+ * OBLIGATORIO UNA VEZ: authorizeDrive_ -> ▶ Ejecutar -> Aceptar Drive.
  * Sin esto, saveStatementArchive falla y el panel no guarda PDFs.
  */
 function authorizeDrive_() {
   var folder = getArchiveFolder_();
   var sh = ensureArchiveSheet_();
   var msg =
-    'Drive OK — ' +
+    'Drive OK - ' +
     SCRIPT_VERSION +
     '\n\nCarpeta: ' +
     ARCHIVE_FOLDER_NAME +
@@ -1544,7 +1546,7 @@ function authorizeDrive_() {
     ARCHIVE_SHEET +
     ' (filas: ' +
     sh.getLastRow() +
-    ')\n\nAhora: setupAll_ (si falta) → Administrar implementaciones → Nueva versión.';
+    ')\n\nAhora: setupAll_ (si falta) -> Administrar implementaciones -> Nueva versión.';
   try {
     SpreadsheetApp.getUi().alert(msg);
   } catch (err) {
@@ -1554,14 +1556,14 @@ function authorizeDrive_() {
 }
 
 /**
- * EJECUTAR DESDE EL EDITOR: selecciona setupAll_ → ▶ Ejecutar
+ * EJECUTAR DESDE EL EDITOR: selecciona setupAll_ -> ▶ Ejecutar
  * Crea/arregla Eventos, P&L banco, Banco, Archive. NO toca Metricas.
  * NO borra clientes ni Costo/Pagado manuales.
  */
 function setupAll_() {
   setupAllSilent_();
   var msg =
-    'Setup OK — ' +
+    'Setup OK - ' +
     SCRIPT_VERSION +
     '\n\n' +
     '✓ ' +
@@ -1577,11 +1579,11 @@ function setupAll_() {
     ARCHIVE_SHEET +
     ' + Drive\n\n' +
     'Metricas original NO se tocó.\n' +
-    'Copia + semanal: restoreMetricasSemanal_ → «' +
+    'Copia + semanal: restoreMetricasSemanal_ -> "' +
     METRICAS_AUTO_SHEET +
-    '»\n' +
+    '"\n' +
     'ER: restoreEstadoResultados_\n\n' +
-    'Siguiente: Nueva versión → Implementar';
+    'Siguiente: Nueva versión -> Implementar';
   try {
     SpreadsheetApp.getUi().alert(msg);
   } catch (err) {
@@ -1599,7 +1601,7 @@ function setupAllSilent_() {
   try {
     getArchiveFolder_();
   } catch (err) {}
-  // Estado de Resultados + P&L — NUNCA pisa Metricas A:L
+  // Estado de Resultados + P&L - NUNCA pisa Metricas A:L
   setupEstadoResultados_(ss);
   setupPnL_(ss);
   ensureAnalisisSheet_(ss, YEAR);
@@ -1904,7 +1906,7 @@ function detectMetricasWeekLayout_(sh) {
  * que estaban a la derecha). No-op a proposito.
  */
 function clearOldBotWeekBlock_(sh) {
-  // Intencionalmente vacio — no borrar N:U ni ningun bloque.
+  // Intencionalmente vacio - no borrar N:U ni ningun bloque.
 }
 
 /**
@@ -2551,22 +2553,22 @@ function debugMetricasEvento_(data) {
 }
 
 /**
- * Metricas YYYY — CICLO ANUAL (ventas + banco).
+ * Metricas YYYY - CICLO ANUAL (ventas + banco).
  * El bot NO la llama en setupAll_ ni al enviar banco.
  * Solo existe por si algún día quieres regenerarla a mano (no recomendado).
  */
 function setupMetricas_(ss) {
   var sh = ss.getSheetByName(METRICAS_SHEET);
   if (!sh) sh = ss.insertSheet(METRICAS_SHEET);
-  // Zona gestionada A1:L50 — se limpia SOLO aquí, a propósito, al restaurar
+  // Zona gestionada A1:L50 - se limpia SOLO aquí, a propósito, al restaurar
   sh.getRange('A1:L50').clear();
 
-  sh.getRange('A1').setValue('Metricas ' + YEAR + ' — Ciclo anual Bodasesor');
+  sh.getRange('A1').setValue('Metricas ' + YEAR + ' - Ciclo anual Bodasesor');
   sh.getRange('A1').setFontWeight('bold').setFontSize(16);
-  sh.getRange('A2').setValue(METRICAS_MARKER + ' · ' + SCRIPT_VERSION);
+  sh.getRange('A2').setValue(METRICAS_MARKER + ' - ' + SCRIPT_VERSION);
   sh.getRange('A2').setFontColor('#666666');
   sh.getRange('B2').setValue(
-    'Ventas ← Eventos · Banco ← pestaña Banco · Socios/Proveedores ← cols Z/AA Banco'
+    'Ventas ← Eventos - Banco ← pestaña Banco - Socios/Proveedores ← cols Z/AA Banco'
   );
 
   // ===== KPIs ANUALES (ciclo) =====
@@ -2592,7 +2594,7 @@ function setupMetricas_(ss) {
   sh.getRange('A5:L5').setFontWeight('bold');
   sh.getRange('A5:L5').setBackground('#e8f0ee');
 
-  // KPIs (fórmulas finales se fijan al final del layout → filas 38 y 54)
+  // KPIs (fórmulas finales se fijan al final del layout -> filas 38 y 54)
   sh.getRange('A6:L6').setFontWeight('bold').setFontSize(12);
 
   // ===== CICLO MENSUAL (todo junto) =====
@@ -2738,7 +2740,7 @@ function setupMetricas_(ss) {
   sh.getRange(54, 6).setFormula('=SUM(F42:F53)');
   sh.getRange('B42:F54').setNumberFormat('$#,##0.00');
 
-  // KPIs anuales (arriba) → totales de detalle
+  // KPIs anuales (arriba) -> totales de detalle
   sh.getRange('A6').setFormula('=D38');
   sh.getRange('B6').setFormula('=B38');
   sh.getRange('C6').setFormula('=C38');
@@ -2766,7 +2768,7 @@ function setupMetricas_(ss) {
 }
 
 /**
- * P&L YYYY — columnas = meses (B=enero … M=diciembre, N=TOTAL).
+ * P&L YYYY - columnas = meses (B=enero ... M=diciembre, N=TOTAL).
  * Al "Enviar al P&L" se PEGAN los resultados en la columna del mes.
  * TOTAL / Ingreso Bruto / Margen / Ingreso Neto = fórmulas.
  * No toca Metricas.
@@ -2776,7 +2778,7 @@ function setupMetricas_(ss) {
  *   Egreso:  proveedores (17), costo evento (18)
  *   Gastos:  Marketing/ads (30), RH/pagos (31), Programas (32), Otros (34)
  *   Banco (40), CAPITAL/socios (41)
- * Filas en 0 = manuales (Intereses, Catering…, Impuestos, Banquete…)
+ * Filas en 0 = manuales (Intereses, Catering..., Impuestos, Banquete...)
  */
 function setupPnL_(ss) {
   var sh = ss.getSheetByName(PL_SHEET);
@@ -2798,9 +2800,9 @@ function setupPnL_(ss) {
     'diciembre',
   ];
 
-  sh.getRange('A1').setValue('P&L ' + YEAR + ' · Bodasesor');
+  sh.getRange('A1').setValue('P&L ' + YEAR + ' - Bodasesor');
   sh.getRange('A1').setFontWeight('bold').setFontSize(16);
-  sh.getRange('A2').setValue(PNL_MARKER + ' · ' + SCRIPT_VERSION);
+  sh.getRange('A2').setValue(PNL_MARKER + ' - ' + SCRIPT_VERSION);
   sh.getRange('A2').setFontColor('#666666');
   sh.getRange('A3').setValue(
     'Columnas = meses. Al Enviar al P&L desde /pnl/ se pegan los resultados en esa columna. Metricas no se toca.'
@@ -2858,7 +2860,7 @@ function setupPnL_(ss) {
     sh.getRange(row, 14).setNumberFormat('0.0%');
   }
 
-  // —— INGRESO ——
+  // -- INGRESO --
   sectionHeader_(6, 'Ingreso', '#d8f3dc');
   fillZero_(7, 'Intereses'); // manual
   fillZero_(8, 'Venta / anticipo'); // pegado desde web
@@ -2869,7 +2871,7 @@ function setupPnL_(ss) {
   fillZero_(13, 'Shows');
   fillSumRows_(14, 'TOTAL', 7, 13, '#b7e4c7');
 
-  // —— EGRESO ——
+  // -- EGRESO --
   sectionHeader_(16, 'Egreso', '#fde2e1');
   fillZero_(17, 'Proveedores'); // pegado
   fillZero_(18, 'Costo de evento'); // pegado
@@ -2880,11 +2882,11 @@ function setupPnL_(ss) {
   fillZero_(23, 'Shows');
   fillSumRows_(24, 'TOTAL', 17, 23, '#f8b4b4');
 
-  // —— Ingreso Bruto / Margen ——
+  // -- Ingreso Bruto / Margen --
   fillDiff_(26, 'Ingreso Bruto', 14, 24, '#fff3bf');
   fillMargin_(27, 'Margen', 26, 14);
 
-  // —— GASTOS ——
+  // -- GASTOS --
   sectionHeader_(29, 'Gastos', '#e7f5ff');
   fillZero_(30, 'Marketing'); // ads
   fillZero_(31, 'RH'); // pagos
@@ -2893,11 +2895,11 @@ function setupPnL_(ss) {
   fillZero_(34, 'Otros');
   fillSumRows_(35, 'TOTAL', 30, 34, '#a5d8ff');
 
-  // —— Ingreso Neto / Margen ——
+  // -- Ingreso Neto / Margen --
   fillDiff_(37, 'Ingreso Neto', 26, 35, '#d0bfff');
   fillMargin_(38, 'Margen', 37, 14);
 
-  // —— Banco / CAPITAL ——
+  // -- Banco / CAPITAL --
   fillZero_(40, 'Banco');
   sh.getRange(40, 1, 1, 14).setBackground('#f3f0ff');
   fillZero_(41, 'CAPITAL');
@@ -2909,7 +2911,7 @@ function setupPnL_(ss) {
   sh.getRange(43, 2).setValue(30000);
   sh.getRange(43, 2).setNumberFormat('$#,##0.00');
   sh.getRange(44, 1).setValue(
-    'Al Enviar al P&L se pega la columna del mes (B=enero…M=diciembre). ' +
+    'Al Enviar al P&L se pega la columna del mes (B=enero...M=diciembre). ' +
       'TOTAL/Bruto/Neto/Margen son fórmulas. Filas manuales no se pisan. ' +
       'Regenerar layout: restorePnLBanco_. Metricas intacta.'
   );
@@ -2977,17 +2979,17 @@ function upsertAnalisis_(data) {
   var sheetName = 'Analisis ' + year;
   sh.clear();
 
-  sh.getRange('A1').setValue('Analisis ' + year + ' — Bodasesor (banco)');
+  sh.getRange('A1').setValue('Analisis ' + year + ' - Bodasesor (banco)');
   sh.getRange('A1').setFontWeight('bold').setFontSize(14);
   sh.getRange('A2').setValue(
-    'Socios: Luis Alejandro Sanchez Campbell · Alejandro Zorrilla Elorza. Resto de traspasos con beneficiario = Proveedor.'
+    'Socios: Luis Alejandro Sanchez Campbell - Alejandro Zorrilla Elorza. Resto de traspasos con beneficiario = Proveedor.'
   );
   sh.getRange('A3').setValue(
     'Actualizado: ' +
       new Date() +
-      ' · Meses: ' +
+      ' - Meses: ' +
       ((a.monthsPresent || []).join(', ') || '(sin datos)') +
-      ' · Runs: ' +
+      ' - Runs: ' +
       (a.runsCount || 0)
   );
 
