@@ -67,6 +67,8 @@ export interface EventosSheetIndex {
 }
 
 let cache: EventosSheetIndex | null = null;
+/** Filas crudas A..T del último fetch, para leer fechas y datos del evento. */
+let cacheRows: string[][] = [];
 const CACHE_TTL_MS = 45_000;
 
 /**
@@ -99,6 +101,7 @@ export async function loadEventosSheetIndex(
   const rows = parseCsv_(text);
   const byFingerprint: Record<string, string> = {};
   const byDealId: Record<string, number> = {};
+  const rawRows: string[][] = [];
 
   // fila 0 = header
   for (let i = 1; i < rows.length; i++) {
@@ -108,6 +111,7 @@ export async function loadEventosSheetIndex(
     if (!cliente) continue;
     const dealId = String(r[19] || "").trim();
     const values = r.slice(0, 20);
+    rawRows[i + 1] = values;
     const fp = eventFingerprintFromValues(values);
     if (fp && fp !== "||||") {
       // conservar el primer dealId visto para esa huella
@@ -123,7 +127,110 @@ export async function loadEventosSheetIndex(
     fetchedAt: Date.now(),
     rowCount: Object.keys(byFingerprint).length,
   };
+  cacheRows = rawRows;
   return cache;
+}
+
+export interface EventoSheetRow {
+  row: number;
+  dealId: string;
+  cliente: string;
+  fechaDelEvento: string;
+  tipoDeEvento: string;
+  invitados: string;
+  direccionDeEvento: string;
+  horario: string;
+}
+
+/**
+ * El Sheet muestra las fechas como dd/mm/yyyy, pero gviz a veces las devuelve
+ * como Date(2026,9,9) o con un solo dígito.
+ */
+function normalizeSheetFecha_(raw: string): string {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  const gviz = s.match(/^Date\((\d{4}),(\d{1,2}),(\d{1,2})/);
+  if (gviz) {
+    const dd = String(Number(gviz[3])).padStart(2, "0");
+    const mm = String(Number(gviz[2]) + 1).padStart(2, "0");
+    return `${dd}/${mm}/${gviz[1]}`;
+  }
+  const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (dmy) {
+    return `${dmy[1].padStart(2, "0")}/${dmy[2].padStart(2, "0")}/${dmy[3]}`;
+  }
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+  return "";
+}
+
+function rowToEvento_(values: string[], row: number): EventoSheetRow {
+  return {
+    row,
+    dealId: String(values[19] || "").trim(),
+    cliente: String(values[0] || "").trim(),
+    fechaDelEvento: normalizeSheetFecha_(values[1]),
+    tipoDeEvento: String(values[5] || "").trim(),
+    invitados: String(values[6] || "").trim(),
+    direccionDeEvento: String(values[7] || "").trim(),
+    horario: String(values[8] || "").trim(),
+  };
+}
+
+/** Datos del evento tal como están en el Sheet (donde se corrigen a mano). */
+export async function findEventoInSheet(
+  dealId: string,
+  year?: number
+): Promise<EventoSheetRow | null> {
+  const id = String(dealId || "").trim();
+  if (!id) return null;
+  try {
+    const idx = await loadEventosSheetIndex(year);
+    const row = idx.byDealId[id];
+    if (!row || !cacheRows[row]) return null;
+    return rowToEvento_(cacheRows[row], row);
+  } catch (err) {
+    console.warn(
+      "[ventas-sheet] no se pudo leer el evento del Sheet",
+      err instanceof Error ? err.message : err
+    );
+    return null;
+  }
+}
+
+/**
+ * Filas con fecha de evento de hoy en adelante. Es la fuente correcta para
+ * los recordatorios: Kommo ordena mal los cierres y muchas fechas solo
+ * existen en el Sheet.
+ */
+export async function loadEventosProximos(
+  year?: number
+): Promise<EventoSheetRow[]> {
+  await loadEventosSheetIndex(year, true);
+  const hoy = new Date();
+  const desde = Date.UTC(
+    hoy.getUTCFullYear(),
+    hoy.getUTCMonth(),
+    hoy.getUTCDate()
+  );
+  const out: EventoSheetRow[] = [];
+  for (let row = 0; row < cacheRows.length; row++) {
+    const values = cacheRows[row];
+    if (!values) continue;
+    const evento = rowToEvento_(values, row);
+    if (!evento.cliente || !evento.fechaDelEvento) continue;
+    const m = evento.fechaDelEvento.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (!m) continue;
+    const when = Date.UTC(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+    if (when < desde) continue;
+    out.push(evento);
+  }
+  out.sort((a, b) => {
+    const pa = a.fechaDelEvento.split("/").reverse().join("");
+    const pb = b.fechaDelEvento.split("/").reverse().join("");
+    return pa.localeCompare(pb);
+  });
+  return out;
 }
 
 /** Busca en el Sheet real si ya existe la misma huella con otro deal. */

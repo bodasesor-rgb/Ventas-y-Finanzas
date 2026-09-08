@@ -9,6 +9,7 @@
  * dentro de Kommo sin salir del CRM.
  */
 import { kommoGetJson_ } from "./kommoApi";
+import { findEventoInSheet } from "./sheetEventosReader";
 import type { FilaVentas, KommoLead } from "./types";
 
 const MX_TZ = "America/Mexico_City";
@@ -23,6 +24,9 @@ export interface KommoTaskResult {
   ok: boolean;
   dealId: string;
   skipped?: string;
+  /** "kommo" o "sheet": de dónde salió la fecha del evento. */
+  fechaSource?: string;
+  fechaDelEvento?: string;
   created: Array<{ kind: ReminderKind; completeTill: string; text: string }>;
   alreadyThere: ReminderKind[];
   tooLate: ReminderKind[];
@@ -144,6 +148,26 @@ export async function ensureEventReminderTasks(
     alreadyThere: [],
     tooLate: [],
   };
+
+  // Kommo suele traer la fecha vacía o como "viernes"; el Sheet es donde se
+  // corrige a mano, así que ahí buscamos antes de rendirnos.
+  let fechaSource = "kommo";
+  if (!fila.fechaDelEvento) {
+    const enSheet = await findEventoInSheet(dealId);
+    if (enSheet?.fechaDelEvento) {
+      fechaSource = "sheet";
+      fila = {
+        ...fila,
+        fechaDelEvento: enSheet.fechaDelEvento,
+        tipoDeEvento: fila.tipoDeEvento || enSheet.tipoDeEvento,
+        invitados: fila.invitados || enSheet.invitados,
+        direccionDeEvento: fila.direccionDeEvento || enSheet.direccionDeEvento,
+        horario: fila.horario || enSheet.horario,
+      };
+    }
+  }
+  base.fechaSource = fechaSource;
+  base.fechaDelEvento = fila.fechaDelEvento;
 
   if (!fila.fechaDelEvento) {
     return { ...base, skipped: "sin_fecha_evento" };

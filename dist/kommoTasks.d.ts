@@ -4,6 +4,9 @@ export interface KommoTaskResult {
     ok: boolean;
     dealId: string;
     skipped?: string;
+    /** "kommo" o "sheet": de dónde salió la fecha del evento. */
+    fechaSource?: string;
+    fechaDelEvento?: string;
     created: Array<{
         kind: ReminderKind;
         completeTill: string;

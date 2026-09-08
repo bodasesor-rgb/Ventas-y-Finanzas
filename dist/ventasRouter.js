@@ -956,22 +956,52 @@ const handleKommoTasks = async (req, res) => {
 };
 exports.ventasRouter.post("/api/ventas/kommo-tasks/:dealId", handleKommoTasks);
 exports.ventasRouter.get("/api/ventas/kommo-tasks/:dealId", handleKommoTasks);
-/** Crea los recordatorios que falten para todos los cierres recientes. */
-const handleKommoTasksBackfill = async (req, res) => {
-    const days = Math.min(Math.max(Number(req.query.days) || 90, 1), 365);
+/**
+ * Crea los recordatorios que falten para los eventos futuros del Sheet.
+ * Se parte del Sheet y no de los cierres de Kommo: Kommo ignora
+ * order[closed_at]=desc (devuelve los más viejos de la ventana) y muchas
+ * fechas de evento solo existen en el Sheet porque se corrigen a mano.
+ */
+const handleKommoTasksBackfill = async (_req, res) => {
     try {
-        const leads = await (0, kommoApi_1.fetchRecentlyClosedLeads)(50, days * 24 * 60 * 60000);
-        const won = leads.filter(pollClosedDeals_1.isClosedWonLead);
+        const proximos = await (0, sheetEventosReader_1.loadEventosProximos)();
         const items = [];
-        for (const lead of won) {
-            const fila = (0, mapDealToFila_1.mapDealToFilaVentas)(lead);
-            items.push({
-                cliente: fila.cliente,
-                fechaDelEvento: fila.fechaDelEvento,
-                ...(await (0, kommoTasks_1.ensureEventReminderTasks)(lead, fila)),
-            });
+        for (const evento of proximos) {
+            if (!evento.dealId) {
+                items.push({
+                    row: evento.row,
+                    cliente: evento.cliente,
+                    fechaDelEvento: evento.fechaDelEvento,
+                    ok: true,
+                    skipped: "fila_sin_kommo_deal_id",
+                });
+                continue;
+            }
+            try {
+                const lead = await (0, kommoApi_1.fetchLeadWithContact)(Number(evento.dealId));
+                const fila = (0, mapDealToFila_1.mapDealToFilaVentas)(lead);
+                items.push({
+                    row: evento.row,
+                    cliente: evento.cliente,
+                    ...(await (0, kommoTasks_1.ensureEventReminderTasks)(lead, fila)),
+                });
+            }
+            catch (leadErr) {
+                items.push({
+                    row: evento.row,
+                    cliente: evento.cliente,
+                    dealId: evento.dealId,
+                    ok: false,
+                    error: leadErr instanceof Error ? leadErr.message : String(leadErr),
+                });
+            }
         }
-        res.status(200).json({ ok: true, days, count: items.length, items });
+        res.status(200).json({
+            ok: true,
+            eventosFuturos: proximos.length,
+            count: items.length,
+            items,
+        });
     }
     catch (err) {
         res.status(502).json({

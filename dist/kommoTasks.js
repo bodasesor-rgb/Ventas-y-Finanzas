@@ -13,6 +13,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.mxUnixAt_ = mxUnixAt_;
 exports.ensureEventReminderTasks = ensureEventReminderTasks;
 const kommoApi_1 = require("./kommoApi");
+const sheetEventosReader_1 = require("./sheetEventosReader");
 const MX_TZ = "America/Mexico_City";
 /** Hora local a la que vence el recordatorio. */
 const REMINDER_HOUR = 9;
@@ -112,6 +113,25 @@ async function ensureEventReminderTasks(lead, fila) {
         alreadyThere: [],
         tooLate: [],
     };
+    // Kommo suele traer la fecha vacía o como "viernes"; el Sheet es donde se
+    // corrige a mano, así que ahí buscamos antes de rendirnos.
+    let fechaSource = "kommo";
+    if (!fila.fechaDelEvento) {
+        const enSheet = await (0, sheetEventosReader_1.findEventoInSheet)(dealId);
+        if (enSheet?.fechaDelEvento) {
+            fechaSource = "sheet";
+            fila = {
+                ...fila,
+                fechaDelEvento: enSheet.fechaDelEvento,
+                tipoDeEvento: fila.tipoDeEvento || enSheet.tipoDeEvento,
+                invitados: fila.invitados || enSheet.invitados,
+                direccionDeEvento: fila.direccionDeEvento || enSheet.direccionDeEvento,
+                horario: fila.horario || enSheet.horario,
+            };
+        }
+    }
+    base.fechaSource = fechaSource;
+    base.fechaDelEvento = fila.fechaDelEvento;
     if (!fila.fechaDelEvento) {
         return { ...base, skipped: "sin_fecha_evento" };
     }
