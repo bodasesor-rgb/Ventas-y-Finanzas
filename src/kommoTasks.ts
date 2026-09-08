@@ -8,8 +8,9 @@
  * Google Calendar lleva el evento en sí; esto es para que el equipo lo vea
  * dentro de Kommo sin salir del CRM.
  */
-import { kommoGetJson_ } from "./kommoApi";
-import { findEventoInSheet } from "./sheetEventosReader";
+import { fetchLeadWithContact, kommoGetJson_ } from "./kommoApi";
+import { mapDealToFilaVentas } from "./mapDealToFila";
+import { findEventoInSheet, loadEventosProximos } from "./sheetEventosReader";
 import type { FilaVentas, KommoLead } from "./types";
 
 const MX_TZ = "America/Mexico_City";
@@ -237,4 +238,56 @@ export async function ensureEventReminderTasks(
     };
   }
   return base;
+}
+
+export interface BackfillResult {
+  eventosFuturos: number;
+  creadas: number;
+  items: Array<Record<string, unknown>>;
+}
+
+/**
+ * Repasa los eventos futuros del Sheet y crea las tareas que falten.
+ *
+ * Se parte del Sheet y no de los cierres de Kommo por dos razones: Kommo
+ * ignora order[closed_at]=desc (devuelve los más viejos de la ventana) y
+ * muchas fechas de evento solo existen en el Sheet porque se corrigen a mano.
+ *
+ * Es el reintento que hace que una caída de la API de Kommo durante el cierre
+ * no deje al evento sin recordatorio para siempre.
+ */
+export async function backfillEventReminderTasks(): Promise<BackfillResult> {
+  const proximos = await loadEventosProximos();
+  const items: Array<Record<string, unknown>> = [];
+  let creadas = 0;
+
+  for (const evento of proximos) {
+    if (!evento.dealId) {
+      items.push({
+        row: evento.row,
+        cliente: evento.cliente,
+        fechaDelEvento: evento.fechaDelEvento,
+        ok: true,
+        skipped: "fila_sin_kommo_deal_id",
+      });
+      continue;
+    }
+    try {
+      const lead = await fetchLeadWithContact(Number(evento.dealId));
+      const fila = mapDealToFilaVentas(lead);
+      const res = await ensureEventReminderTasks(lead, fila);
+      creadas += res.created.length;
+      items.push({ row: evento.row, cliente: evento.cliente, ...res });
+    } catch (leadErr) {
+      items.push({
+        row: evento.row,
+        cliente: evento.cliente,
+        dealId: evento.dealId,
+        ok: false,
+        error: leadErr instanceof Error ? leadErr.message : String(leadErr),
+      });
+    }
+  }
+
+  return { eventosFuturos: proximos.length, creadas, items };
 }

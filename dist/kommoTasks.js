@@ -12,7 +12,9 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.mxUnixAt_ = mxUnixAt_;
 exports.ensureEventReminderTasks = ensureEventReminderTasks;
+exports.backfillEventReminderTasks = backfillEventReminderTasks;
 const kommoApi_1 = require("./kommoApi");
+const mapDealToFila_1 = require("./mapDealToFila");
 const sheetEventosReader_1 = require("./sheetEventosReader");
 const MX_TZ = "America/Mexico_City";
 /** Hora local a la que vence el recordatorio. */
@@ -198,4 +200,48 @@ async function ensureEventReminderTasks(lead, fila) {
         };
     }
     return base;
+}
+/**
+ * Repasa los eventos futuros del Sheet y crea las tareas que falten.
+ *
+ * Se parte del Sheet y no de los cierres de Kommo por dos razones: Kommo
+ * ignora order[closed_at]=desc (devuelve los más viejos de la ventana) y
+ * muchas fechas de evento solo existen en el Sheet porque se corrigen a mano.
+ *
+ * Es el reintento que hace que una caída de la API de Kommo durante el cierre
+ * no deje al evento sin recordatorio para siempre.
+ */
+async function backfillEventReminderTasks() {
+    const proximos = await (0, sheetEventosReader_1.loadEventosProximos)();
+    const items = [];
+    let creadas = 0;
+    for (const evento of proximos) {
+        if (!evento.dealId) {
+            items.push({
+                row: evento.row,
+                cliente: evento.cliente,
+                fechaDelEvento: evento.fechaDelEvento,
+                ok: true,
+                skipped: "fila_sin_kommo_deal_id",
+            });
+            continue;
+        }
+        try {
+            const lead = await (0, kommoApi_1.fetchLeadWithContact)(Number(evento.dealId));
+            const fila = (0, mapDealToFila_1.mapDealToFilaVentas)(lead);
+            const res = await ensureEventReminderTasks(lead, fila);
+            creadas += res.created.length;
+            items.push({ row: evento.row, cliente: evento.cliente, ...res });
+        }
+        catch (leadErr) {
+            items.push({
+                row: evento.row,
+                cliente: evento.cliente,
+                dealId: evento.dealId,
+                ok: false,
+                error: leadErr instanceof Error ? leadErr.message : String(leadErr),
+            });
+        }
+    }
+    return { eventosFuturos: proximos.length, creadas, items };
 }

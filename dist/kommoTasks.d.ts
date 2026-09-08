@@ -23,3 +23,14 @@ export declare function mxUnixAt_(fechaDMY: string, hour: number): number | null
  * Idempotente: relee las tareas del lead y salta las que ya tienen la marca.
  */
 export declare function ensureEventReminderTasks(lead: KommoLead, fila: FilaVentas): Promise<KommoTaskResult>;
+export interface BackfillResult {
+    eventosFuturos: number;
+    creadas: number;
+    items: Array<Record<string, unknown>>;
+}
+/**
+ * Repasa los eventos futuros del Sheet y crea las tareas que falten.
+ * Es el reintento que hace que una caída de la API de Kommo durante el cierre
+ * no deje al evento sin recordatorio para siempre.
+ */
+export declare function backfillEventReminderTasks(): Promise<BackfillResult>;

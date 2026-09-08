@@ -234,6 +234,8 @@ const FACEBOOK_ADS_TICK_EVERY_MS = 6 * 60 * 60_000;
 const GOOGLE_ADS_TICK_EVERY_MS = 6 * 60 * 60_000;
 const LEADS_WA_TICK_EVERY_MS = 6 * 60 * 60_000;
 const BREVO_TICK_EVERY_MS = 6 * 60 * 60_000;
+let lastKommoTasksTickAt = 0;
+const KOMMO_TASKS_TICK_EVERY_MS = 6 * 60 * 60_000;
 async function handleTick(_req, res) {
     try {
         const result = await (0, pollClosedDeals_1.runPollTick)();
@@ -303,6 +305,18 @@ async function handleTick(_req, res) {
                 console.warn("[tick] sync brevo", err instanceof Error ? err.message : err);
             }
         }
+        // Reintento de recordatorios: si Kommo falló justo en el cierre, aquí se
+        // recupera sin que nadie tenga que darse cuenta.
+        let kommoTasks = null;
+        if (Date.now() - lastKommoTasksTickAt > KOMMO_TASKS_TICK_EVERY_MS) {
+            lastKommoTasksTickAt = Date.now();
+            try {
+                kommoTasks = await (0, kommoTasks_1.backfillEventReminderTasks)();
+            }
+            catch (err) {
+                console.warn("[tick] backfill tareas Kommo", err instanceof Error ? err.message : err);
+            }
+        }
         res.status(200).json({
             ok: true,
             at: new Date().toISOString(),
@@ -314,6 +328,12 @@ async function handleTick(_req, res) {
             googleAds,
             leadsWa,
             brevo,
+            kommoTasks: kommoTasks
+                ? {
+                    eventosFuturos: kommoTasks.eventosFuturos,
+                    creadas: kommoTasks.creadas,
+                }
+                : null,
             message: "Tick OK — cierres faltantes de la ventana sincronizados",
         });
     }
@@ -956,52 +976,11 @@ const handleKommoTasks = async (req, res) => {
 };
 exports.ventasRouter.post("/api/ventas/kommo-tasks/:dealId", handleKommoTasks);
 exports.ventasRouter.get("/api/ventas/kommo-tasks/:dealId", handleKommoTasks);
-/**
- * Crea los recordatorios que falten para los eventos futuros del Sheet.
- * Se parte del Sheet y no de los cierres de Kommo: Kommo ignora
- * order[closed_at]=desc (devuelve los más viejos de la ventana) y muchas
- * fechas de evento solo existen en el Sheet porque se corrigen a mano.
- */
+/** Fuerza el repaso de recordatorios sin esperar al tick de cada 6h. */
 const handleKommoTasksBackfill = async (_req, res) => {
     try {
-        const proximos = await (0, sheetEventosReader_1.loadEventosProximos)();
-        const items = [];
-        for (const evento of proximos) {
-            if (!evento.dealId) {
-                items.push({
-                    row: evento.row,
-                    cliente: evento.cliente,
-                    fechaDelEvento: evento.fechaDelEvento,
-                    ok: true,
-                    skipped: "fila_sin_kommo_deal_id",
-                });
-                continue;
-            }
-            try {
-                const lead = await (0, kommoApi_1.fetchLeadWithContact)(Number(evento.dealId));
-                const fila = (0, mapDealToFila_1.mapDealToFilaVentas)(lead);
-                items.push({
-                    row: evento.row,
-                    cliente: evento.cliente,
-                    ...(await (0, kommoTasks_1.ensureEventReminderTasks)(lead, fila)),
-                });
-            }
-            catch (leadErr) {
-                items.push({
-                    row: evento.row,
-                    cliente: evento.cliente,
-                    dealId: evento.dealId,
-                    ok: false,
-                    error: leadErr instanceof Error ? leadErr.message : String(leadErr),
-                });
-            }
-        }
-        res.status(200).json({
-            ok: true,
-            eventosFuturos: proximos.length,
-            count: items.length,
-            items,
-        });
+        const result = await (0, kommoTasks_1.backfillEventReminderTasks)();
+        res.status(200).json({ ok: true, ...result });
     }
     catch (err) {
         res.status(502).json({
