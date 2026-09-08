@@ -10,10 +10,12 @@ import {
   fetchGoogleAdsGa4Daily,
   googleAdsApiConfigured,
   googleAdsGa4Configured,
+  saveGoogleAdsGa4Mode,
   googleAdsStatus,
   probeGoogleAdsApi,
   type WeekGoogleAdsMetrics,
 } from "./googleAdsClient";
+import { shouldWriteWeekCell_ } from "./metricasWeek";
 
 function pad2_(n: number): string {
   return String(n).padStart(2, "0");
@@ -275,7 +277,12 @@ export async function syncMetricasGoogleAds(opts?: {
     if (w.date.getTime() + 7 * 86400000 < lookbackStart) return false;
     const invRow = layout.values[layout.rows.inversion - 1] || [];
     const empty = isEmptyCell_(invRow[w.col - 1]);
-    return force || empty;
+    return shouldWriteWeekCell_({
+      weekStartMs: w.date.getTime(),
+      todayUtc,
+      empty,
+      force,
+    });
   });
 
   if (!targetWeeks.length) {
@@ -398,6 +405,17 @@ export async function syncMetricasGoogleAds(opts?: {
       spreadsheetId: metricasSheetId(),
       requestBody: { valueInputOption: "RAW", data },
     });
+  }
+
+  if (source === "ga4") {
+    try {
+      saveGoogleAdsGa4Mode();
+    } catch (err) {
+      console.warn(
+        "[google-ads] no pude persistir modo GA4",
+        err instanceof Error ? err.message : err
+      );
+    }
   }
 
   return {

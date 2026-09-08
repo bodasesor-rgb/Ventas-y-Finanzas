@@ -6,6 +6,7 @@ exports.googleAdsSyncStatus = googleAdsSyncStatus;
 const googleapis_1 = require("googleapis");
 const googleAuth_1 = require("./googleAuth");
 const googleAdsClient_1 = require("./googleAdsClient");
+const metricasWeek_1 = require("./metricasWeek");
 function pad2_(n) {
     return String(n).padStart(2, "0");
 }
@@ -215,7 +216,12 @@ async function syncMetricasGoogleAds(opts) {
             return false;
         const invRow = layout.values[layout.rows.inversion - 1] || [];
         const empty = isEmptyCell_(invRow[w.col - 1]);
-        return force || empty;
+        return (0, metricasWeek_1.shouldWriteWeekCell_)({
+            weekStartMs: w.date.getTime(),
+            todayUtc,
+            empty,
+            force,
+        });
     });
     if (!targetWeeks.length) {
         return {
@@ -316,6 +322,14 @@ async function syncMetricasGoogleAds(opts) {
             spreadsheetId: (0, googleAuth_1.metricasSheetId)(),
             requestBody: { valueInputOption: "RAW", data },
         });
+    }
+    if (source === "ga4") {
+        try {
+            (0, googleAdsClient_1.saveGoogleAdsGa4Mode)();
+        }
+        catch (err) {
+            console.warn("[google-ads] no pude persistir modo GA4", err instanceof Error ? err.message : err);
+        }
     }
     return {
         ok: true,

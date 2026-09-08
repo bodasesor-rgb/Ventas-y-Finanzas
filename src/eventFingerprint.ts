@@ -1,6 +1,7 @@
 /**
  * Huella de evento para no repetir filas en Eventos.
- * Misma lógica que Apps Script v30: cliente + fechas + horario + tipo.
+ * cliente + fecha evento + horario + tipo (sin fecha de cierre:
+ * si Kommo cambia closed_at no se crea otra fila).
  */
 
 function normKey_(v: unknown): string {
@@ -29,7 +30,6 @@ export function eventFingerprintFromValues(values: string[]): string {
   return [
     normKey_(values[0]),
     normFecha_(values[1]),
-    normFecha_(values[2]),
     normKey_(values[8]),
     normKey_(values[5]),
   ].join("|");
@@ -38,14 +38,13 @@ export function eventFingerprintFromValues(values: string[]): string {
 export function eventFingerprintFromFila(fila: {
   cliente: string;
   fechaDelEvento: string;
-  fechaDeCierre: string;
+  fechaDeCierre?: string;
   horario: string;
   tipoDeEvento: string;
 }): string {
   return [
     normKey_(fila.cliente),
     normFecha_(fila.fechaDelEvento),
-    normFecha_(fila.fechaDeCierre),
     normKey_(fila.horario),
     normKey_(fila.tipoDeEvento),
   ].join("|");

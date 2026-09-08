@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.loadEventosSheetIndex = loadEventosSheetIndex;
 exports.findDuplicateInSheet = findDuplicateInSheet;
+exports.findDealRowInSheet = findDealRowInSheet;
 const eventFingerprint_1 = require("./eventFingerprint");
 const fingerprintStore_1 = require("./fingerprintStore");
 const DEFAULT_SHEET_ID = "1TWbOOjTnm68n2QioiwRsHvXSuARev2PLIhqr1pVctp8";
@@ -136,6 +137,21 @@ async function findDuplicateInSheet(fingerprint, dealId, year) {
     }
     catch (err) {
         console.warn("[ventas-sheet] no se pudo leer Eventos para dedupe", err instanceof Error ? err.message : err);
+        return null;
+    }
+}
+/** ¿Este Kommo Deal ID ya tiene fila en Eventos? */
+async function findDealRowInSheet(dealId, year) {
+    const id = String(dealId || "").trim();
+    if (!id)
+        return null;
+    try {
+        const idx = await loadEventosSheetIndex(year);
+        const row = idx.byDealId[id];
+        return row && row > 0 ? row : null;
+    }
+    catch (err) {
+        console.warn("[ventas-sheet] no se pudo leer Eventos por dealId", err instanceof Error ? err.message : err);
         return null;
     }
 }

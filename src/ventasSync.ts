@@ -15,6 +15,7 @@ import {
   yearFromFecha,
 } from "./mapDealToFila";
 import { findDuplicateInSheet } from "./sheetEventosReader";
+import { ensureEventReminderTasks, type KommoTaskResult } from "./kommoTasks";
 import type { FilaVentas, KommoLead, KommoWebhookBody } from "./types";
 
 /** Evita import circular: poller marca estado tras sync exitoso. */
@@ -44,6 +45,8 @@ export interface VentasSyncResult {
     version?: string;
     error?: string;
   };
+  /** Recordatorios en el calendario de Kommo (el de Google lo pone Apps Script). */
+  kommoTasks?: KommoTaskResult;
   headers: readonly string[];
 }
 
@@ -116,6 +119,8 @@ export async function syncDealToSheet(
       const fp = eventFingerprintFromFila(fila);
 
       // 1) cache local  2) leer Eventos del Sheet (CSV)  3) Apps Script
+      // Si el deal ya está, Apps Script v37 rellena Venta/Pagado/Fecha vacíos
+      // sin pisar Fecha de cierre.
       let dupDeal = findDuplicateDealId(fp, fila.kommoDealId);
       let dupSource = dupDeal ? "cache" : "";
       if (!dupDeal) {
@@ -124,14 +129,15 @@ export async function syncDealToSheet(
           fila.kommoDealId,
           year
         );
-        if (inSheet) {
+        // Misma huella con OTRO dealId → duplicado real. Mismo deal → dejar pasar.
+        if (inSheet && inSheet.dealId && inSheet.dealId !== fila.kommoDealId) {
           dupDeal = inSheet.dealId;
           dupSource = "sheet_csv";
           sheetWrite.row = inSheet.row;
         }
       }
 
-      if (dupDeal) {
+      if (dupDeal && dupDeal !== fila.kommoDealId) {
         sheetWrite.ok = true;
         sheetWrite.action = "skipped_duplicate";
         rememberFingerprint(fp, dupDeal);
@@ -189,6 +195,19 @@ export async function syncDealToSheet(
     );
   }
 
+  // Los recordatorios no deben tumbar el sync: si Kommo falla, la fila ya está.
+  let kommoTasks: KommoTaskResult | undefined;
+  if (sheetWrite.ok && sheetWrite.action !== "skipped_duplicate") {
+    try {
+      kommoTasks = await ensureEventReminderTasks(lead, fila);
+    } catch (taskErr) {
+      console.error(
+        "[ventas][calendario] tareas Kommo FAIL",
+        taskErr instanceof Error ? taskErr.message : String(taskErr)
+      );
+    }
+  }
+
   const result: VentasSyncResult = {
     startedAt,
     finishedAt: new Date().toISOString(),
@@ -198,6 +217,7 @@ export async function syncDealToSheet(
     fila,
     values,
     sheetWrite,
+    kommoTasks,
     headers: SHEET_HEADERS,
   };
 

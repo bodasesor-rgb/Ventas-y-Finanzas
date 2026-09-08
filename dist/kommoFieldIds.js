@@ -12,6 +12,8 @@ exports.KOMMO_FIELD_IDS = {
     MONTO_CIERRE: 1049178,
     /** Forma de pago → columna "Forma de Pago" */
     FORMA_DE_PAGO: 1049180,
+    /** Anticipo → columna "Pagado" */
+    ANTICIPO: 1049322,
     /** Tipo de evento → columna "Tipo de evento" */
     TIPO_DE_EVENTO: 1048782,
     /** Dirección de evento → columna "Dirección de evento" */

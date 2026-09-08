@@ -22,6 +22,10 @@ export type GoogleAdsCredentials = {
   login_customer_id?: string;
   /** Si true, intenta JWT del service account (requiere SA como usuario Ads + Workspace/MCC). */
   use_service_account?: boolean;
+  /** ga4 = inversión/clics desde Analytics; conversiones 10% clics. */
+  source?: "ga4" | "google_ads_api";
+  conversionRule?: string;
+  updatedAt?: string;
 };
 
 export type WeekGoogleAdsMetrics = {
@@ -90,6 +94,31 @@ export function loadGoogleAdsCredentials(): GoogleAdsCredentials | null {
     };
   }
   return null;
+}
+
+/** Recuerda que Google Ads se llena desde GA4 (sobrevive deploy vía Drive). */
+export function saveGoogleAdsGa4Mode(): {
+  localPath: string;
+} {
+  const prev = readCredFile_() || ({} as GoogleAdsCredentials);
+  const next = {
+    ...prev,
+    source: "ga4",
+    conversionRule: "clicks_10pct",
+    updatedAt: new Date().toISOString(),
+  };
+  fs.mkdirSync(path.dirname(ADS_FILE), { recursive: true });
+  fs.writeFileSync(ADS_FILE, JSON.stringify(next, null, 2), {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  void persistHostSecret("google-ads", next).catch((err) => {
+    console.warn(
+      "[google-ads] backup Drive GA4 mode:",
+      err instanceof Error ? err.message : err
+    );
+  });
+  return { localPath: "data/google-ads.json" };
 }
 
 export function saveGoogleAdsCredentials(
@@ -376,9 +405,11 @@ export async function probeGoogleAdsApi(): Promise<{
 }
 
 /**
- * Fallback: costo/clics desde GA4 (Google Ads vinculado).
- * Conversiones: regla de negocio Bodasesor = 10% de los clics
- * (no hay Google Ads API; el histórico del Sheet coincide ~10%).
+ * Costo/clics desde GA4 (Google Ads vinculado a la propiedad).
+ * advertiserAdCost exige una dimensión de campaña; date solo da 400.
+ * PMax llega como sessionCampaignName (p.ej. "Pmax - Banquetes") y en GA4
+ * se atribuye a google / cpc — no hay que filtrar source/medium.
+ * Conversiones: 10% de los clics (sin Ads API no hay conversions reales).
  */
 export async function fetchGoogleAdsGa4Daily(opts: {
   since: string;
@@ -405,60 +436,33 @@ export async function fetchGoogleAdsGa4Daily(opts: {
   const [response] = await analytics.runReport({
     property: `properties/${propertyId}`,
     dateRanges: [{ startDate: opts.since, endDate: opts.until }],
-    dimensions: [{ name: "date" }],
+    dimensions: [{ name: "date" }, { name: "sessionCampaignName" }],
     metrics: [
       { name: "advertiserAdCost" },
       { name: "advertiserAdClicks" },
     ],
-    dimensionFilter: {
-      andGroup: {
-        expressions: [
-          {
-            filter: {
-              fieldName: "sessionSource",
-              stringFilter: {
-                matchType: "EXACT",
-                value: "google",
-                caseSensitive: false,
-              },
-            },
-          },
-          {
-            filter: {
-              fieldName: "sessionMedium",
-              stringFilter: {
-                matchType: "EXACT",
-                value: "cpc",
-                caseSensitive: false,
-              },
-            },
-          },
-        ],
-      },
-    },
     limit: 100000,
   });
 
-  const out: Array<{
-    date: string;
-    cost: number;
-    clicks: number;
-    conversions: number;
-  }> = [];
+  const byDate = new Map<string, { cost: number; clicks: number }>();
   for (const row of response.rows || []) {
     const yyyymmdd = String(row.dimensionValues?.[0]?.value || "");
     if (!/^\d{8}$/.test(yyyymmdd)) continue;
     const date = `${yyyymmdd.slice(0, 4)}-${yyyymmdd.slice(4, 6)}-${yyyymmdd.slice(6, 8)}`;
-    const clicks = num_(row.metricValues?.[1]?.value);
-    out.push({
-      date,
-      cost: num_(row.metricValues?.[0]?.value),
-      clicks,
-      // Estimado: 10% de clics (acordado; sin Ads API)
-      conversions: clicks * 0.1,
-    });
+    const prev = byDate.get(date) || { cost: 0, clicks: 0 };
+    prev.cost += num_(row.metricValues?.[0]?.value);
+    prev.clicks += num_(row.metricValues?.[1]?.value);
+    byDate.set(date, prev);
   }
-  return out;
+
+  return [...byDate.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, v]) => ({
+      date,
+      cost: v.cost,
+      clicks: v.clicks,
+      conversions: v.clicks * 0.1,
+    }));
 }
 
 export function aggregateWeekMetrics_(

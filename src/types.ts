@@ -53,6 +53,7 @@ export interface KommoLead {
   id: number;
   name?: string;
   status_id?: number;
+  responsible_user_id?: number;
   closed_at?: number;
   updated_at?: number;
   created_at?: number;

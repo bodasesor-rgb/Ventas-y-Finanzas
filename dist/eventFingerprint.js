@@ -1,7 +1,7 @@
 "use strict";
 /**
  * Huella de evento para no repetir filas en Eventos.
- * Misma lógica que Apps Script v30: cliente + fechas + horario + tipo.
+ * cliente + fecha evento + horario + tipo (sin fecha de cierre).
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.eventFingerprintFromValues = eventFingerprintFromValues;
@@ -30,7 +30,6 @@ function eventFingerprintFromValues(values) {
     return [
         normKey_(values[0]),
         normFecha_(values[1]),
-        normFecha_(values[2]),
         normKey_(values[8]),
         normKey_(values[5]),
     ].join("|");
@@ -39,7 +38,6 @@ function eventFingerprintFromFila(fila) {
     return [
         normKey_(fila.cliente),
         normFecha_(fila.fechaDelEvento),
-        normFecha_(fila.fechaDeCierre),
         normKey_(fila.horario),
         normKey_(fila.tipoDeEvento),
     ].join("|");

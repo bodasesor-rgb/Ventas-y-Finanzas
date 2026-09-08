@@ -6,6 +6,7 @@ const googleapis_1 = require("googleapis");
 const ga4Client_1 = require("./ga4Client");
 const googleAuth_1 = require("./googleAuth");
 const appsScriptClient_1 = require("./appsScriptClient");
+const metricasWeek_1 = require("./metricasWeek");
 function pad2_(n) {
     return String(n).padStart(2, "0");
 }
@@ -247,7 +248,12 @@ function buildWeekPayload_(layout, daily, opts) {
         const siteRow = layout.values[layout.visitasSiteRow - 1] || [];
         const existing = siteRow[w.col - 1];
         const alreadyFilled = !isEmptyCell_(existing);
-        if (onlyEmpty && alreadyFilled && !force)
+        if (!(0, metricasWeek_1.shouldWriteWeekCell_)({
+            weekStartMs: w.date.getTime(),
+            todayUtc,
+            empty: !alreadyFilled,
+            force: force || !onlyEmpty,
+        }))
             continue;
         // Para semana actual, sumar solo hasta ayer
         let endCap = weekEnd;
@@ -417,8 +423,8 @@ async function syncMetricasVisitas(opts) {
                 weeks: writable,
                 error: err2 instanceof Error ? err2.message : String(err2),
                 hint: sa?.client_email
-                    ? `Comparte el Sheet con ${sa.client_email} como Editor, o publica Apps Script v31 (upsertMetricasVisitas).`
-                    : "Configura service account con acceso al Sheet o Apps Script v31.",
+                    ? `Comparte el Sheet con ${sa.client_email} como Editor, o publica Apps Script v33 (upsertMetricasVisitas).`
+                    : "Configura service account con acceso al Sheet o Apps Script v33.",
             };
         }
     }

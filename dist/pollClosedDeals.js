@@ -202,19 +202,23 @@ async function pollClosedDealsOnce(limit = 40, opts) {
                 continue;
             }
             if (prev >= closedAt) {
-                skippedAlreadySynced++;
-                continue;
+                // Campos pueden llenarse DESPUÉS del cierre (Monto, Anticipo, fecha).
+                const touched = lead.updated_at || 0;
+                if (touched <= prev) {
+                    skippedAlreadySynced++;
+                    continue;
+                }
             }
             // Histórico fuera de ventana: recordar sin escribir
             if (closedAt < cutoff) {
-                memoryState.syncedUpdatedAt[id] = closedAt;
+                memoryState.syncedUpdatedAt[id] = Math.max(closedAt, lead.updated_at || 0, prev);
                 seededOld++;
                 continue;
             }
             try {
                 const result = await (0, ventasSync_1.syncDealToSheet)(lead.id);
                 if (result.sheetWrite.ok || !result.sheetWrite.attempted) {
-                    memoryState.syncedUpdatedAt[id] = closedAt;
+                    memoryState.syncedUpdatedAt[id] = Math.max(closedAt, lead.updated_at || 0, Math.floor(Date.now() / 1000));
                     synced.push(id);
                 }
                 else {

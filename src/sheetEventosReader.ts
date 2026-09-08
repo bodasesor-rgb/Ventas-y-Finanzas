@@ -155,3 +155,23 @@ export async function findDuplicateInSheet(
     return null;
   }
 }
+
+/** ¿Este Kommo Deal ID ya tiene fila en Eventos? */
+export async function findDealRowInSheet(
+  dealId: string,
+  year?: number
+): Promise<number | null> {
+  const id = String(dealId || "").trim();
+  if (!id) return null;
+  try {
+    const idx = await loadEventosSheetIndex(year);
+    const row = idx.byDealId[id];
+    return row && row > 0 ? row : null;
+  } catch (err) {
+    console.warn(
+      "[ventas-sheet] no se pudo leer Eventos por dealId",
+      err instanceof Error ? err.message : err
+    );
+    return null;
+  }
+}

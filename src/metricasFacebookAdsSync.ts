@@ -11,6 +11,7 @@ import {
   type WeekAdsMetrics,
 } from "./metaAdsClient";
 import { metaConfigured } from "./metaSocialClient";
+import { shouldWriteWeekCell_ } from "./metricasWeek";
 
 function pad2_(n: number): string {
   return String(n).padStart(2, "0");
@@ -289,7 +290,12 @@ export async function syncMetricasFacebookAds(opts?: {
     if (w.date.getTime() + 7 * 86400000 < lookbackStart) return false;
     const invRow = layout.values[layout.rows.inversion - 1] || [];
     const empty = isEmptyCell_(invRow[w.col - 1]);
-    return force || empty;
+    return shouldWriteWeekCell_({
+      weekStartMs: w.date.getTime(),
+      todayUtc,
+      empty,
+      force,
+    });
   });
 
   if (!targetWeeks.length) {

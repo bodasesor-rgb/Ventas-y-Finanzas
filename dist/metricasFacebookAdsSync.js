@@ -7,6 +7,7 @@ const googleapis_1 = require("googleapis");
 const googleAuth_1 = require("./googleAuth");
 const metaAdsClient_1 = require("./metaAdsClient");
 const metaSocialClient_1 = require("./metaSocialClient");
+const metricasWeek_1 = require("./metricasWeek");
 function pad2_(n) {
     return String(n).padStart(2, "0");
 }
@@ -229,7 +230,12 @@ async function syncMetricasFacebookAds(opts) {
             return false;
         const invRow = layout.values[layout.rows.inversion - 1] || [];
         const empty = isEmptyCell_(invRow[w.col - 1]);
-        return force || empty;
+        return (0, metricasWeek_1.shouldWriteWeekCell_)({
+            weekStartMs: w.date.getTime(),
+            todayUtc,
+            empty,
+            force,
+        });
     });
     if (!targetWeeks.length) {
         return {

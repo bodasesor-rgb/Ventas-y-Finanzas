@@ -23,6 +23,7 @@ import {
   rememberWebhookAccepted,
   syncDealToSheet,
 } from "./ventasSync";
+import { ensureEventReminderTasks } from "./kommoTasks";
 import { getFingerprintStoreStatus } from "./fingerprintStore";
 import { eventFingerprintFromFila } from "./eventFingerprint";
 import {
@@ -1040,6 +1041,112 @@ ventasRouter.get("/api/ventas/sync-latest", async (_req, res) => {
   }
 });
 
+/* ---------- Calendario de eventos ---------- */
+
+/**
+ * Reagenda en Google Calendar todos los eventos futuros del Sheet.
+ * Úsalo tras el primer deploy de v38 o si corregiste fechas a mano.
+ */
+const handleCalendarSync = async (_req: Request, res: Response) => {
+  try {
+    const result = await postToAppsScript(
+      { action: "syncEventosCalendar" },
+      { timeoutMs: 300_000 }
+    );
+    res.status(200).json({ ok: true, result });
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+};
+ventasRouter.post("/api/ventas/calendar-sync", handleCalendarSync);
+ventasRouter.get("/api/ventas/calendar-sync", handleCalendarSync);
+
+/** Dispara el resumen "esta semana" sin esperar al lunes. */
+const handleCalendarDigest = async (_req: Request, res: Response) => {
+  try {
+    const result = await postToAppsScript(
+      { action: "weeklyEventosDigest" },
+      { timeoutMs: 180_000 }
+    );
+    res.status(200).json({ ok: true, result });
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+};
+ventasRouter.post("/api/ventas/calendar-digest", handleCalendarDigest);
+ventasRouter.get("/api/ventas/calendar-digest", handleCalendarDigest);
+
+/** Instala los triggers de Apps Script (lunes 7am + reagenda diaria 5am). */
+const handleCalendarInstall = async (_req: Request, res: Response) => {
+  try {
+    const result = await postToAppsScript({
+      action: "installEventosCalendarTriggers",
+    });
+    res.status(200).json({ ok: true, result });
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+};
+ventasRouter.post("/api/ventas/calendar-install", handleCalendarInstall);
+ventasRouter.get("/api/ventas/calendar-install", handleCalendarInstall);
+
+/** Recordatorios en el calendario de Kommo para un deal concreto. */
+const handleKommoTasks = async (req: Request, res: Response) => {
+  const dealId = Number(req.params.dealId);
+  if (!Number.isFinite(dealId) || dealId <= 0) {
+    res.status(400).json({ ok: false, error: "dealId inválido" });
+    return;
+  }
+  try {
+    const lead = await fetchLeadWithContact(dealId);
+    const fila = mapDealToFilaVentas(lead);
+    const result = await ensureEventReminderTasks(lead, fila);
+    res.status(200).json({ ok: true, fechaDelEvento: fila.fechaDelEvento, result });
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+};
+ventasRouter.post("/api/ventas/kommo-tasks/:dealId", handleKommoTasks);
+ventasRouter.get("/api/ventas/kommo-tasks/:dealId", handleKommoTasks);
+
+/** Crea los recordatorios que falten para todos los cierres recientes. */
+const handleKommoTasksBackfill = async (req: Request, res: Response) => {
+  const days = Math.min(Math.max(Number(req.query.days) || 90, 1), 365);
+  try {
+    const leads = await fetchRecentlyClosedLeads(50, days * 24 * 60 * 60_000);
+    const won = leads.filter(isClosedWonLead);
+    const items = [];
+    for (const lead of won) {
+      const fila = mapDealToFilaVentas(lead);
+      items.push({
+        cliente: fila.cliente,
+        fechaDelEvento: fila.fechaDelEvento,
+        ...(await ensureEventReminderTasks(lead, fila)),
+      });
+    }
+    res.status(200).json({ ok: true, days, count: items.length, items });
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+};
+ventasRouter.post("/api/ventas/kommo-tasks-backfill", handleKommoTasksBackfill);
+ventasRouter.get("/api/ventas/kommo-tasks-backfill", handleKommoTasksBackfill);
+
 /** Últimos deals tocados en Kommo (para elegir cuál sincronizar). */
 ventasRouter.get("/api/ventas/recent", async (req, res) => {
   const limit = Number(req.query.limit) || 15;
@@ -1083,7 +1190,7 @@ ventasRouter.post("/api/ventas/setup-metricas-auto", async (_req, res) => {
         error: result.error || "Apps Script rechazó setupMetricasAuto",
         version: result.version,
         hint:
-          "Pega Codigo.gs v23 → Guardar → Implementar → Nueva versión. O en Apps Script ejecuta restoreMetricasSemanal_.",
+          "Pega Codigo.gs v33 → Guardar → Implementar → Nueva versión. O en Apps Script ejecuta restoreMetricasSemanal_.",
       });
       return;
     }
@@ -1106,7 +1213,7 @@ ventasRouter.post("/api/ventas/setup-metricas-auto", async (_req, res) => {
       ok: false,
       error,
       hint:
-        "Si el script aún es v22: en Apps Script elige restoreMetricasSemanal_ → ▶ Ejecutar. O pega v23 e Implementa.",
+        "Pega Codigo.gs v33 → Guardar → Implementar → Nueva versión. O ejecuta restoreMetricasSemanal_.",
     });
   }
 });

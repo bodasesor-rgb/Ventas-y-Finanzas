@@ -85,22 +85,22 @@ async function restoreHostSecretIfMissing(secretKey) {
     return "restored";
 }
 let restoreOnce = null;
-/** Una vez por proceso Node: intenta recuperar SA/Meta/Brevo tras deploy. */
+const HOST_SECRET_KEYS = [
+    "google-service-account",
+    "meta-token",
+    "brevo",
+    "google-ads",
+];
+async function restoreAllHostSecrets_() {
+    const out = {};
+    for (const key of HOST_SECRET_KEYS) {
+        out[key] = await restoreHostSecretIfMissing(key);
+    }
+    return out;
+}
 function restoreHostSecretsOnBoot() {
     if (!restoreOnce) {
-        restoreOnce = (async () => {
-            const keys = [
-                "google-service-account",
-                "meta-token",
-                "brevo",
-                "google-ads",
-            ];
-            const out = {};
-            for (const key of keys) {
-                out[key] = await restoreHostSecretIfMissing(key);
-            }
-            return out;
-        })().catch((err) => {
+        restoreOnce = restoreAllHostSecrets_().catch((err) => {
             console.warn("[secrets] restore on boot falló", err instanceof Error ? err.message : err);
             restoreOnce = null;
             return {
@@ -111,7 +111,21 @@ function restoreHostSecretsOnBoot() {
             };
         });
     }
-    return restoreOnce;
+    return restoreOnce.then((cached) => {
+        const out = { ...cached };
+        let changed = false;
+        for (const key of HOST_SECRET_KEYS) {
+            if (fs_1.default.existsSync(LOCAL_PATH[key]) &&
+                cached[key] !== "present" &&
+                cached[key] !== "restored") {
+                out[key] = "present";
+                changed = true;
+            }
+        }
+        if (changed)
+            restoreOnce = Promise.resolve(out);
+        return out;
+    });
 }
 /** Guarda local + intenta Drive (no bloquea si Apps Script aún no es v32). */
 async function persistHostSecret(secretKey, json) {
@@ -119,6 +133,7 @@ async function persistHostSecret(secretKey, json) {
     fs_1.default.mkdirSync(path_1.default.dirname(dest), { recursive: true });
     const text = typeof json === "string" ? json : JSON.stringify(json, null, 2);
     fs_1.default.writeFileSync(dest, text, { encoding: "utf8", mode: 0o600 });
+    restoreOnce = null;
     const archived = await archiveHostSecret(secretKey, JSON.parse(text));
     if (!archived.ok) {
         console.warn(`[secrets] Drive backup ${secretKey} falló (¿Apps Script v32?):`, archived.error);

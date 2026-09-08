@@ -12,6 +12,7 @@ import {
   metricasSheetName,
 } from "./googleAuth";
 import { postToAppsScript } from "./appsScriptClient";
+import { shouldWriteWeekCell_ } from "./metricasWeek";
 
 export interface WeekVisitas {
   weekStart: string; // DD/MM/YYYY as in sheet header
@@ -299,7 +300,16 @@ function buildWeekPayload_(
     const siteRow = layout.values[layout.visitasSiteRow - 1] || [];
     const existing = siteRow[w.col - 1];
     const alreadyFilled = !isEmptyCell_(existing);
-    if (onlyEmpty && alreadyFilled && !force) continue;
+    if (
+      !shouldWriteWeekCell_({
+        weekStartMs: w.date.getTime(),
+        todayUtc,
+        empty: !alreadyFilled,
+        force: force || !onlyEmpty,
+      })
+    ) {
+      continue;
+    }
 
     // Para semana actual, sumar solo hasta ayer
     let endCap = weekEnd;
@@ -529,8 +539,8 @@ export async function syncMetricasVisitas(opts?: {
         weeks: writable,
         error: err2 instanceof Error ? err2.message : String(err2),
         hint: sa?.client_email
-          ? `Comparte el Sheet con ${sa.client_email} como Editor, o publica Apps Script v31 (upsertMetricasVisitas).`
-          : "Configura service account con acceso al Sheet o Apps Script v31.",
+          ? `Comparte el Sheet con ${sa.client_email} como Editor, o publica Apps Script v33 (upsertMetricasVisitas).`
+          : "Configura service account con acceso al Sheet o Apps Script v33.",
       };
     }
   }

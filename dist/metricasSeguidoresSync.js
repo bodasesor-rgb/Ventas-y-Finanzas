@@ -143,7 +143,7 @@ async function loadLayout_() {
     };
 }
 /** Semana que contiene "hoy" (UTC date), o la última semana ya empezada. */
-function pickWeekCol_(layout, opts) {
+function pickWeekCol_(layout) {
     const today = new Date();
     const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
     // Prefer current week
@@ -163,9 +163,6 @@ function pickWeekCol_(layout, opts) {
     const fbVals = layout.values[layout.fbRow - 1] || [];
     const igEmpty = layout.igRow > 0 && isEmptyCell_(igVals[target.col - 1]);
     const fbEmpty = layout.fbRow > 0 && isEmptyCell_(fbVals[target.col - 1]);
-    if (!opts?.force && !igEmpty && !fbEmpty) {
-        return { col: target.col, date: target.date, igEmpty, fbEmpty };
-    }
     return { col: target.col, date: target.date, igEmpty, fbEmpty };
 }
 async function syncMetricasSeguidores(opts) {
@@ -181,7 +178,7 @@ async function syncMetricasSeguidores(opts) {
     }
     const followers = await (0, metaSocialClient_1.fetchSocialFollowers)();
     const layout = await loadLayout_();
-    const week = pickWeekCol_(layout, { force: opts?.force });
+    const week = pickWeekCol_(layout);
     if (!week) {
         return {
             ok: false,
@@ -191,15 +188,14 @@ async function syncMetricasSeguidores(opts) {
         };
     }
     const weekStart = `${pad2_(week.date.getUTCDate())}/${pad2_(week.date.getUTCMonth() + 1)}/${String(week.date.getUTCFullYear()).slice(-2)}`;
-    const force = Boolean(opts?.force);
     const data = [];
-    if (layout.igRow > 0 && (force || week.igEmpty)) {
+    if (layout.igRow > 0) {
         data.push({
             range: `'${layout.sheetName}'!${colLetter_(week.col)}${layout.igRow}`,
             values: [[followers.instagramFollowers]],
         });
     }
-    if (layout.fbRow > 0 && (force || week.fbEmpty)) {
+    if (layout.fbRow > 0) {
         data.push({
             range: `'${layout.sheetName}'!${colLetter_(week.col)}${layout.fbRow}`,
             values: [[followers.facebookFollowers]],
@@ -217,7 +213,7 @@ async function syncMetricasSeguidores(opts) {
             pageName: followers.pageName,
             igUsername: followers.igUsername,
             skipped: true,
-            hint: "La semana actual ya tenía seguidores; usa ?force=1 para sobrescribir",
+            hint: "No encontré filas Seguidores IG / Fb Seguidores en Metricas",
         };
     }
     const auth = await (0, googleAuth_1.getGoogleAuthClient)([

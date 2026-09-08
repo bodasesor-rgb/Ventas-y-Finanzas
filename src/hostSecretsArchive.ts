@@ -100,24 +100,29 @@ export async function restoreHostSecretIfMissing(
 
 let restoreOnce: Promise<Record<HostSecretKey, string>> | null = null;
 
-/** Una vez por proceso Node: intenta recuperar SA/Meta/Brevo tras deploy. */
+const HOST_SECRET_KEYS: HostSecretKey[] = [
+  "google-service-account",
+  "meta-token",
+  "brevo",
+  "google-ads",
+];
+
+async function restoreAllHostSecrets_(): Promise<
+  Record<HostSecretKey, string>
+> {
+  const out = {} as Record<HostSecretKey, string>;
+  for (const key of HOST_SECRET_KEYS) {
+    out[key] = await restoreHostSecretIfMissing(key);
+  }
+  return out;
+}
+
+/** Tras deploy: recupera SA/Meta/Brevo/Ads desde Drive si falta el archivo. */
 export function restoreHostSecretsOnBoot(): Promise<
   Record<HostSecretKey, string>
 > {
   if (!restoreOnce) {
-    restoreOnce = (async () => {
-      const keys: HostSecretKey[] = [
-        "google-service-account",
-        "meta-token",
-        "brevo",
-        "google-ads",
-      ];
-      const out = {} as Record<HostSecretKey, string>;
-      for (const key of keys) {
-        out[key] = await restoreHostSecretIfMissing(key);
-      }
-      return out;
-    })().catch((err) => {
+    restoreOnce = restoreAllHostSecrets_().catch((err) => {
       console.warn(
         "[secrets] restore on boot falló",
         err instanceof Error ? err.message : err
@@ -131,7 +136,22 @@ export function restoreHostSecretsOnBoot(): Promise<
       } as Record<HostSecretKey, string>;
     });
   }
-  return restoreOnce;
+  return restoreOnce.then((cached) => {
+    const out = { ...cached };
+    let changed = false;
+    for (const key of HOST_SECRET_KEYS) {
+      if (
+        fs.existsSync(LOCAL_PATH[key]) &&
+        cached[key] !== "present" &&
+        cached[key] !== "restored"
+      ) {
+        out[key] = "present";
+        changed = true;
+      }
+    }
+    if (changed) restoreOnce = Promise.resolve(out);
+    return out;
+  });
 }
 
 /** Guarda local + intenta Drive (no bloquea si Apps Script aún no es v32). */
@@ -144,6 +164,7 @@ export async function persistHostSecret(
   const text =
     typeof json === "string" ? json : JSON.stringify(json, null, 2);
   fs.writeFileSync(dest, text, { encoding: "utf8", mode: 0o600 });
+  restoreOnce = null;
   const archived = await archiveHostSecret(secretKey, JSON.parse(text));
   if (!archived.ok) {
     console.warn(

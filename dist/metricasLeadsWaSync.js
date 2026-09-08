@@ -8,6 +8,7 @@ exports.isCotizacionStatus_ = isCotizacionStatus_;
 const googleapis_1 = require("googleapis");
 const googleAuth_1 = require("./googleAuth");
 const kommoApi_1 = require("./kommoApi");
+const metricasWeek_1 = require("./metricasWeek");
 function pad2_(n) {
     return String(n).padStart(2, "0");
 }
@@ -344,7 +345,12 @@ async function syncMetricasLeadsWa(opts) {
             return false;
         const leadsRow = layout.values[layout.rows.leads - 1] || [];
         const empty = isEmptyCell_(leadsRow[w.col - 1]);
-        return force || empty;
+        return (0, metricasWeek_1.shouldWriteWeekCell_)({
+            weekStartMs: w.date.getTime(),
+            todayUtc,
+            empty,
+            force,
+        });
     });
     if (!targetWeeks.length) {
         return {

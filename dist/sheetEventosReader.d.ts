@@ -15,3 +15,5 @@ export declare function findDuplicateInSheet(fingerprint: string, dealId: string
     dealId: string;
     row?: number;
 } | null>;
+/** ¿Este Kommo Deal ID ya tiene fila en Eventos? */
+export declare function findDealRowInSheet(dealId: string, year?: number): Promise<number | null>;

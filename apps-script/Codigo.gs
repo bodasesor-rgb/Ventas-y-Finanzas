@@ -1,16 +1,24 @@
 /**
  * ============================================================
  * Apps Script - Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-08-10-v32b
+ * VERSION: 2026-08-30-v37
  * ============================================================
  * PEGAR TODO ESTE ARCHIVO (borrar lo anterior -> pegar -> Guardar)
+ * Luego: Nueva implementación /exec → URL en Hostinger → reiniciar Node.
  *
- * REGLA v32b: sintaxis limpia para pegar en Apps Script
- *   - saveHostSecret / getHostSecret: SA+Meta sobreviven deploys Hostinger
- *   - v31: upsertMetricasVisitas: llena Visitas (GA4) por semana
+ * REPARACIONES acumuladas:
+ *   v38: cada evento cerrado se agenda en Google Calendar (recordatorio la
+ *        víspera) + resumen "esta semana" los lunes 7am
+ *   v37: rellena Venta/Pagado/Fecha vacíos sin pisar Fecha de cierre;
+ *        escribe Anticipo (col L); parser fecha "Septiembre 1, 2026"
+ *   v36: deal ya en Sheet no reescribe fechas; huella sin fecha cierre
+ *   v35-v33: Metricas Auto, fechas Date, host secrets
+ * ============================================================
+ * TRAS PEGAR v38: authorizeCalendar -> ▶ Ejecutar -> Aceptar permisos,
+ * luego installEventosCalendarTriggers -> ▶ Ejecutar.
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-08-10-v32b';
+var SCRIPT_VERSION = '2026-09-08-v38';
 /** Hostinger: tick cada minuto para que los cierres suban al Sheet al momento. */
 var VENTAS_TICK_URL =
   'https://lightcyan-reindeer-284498.hostingersite.com/api/ventas/tick';
@@ -34,11 +42,28 @@ var DEFAULT_SHEET_NAME = EVENTOS_SHEET;
 var DEAL_ID_COL = 20; // T
 var CLIENTE_COL = 1; // A
 var SEMANA_CIERRE_COL = 21; // U
+/** V — id del evento en Google Calendar (W en adelante es la tabla mensual). */
+var CAL_EVENT_ID_COL = 22;
+var CAL_TIMEZONE = 'America/Mexico_City';
+var CAL_TAG_PREFIX = '[bodasesor-deal:';
+var CAL_DIGEST_PREFIX = '📅 ';
+var CAL_DIGEST_HOUR = 8;
+/** Duración por defecto cuando el Horario sí trae hora de inicio. */
+var CAL_EVENT_HOURS = 5;
+var DIAS_ES = [
+  'domingo',
+  'lunes',
+  'martes',
+  'miércoles',
+  'jueves',
+  'viernes',
+  'sábado',
+];
 var MAX_CLIENT_SCAN = 500;
 var MAX_WEEKS = 53;
 
-// A-J + P-R + T (no toca K Costo, L Pagado, M/N/O fórmulas, S IVA)
-var WRITE_COLS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 16, 17, 18, 20];
+// A-J + L Pagado + P-R + T (no toca K Costo, M/N/O fórmulas, S IVA)
+var WRITE_COLS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 16, 17, 18, 20];
 
 var EVENTOS_HEADERS = [
   'Cliente',
@@ -292,15 +317,13 @@ function normDupFecha_(v) {
 }
 
 /**
- * Huella del evento: cliente + fecha evento + fecha cierre + horario + tipo.
- * No basta el nombre: dos cumpleaños distintos el mismo día no chocan si
- * cambia horario/tipo/fecha.
+ * Huella del evento: cliente + fecha evento + horario + tipo.
+ * Sin fecha de cierre: si Kommo cambia closed_at no se duplica la fila.
  */
 function eventFingerprintFromValues_(values) {
   return [
     normDupKey_(values[0]), // Cliente
     normDupFecha_(values[1]), // Fecha del evento
-    normDupFecha_(values[2]), // Fecha de cierre
     normDupKey_(values[8]), // Horario
     normDupKey_(values[5]), // Tipo de evento
   ].join('|');
@@ -379,12 +402,605 @@ function applyCalcFormulas_(sheet, row) {
     );
 }
 
+function coerceEventosDate_(v) {
+  if (v === '' || v == null) return v;
+  if (v instanceof Date && !isNaN(v.getTime())) return v;
+  var d = parseHeaderDate_(v);
+  return d || v;
+}
+
+function coerceEventosRowDates_(values) {
+  var out = values.slice();
+  if (out.length > 1) out[1] = coerceEventosDate_(out[1]);
+  if (out.length > 2) out[2] = coerceEventosDate_(out[2]);
+  return out;
+}
+
+function isEmptySheetCell_(v) {
+  if (v === '' || v == null) return true;
+  if (v instanceof Date) return isNaN(v.getTime());
+  return !String(v).trim();
+}
+
 function writeRowValues_(sheet, rowIndex, values) {
+  values = coerceEventosRowDates_(values);
   for (var c = 0; c < WRITE_COLS.length; c++) {
     var col = WRITE_COLS[c];
     sheet.getRange(rowIndex, col).setValue(values[col - 1]);
   }
+  sheet.getRange(rowIndex, 2, 1, 2).setNumberFormat('dd/mm/yyyy');
+  if (values[9] !== '' && values[9] != null) {
+    sheet.getRange(rowIndex, 10).setNumberFormat('$#,##0.00');
+  }
+  if (values[11] !== '' && values[11] != null) {
+    sheet.getRange(rowIndex, 12).setNumberFormat('$#,##0.00');
+  }
   applyCalcFormulas_(sheet, rowIndex);
+}
+
+/**
+ * Deal ya existe: rellena huecos (Venta, Pagado, Fecha evento, Horario)
+ * SIN tocar Fecha de cierre ni Mes cierre.
+ */
+function fillMissingEventoFields_(sheet, rowIndex, values) {
+  var filled = [];
+  var prevFecha = sheet.getRange(rowIndex, 2).getValue();
+  var prevHorario = sheet.getRange(rowIndex, 9).getValue();
+  var newFecha = values[1];
+  var newHorario = values[8];
+  var newVenta = values[9];
+  var newPagado = values[11];
+
+  if (isEmptySheetCell_(prevFecha) && !isEmptySheetCell_(newFecha)) {
+    sheet.getRange(rowIndex, 2).setValue(coerceEventosDate_(newFecha));
+    sheet.getRange(rowIndex, 2).setNumberFormat('dd/mm/yyyy');
+    filled.push('fechaEvento');
+  }
+  // Si Horario tiene una "fecha" mal puesta (ej. "Septiembre 1, 2026") y ya
+  // tenemos fecha buena, limpia horario o pon el horario real.
+  var horarioStr = String(prevHorario == null ? '' : prevHorario).trim();
+  var horarioPareceFecha =
+    /\b(20\d{2})\b/.test(horarioStr) ||
+    /\b(ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic|january|february|september)/i.test(
+      horarioStr
+    );
+  if (
+    (isEmptySheetCell_(prevHorario) || horarioPareceFecha) &&
+    !isEmptySheetCell_(newHorario)
+  ) {
+    sheet.getRange(rowIndex, 9).setValue(newHorario);
+    filled.push('horario');
+  } else if (horarioPareceFecha && isEmptySheetCell_(newHorario)) {
+    sheet.getRange(rowIndex, 9).setValue('');
+    filled.push('horarioCleared');
+  }
+
+  if (!isEmptySheetCell_(newVenta)) {
+    sheet.getRange(rowIndex, 10).setValue(newVenta);
+    sheet.getRange(rowIndex, 10).setNumberFormat('$#,##0.00');
+    filled.push('venta');
+  }
+  if (!isEmptySheetCell_(newPagado)) {
+    sheet.getRange(rowIndex, 12).setValue(newPagado);
+    sheet.getRange(rowIndex, 12).setNumberFormat('$#,##0.00');
+    filled.push('pagado');
+  }
+
+  // Contacto / tipo si estaban vacíos
+  var patchCols = [
+    [4, 3],
+    [5, 4],
+    [6, 5],
+    [7, 6],
+    [8, 7],
+    [16, 15],
+    [18, 17],
+  ];
+  for (var i = 0; i < patchCols.length; i++) {
+    var col = patchCols[i][0];
+    var idx = patchCols[i][1];
+    var cur = sheet.getRange(rowIndex, col).getValue();
+    if (isEmptySheetCell_(cur) && !isEmptySheetCell_(values[idx])) {
+      sheet.getRange(rowIndex, col).setValue(values[idx]);
+      filled.push('col' + col);
+    }
+  }
+
+  applyCalcFormulas_(sheet, rowIndex);
+  return filled;
+}
+
+/* ===================== Calendario de eventos ===================== */
+
+/**
+ * Cada evento cerrado se agenda en Google Calendar con un recordatorio la
+ * víspera. El aviso de "esta semana hay eventos" NO va por evento: lo manda
+ * weeklyEventosDigest los lunes, para que sea una sola notificación.
+ */
+function eventosCalendar_() {
+  return CalendarApp.getDefaultCalendar();
+}
+
+/**
+ * Hora de inicio desde la columna Horario.
+ * Sin hora reconocible -> evento de día completo (Horario suele traer basura
+ * de Lucy: "viernes", "20 a 30", frases sueltas).
+ */
+function parseHorarioStart_(raw) {
+  if (raw instanceof Date && !isNaN(raw.getTime())) {
+    return { h: raw.getHours(), m: raw.getMinutes() };
+  }
+  var s = String(raw == null ? '' : raw).trim().toLowerCase();
+  if (!s) return null;
+  try {
+    s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  } catch (eNorm) {}
+
+  var ampm = s.match(/\b(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)\b/);
+  if (ampm) {
+    var h12 = Number(ampm[1]) % 12;
+    if (ampm[3].charAt(0) === 'p') h12 += 12;
+    return { h: h12, m: Number(ampm[2] || 0) };
+  }
+
+  var hhmm = s.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+  if (hhmm) return { h: Number(hhmm[1]), m: Number(hhmm[2]) };
+
+  var texto = s.match(/\b(\d{1,2})\s*de la\s*(manana|tarde|noche)\b/);
+  if (texto) {
+    var ht = Number(texto[1]) % 12;
+    if (texto[2] !== 'manana') ht += 12;
+    return { h: ht, m: 0 };
+  }
+  return null;
+}
+
+/** Fecha del evento (col B) + Horario (col I) -> rango para Calendar. */
+function eventoCalendarSlot_(fechaCell, horarioCell) {
+  var d = parseHeaderDate_(fechaCell);
+  if (!d || isNaN(d.getTime())) return null;
+  var hora = parseHorarioStart_(horarioCell);
+  var dia = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  if (!hora) return { allDay: true, start: dia, end: null };
+  var start = new Date(
+    d.getFullYear(),
+    d.getMonth(),
+    d.getDate(),
+    hora.h,
+    hora.m,
+    0
+  );
+  return {
+    allDay: false,
+    start: start,
+    end: new Date(start.getTime() + CAL_EVENT_HOURS * 3600 * 1000),
+  };
+}
+
+function calFmtFecha_(d) {
+  return Utilities.formatDate(d, CAL_TIMEZONE, 'dd/MM/yyyy');
+}
+
+function eventoCalendarTitle_(row) {
+  var cliente = String(row[0] || '').trim() || 'Evento sin nombre';
+  var tipo = String(row[5] || '').trim();
+  return tipo ? cliente + ' — ' + tipo : cliente;
+}
+
+function eventoCalendarDescription_(row, dealId) {
+  var lines = [];
+  function add(label, v) {
+    var s =
+      v instanceof Date && !isNaN(v.getTime())
+        ? calFmtFecha_(v)
+        : String(v == null ? '' : v).trim();
+    if (s) lines.push(label + ': ' + s);
+  }
+  add('Invitados', row[6]);
+  add('Horario', row[8]);
+  add('Teléfono', row[3]);
+  add('Correo', row[4]);
+  add('Dirección', row[7]);
+  add('Venta', row[9]);
+  add('Anticipo pagado', row[11]);
+  add('Cotización', row[15]);
+  add('Cerrado el', row[2]);
+  lines.push('');
+  lines.push('Sheet: ' + SpreadsheetApp.getActiveSpreadsheet().getUrl());
+  if (dealId) lines.push(CAL_TAG_PREFIX + dealId + ']');
+  return lines.join('\n');
+}
+
+/**
+ * Crea o actualiza el evento de Calendar de una fila de Eventos.
+ * El id queda en la columna V para que un re-sync actualice en vez de duplicar.
+ */
+function upsertEventoCalendar_(sheet, rowIndex) {
+  var row = sheet.getRange(rowIndex, 1, 1, DEAL_ID_COL).getValues()[0];
+  var cliente = String(row[0] || '').trim();
+  if (!cliente) return { ok: false, reason: 'sin_cliente', row: rowIndex };
+
+  var dealId = String(row[DEAL_ID_COL - 1] || '').trim();
+  var slot = eventoCalendarSlot_(row[1], row[8]);
+  if (!slot) {
+    return {
+      ok: false,
+      reason: 'sin_fecha_evento',
+      row: rowIndex,
+      cliente: cliente,
+      dealId: dealId,
+    };
+  }
+
+  var cal = eventosCalendar_();
+  var idCell = sheet.getRange(rowIndex, CAL_EVENT_ID_COL);
+  var existingId = String(idCell.getValue() || '').trim();
+  var ev = null;
+  if (existingId) {
+    try {
+      ev = cal.getEventById(existingId);
+    } catch (eGet) {
+      ev = null;
+    }
+  }
+
+  var title = eventoCalendarTitle_(row);
+  var desc = eventoCalendarDescription_(row, dealId);
+  var lugar = String(row[7] || '').trim();
+  var action;
+
+  if (ev) {
+    if (slot.allDay) ev.setAllDayDate(slot.start);
+    else ev.setTime(slot.start, slot.end);
+    ev.setTitle(title);
+    ev.setDescription(desc);
+    ev.setLocation(lugar);
+    action = 'updated';
+  } else {
+    var opts = { description: desc, location: lugar };
+    ev = slot.allDay
+      ? cal.createAllDayEvent(title, slot.start, opts)
+      : cal.createEvent(title, slot.start, slot.end, opts);
+    idCell.setValue(ev.getId());
+    action = 'created';
+  }
+
+  // En eventos de día completo los minutos cuentan desde las 00:00 del día,
+  // así que 900 = 9:00 am de la víspera (y no medianoche).
+  ev.removeAllReminders();
+  ev.addPopupReminder(slot.allDay ? 24 * 60 - 9 * 60 : 24 * 60);
+
+  return {
+    ok: true,
+    action: action,
+    row: rowIndex,
+    cliente: cliente,
+    dealId: dealId,
+    eventId: ev.getId(),
+    fecha: calFmtFecha_(slot.start),
+    allDay: slot.allDay,
+  };
+}
+
+/** Agenda el evento de un deal concreto (lo llama upsertEvento_). */
+function syncEventoCalendarByRow_(sheet, rowIndex) {
+  try {
+    return upsertEventoCalendar_(sheet, rowIndex);
+  } catch (err) {
+    Logger.log('upsertEventoCalendar_ fila ' + rowIndex + ': ' + err);
+    return { ok: false, reason: 'error', row: rowIndex, error: String(err) };
+  }
+}
+
+/**
+ * Backfill: agenda todas las filas cuyo evento sea de hoy en adelante.
+ * Sirve tras el primer deploy y para propagar correcciones hechas a mano.
+ */
+function syncEventosCalendar_(data) {
+  data = data || {};
+  var sheetName = String(data.sheetName || EVENTOS_SHEET).trim();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    return { ok: false, version: SCRIPT_VERSION, error: 'No existe ' + sheetName };
+  }
+
+  if (!String(sheet.getRange(1, CAL_EVENT_ID_COL).getValue()).trim()) {
+    sheet.getRange(1, CAL_EVENT_ID_COL).setValue('Calendar Event ID');
+  }
+
+  var hoy = new Date();
+  var desde = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+  var lastRow = Math.max(sheet.getLastRow(), 1);
+  var agendados = [];
+  var sinFecha = [];
+  var pasados = 0;
+  if (lastRow < 2) {
+    return {
+      ok: true,
+      version: SCRIPT_VERSION,
+      sheetName: sheetName,
+      agendados: 0,
+      detalle: [],
+      sinFechaEvento: [],
+      eventosPasadosOmitidos: 0,
+    };
+  }
+
+  // Una sola lectura: fila por fila se acaba la cuota de tiempo del /exec.
+  var bloque = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+  for (var i = 0; i < bloque.length; i++) {
+    var r = i + 2;
+    var cliente = String(bloque[i][0] || '').trim();
+    if (!cliente) continue;
+    var fecha = parseHeaderDate_(bloque[i][1]);
+    if (!fecha || isNaN(fecha.getTime())) {
+      sinFecha.push({ row: r, cliente: cliente, reason: 'sin_fecha_evento' });
+      continue;
+    }
+    if (fecha.getTime() < desde.getTime()) {
+      pasados++;
+      continue;
+    }
+    var res = syncEventoCalendarByRow_(sheet, r);
+    if (res.ok) agendados.push(res);
+    else sinFecha.push(res);
+  }
+
+  return {
+    ok: true,
+    version: SCRIPT_VERSION,
+    sheetName: sheetName,
+    calendario: eventosCalendar_().getName(),
+    agendados: agendados.length,
+    detalle: agendados,
+    sinFechaEvento: sinFecha,
+    eventosPasadosOmitidos: pasados,
+  };
+}
+
+/** Lunes 00:00 de la semana de d. */
+function startOfWeekMonday_(d) {
+  var day = d.getDay(); // 0 domingo
+  var diff = day === 0 ? -6 : 1 - day;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + diff);
+}
+
+/**
+ * Resumen semanal: notifica en la computadora cuántos eventos hay esta semana.
+ * Manda correo y crea un aviso en Calendar con popup, que es lo que dispara la
+ * notificación de escritorio. Trigger: lunes 7am.
+ */
+function weeklyEventosDigest() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(EVENTOS_SHEET);
+  if (!sheet) {
+    return { ok: false, version: SCRIPT_VERSION, error: 'No existe ' + EVENTOS_SHEET };
+  }
+
+  var now = new Date();
+  var lunes = startOfWeekMonday_(now);
+  var domingo = new Date(
+    lunes.getFullYear(),
+    lunes.getMonth(),
+    lunes.getDate() + 6,
+    23,
+    59,
+    59
+  );
+  var cierreDesde = new Date(now.getTime() - 30 * 86400000);
+
+  var lastRow = Math.max(sheet.getLastRow(), 1);
+  var semana = [];
+  var sinFecha = [];
+  var bloque =
+    lastRow >= 2 ? sheet.getRange(2, 1, lastRow - 1, DEAL_ID_COL).getValues() : [];
+
+  for (var k = 0; k < bloque.length; k++) {
+    var r = k + 2;
+    var row = bloque[k];
+    var cliente = String(row[0] || '').trim();
+    if (!cliente) continue;
+
+    var fecha = parseHeaderDate_(row[1]);
+    if (!fecha || isNaN(fecha.getTime())) {
+      // Solo interesan los cierres recientes: los viejos sin fecha ya no son accionables.
+      var cierre = parseHeaderDate_(row[2]);
+      if (cierre && cierre.getTime() >= cierreDesde.getTime()) {
+        sinFecha.push({
+          row: r,
+          cliente: cliente,
+          cerradoEl: calFmtFecha_(cierre),
+        });
+      }
+      continue;
+    }
+    if (fecha.getTime() < lunes.getTime() || fecha.getTime() > domingo.getTime()) {
+      continue;
+    }
+    semana.push({
+      row: r,
+      cliente: cliente,
+      fecha: fecha,
+      fechaTxt: calFmtFecha_(fecha),
+      dia: DIAS_ES[fecha.getDay()],
+      tipo: String(row[5] || '').trim(),
+      horario: String(row[8] || '').trim(),
+      invitados: String(row[6] || '').trim(),
+      lugar: String(row[7] || '').trim(),
+    });
+  }
+
+  semana.sort(function (a, b) {
+    return a.fecha.getTime() - b.fecha.getTime();
+  });
+
+  var titulo = semana.length
+    ? 'Esta semana: ' + semana.length + ' evento(s)'
+    : 'Esta semana: sin eventos agendados';
+
+  var cuerpo = [
+    'Semana del ' + calFmtFecha_(lunes) + ' al ' + calFmtFecha_(domingo),
+    '',
+  ];
+  if (semana.length) {
+    for (var i = 0; i < semana.length; i++) {
+      var e = semana[i];
+      var linea = '• ' + e.fechaTxt + ' (' + e.dia + ') — ' + e.cliente;
+      if (e.tipo) linea += ' — ' + e.tipo;
+      if (e.horario) linea += ' — ' + e.horario;
+      if (e.invitados) linea += ' — ' + e.invitados + ' invitados';
+      if (e.lugar) linea += ' — ' + e.lugar;
+      cuerpo.push(linea);
+    }
+  } else {
+    cuerpo.push('No hay eventos con fecha dentro de esta semana.');
+  }
+
+  if (sinFecha.length) {
+    cuerpo.push('');
+    cuerpo.push('⚠ Cierres recientes SIN fecha de evento (no se pudieron agendar):');
+    for (var j = 0; j < sinFecha.length; j++) {
+      cuerpo.push(
+        '• fila ' +
+          sinFecha[j].row +
+          ' — ' +
+          sinFecha[j].cliente +
+          ' (cerrado ' +
+          sinFecha[j].cerradoEl +
+          ')'
+      );
+    }
+    cuerpo.push('Corrige la fecha en Kommo o en el Sheet para que se agenden.');
+  }
+
+  cuerpo.push('');
+  cuerpo.push(ss.getUrl());
+  var texto = cuerpo.join('\n');
+
+  var avisoId = '';
+  try {
+    avisoId = crearAvisoSemanal_(titulo, texto, now);
+  } catch (errAviso) {
+    Logger.log('crearAvisoSemanal_: ' + errAviso);
+  }
+
+  var correo = '';
+  try {
+    correo = Session.getEffectiveUser().getEmail();
+    if (correo) MailApp.sendEmail(correo, '📅 ' + titulo, texto);
+  } catch (errMail) {
+    Logger.log('weeklyEventosDigest mail: ' + errMail);
+  }
+
+  return {
+    ok: true,
+    version: SCRIPT_VERSION,
+    semanaDel: calFmtFecha_(lunes),
+    semanaAl: calFmtFecha_(domingo),
+    eventos: semana.length,
+    detalle: semana.map(function (e) {
+      return { row: e.row, cliente: e.cliente, fecha: e.fechaTxt, tipo: e.tipo };
+    }),
+    sinFechaEvento: sinFecha,
+    avisoCalendarId: avisoId,
+    correo: correo,
+    mensaje: texto,
+  };
+}
+
+/**
+ * Aviso con popup inmediato: es lo que hace que Google Calendar lance la
+ * notificación de escritorio. Se reemplaza si ya se corrió hoy.
+ */
+function crearAvisoSemanal_(titulo, cuerpo, now) {
+  var cal = eventosCalendar_();
+  var existentes = cal.getEventsForDay(now);
+  for (var i = 0; i < existentes.length; i++) {
+    if (existentes[i].getTitle().indexOf(CAL_DIGEST_PREFIX) === 0) {
+      existentes[i].deleteEvent();
+    }
+  }
+  var inicio = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    CAL_DIGEST_HOUR,
+    0,
+    0
+  );
+  // Si el trigger corrió tarde, el popup no serviría de nada en el pasado.
+  if (inicio.getTime() < now.getTime() + 5 * 60000) {
+    inicio = new Date(now.getTime() + 10 * 60000);
+  }
+  var ev = cal.createEvent(
+    CAL_DIGEST_PREFIX + titulo,
+    inicio,
+    new Date(inicio.getTime() + 15 * 60000),
+    { description: cuerpo }
+  );
+  ev.removeAllReminders();
+  ev.addPopupReminder(0);
+  return ev.getId();
+}
+
+/** Diario: reagenda lo que venga, para recoger correcciones hechas a mano. */
+function nightlyEventosCalendarSync() {
+  return syncEventosCalendar_({});
+}
+
+/** Ejecutar una vez desde el editor: instala resumen del lunes + sync diario. */
+function installEventosCalendarTriggers() {
+  var nombres = ['weeklyEventosDigest', 'nightlyEventosCalendarSync'];
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (nombres.indexOf(triggers[i].getHandlerFunction()) !== -1) {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+  ScriptApp.newTrigger('weeklyEventosDigest')
+    .timeBased()
+    .onWeekDay(ScriptApp.WeekDay.MONDAY)
+    .atHour(7)
+    .create();
+  ScriptApp.newTrigger('nightlyEventosCalendarSync')
+    .timeBased()
+    .everyDays(1)
+    .atHour(5)
+    .create();
+  return {
+    ok: true,
+    version: SCRIPT_VERSION,
+    calendario: eventosCalendar_().getName(),
+    triggers: [
+      'weeklyEventosDigest: lunes 7am (aviso "esta semana")',
+      'nightlyEventosCalendarSync: diario 5am (reagenda próximos)',
+    ],
+  };
+}
+
+/**
+ * OBLIGATORIO UNA VEZ tras pegar v38: ▶ Ejecutar -> Aceptar Calendar y Gmail.
+ * Sin esto el /exec falla al intentar agendar.
+ */
+function authorizeCalendar() {
+  var cal = eventosCalendar_();
+  var correo = Session.getEffectiveUser().getEmail();
+  var msg =
+    'Calendar OK - ' +
+    SCRIPT_VERSION +
+    '\n\nCalendario: ' +
+    cal.getName() +
+    '\nCuenta: ' +
+    correo +
+    '\n\nAhora: installEventosCalendarTriggers -> ▶ Ejecutar' +
+    '\nLuego: Nueva implementación -> URL /exec a Hostinger.';
+  try {
+    SpreadsheetApp.getUi().alert(msg);
+  } catch (errUi) {
+    Logger.log(msg);
+  }
+  return { ok: true, calendario: cal.getName(), correo: correo };
 }
 
 /* ===================== Banco ===================== */
@@ -1219,6 +1835,14 @@ function saveHostSecret_(data) {
   }
   var folder = getArchiveFolder_();
   var name = hostSecretFileName_(secretKey);
+  try {
+    PropertiesService.getScriptProperties().setProperty(
+      'HOST_SECRET_' + secretKey,
+      payload
+    );
+  } catch (propErr) {
+    Logger.log('saveHostSecret properties: ' + propErr);
+  }
   removeFilesNamedInFolder_(folder, name);
   var file = folder.createFile(
     Utilities.newBlob(payload, 'application/json', name)
@@ -1243,6 +1867,23 @@ function getHostSecret_(data) {
   }
   var folder = getArchiveFolder_();
   var name = hostSecretFileName_(secretKey);
+  try {
+    var stored = PropertiesService.getScriptProperties().getProperty(
+      'HOST_SECRET_' + secretKey
+    );
+    if (stored) {
+      return json_({
+        ok: true,
+        version: SCRIPT_VERSION,
+        action: 'fetchedHostSecret',
+        secretKey: secretKey,
+        source: 'properties',
+        jsonBase64: Utilities.base64Encode(stored),
+      });
+    }
+  } catch (propErr) {
+    Logger.log('getHostSecret properties: ' + propErr);
+  }
   var files = folder.getFilesByName(name);
   if (!files.hasNext()) {
     return json_({
@@ -1341,6 +1982,15 @@ function doPost(e) {
     if (data && data.action === 'upsertMetricasVisitas') {
       return json_(upsertMetricasVisitas_(data));
     }
+    if (data && data.action === 'syncEventosCalendar') {
+      return json_(syncEventosCalendar_(data));
+    }
+    if (data && data.action === 'weeklyEventosDigest') {
+      return json_(weeklyEventosDigest());
+    }
+    if (data && data.action === 'installEventosCalendarTriggers') {
+      return json_(installEventosCalendarTriggers());
+    }
     if (data && data.action === 'installVentasKeepAlive') {
       var installed = installVentasKeepAliveTrigger();
       return json_({
@@ -1416,6 +2066,7 @@ function doPost(e) {
 
     values = values.slice(0, DEAL_ID_COL);
     while (values.length < DEAL_ID_COL) values.push('');
+    values = coerceEventosRowDates_(values);
 
     var dealId = String(data.dealId || values[19] || '').trim();
     var sheetName = String(data.sheetName || EVENTOS_SHEET).trim();
@@ -1452,21 +2103,50 @@ function doPost(e) {
     var fingerprint = eventFingerprintFromValues_(values);
 
     if (existingRow !== -1) {
-      // Mismo Kommo Deal ID -> actualizar esa fila (no es cliente nuevo)
-      rowIndex = existingRow;
-      writeRowValues_(sheet, rowIndex, values);
-      action = 'updated';
+      // Deal ya en Sheet: rellena Venta/Pagado/Fecha vacíos; NUNCA pisa cierre.
+      values = coerceEventosRowDates_(values);
+      var filled = fillMissingEventoFields_(sheet, existingRow, values);
+      var calExist = syncEventoCalendarByRow_(sheet, existingRow);
+      try {
+        ensureWeeklyPipeline_(SpreadsheetApp.getActiveSpreadsheet());
+      } catch (pipeExistErr) {}
+      var infoExist = spreadsheetInfo_();
+      return json_({
+        ok: true,
+        version: SCRIPT_VERSION,
+        action: filled.length ? 'filled_missing' : 'already_on_sheet',
+        filled: filled,
+        calendar: calExist,
+        row: existingRow,
+        nextRowWouldBe: nextRow,
+        dealId: dealId,
+        fingerprint: fingerprint,
+        sheetName: sheetName,
+        message: filled.length
+          ? 'Deal ya existía; se rellenaron campos faltantes: ' + filled.join(', ')
+          : 'Deal ya estaba en Eventos. Fechas de cierre intactas.',
+        existingSheets: infoExist.existingSheets,
+        metricasAutoExists:
+          (infoExist.existingSheets || []).indexOf(METRICAS_AUTO_SHEET) !== -1,
+      });
     } else {
-      // ¿Ya existe el mismo evento (cliente+fechas+horario+tipo)?
+      // ¿Ya existe el mismo evento (cliente+fecha evento+horario+tipo)?
       var dupRow = findRowByEventFingerprint_(sheet, values, dealId);
       if (dupRow !== -1) {
         rowIndex = dupRow;
         var existingDeal = String(
           sheet.getRange(dupRow, DEAL_ID_COL).getValue() || ''
         ).trim();
+        // Si la fila dup no tenía dealId, anclarlo sin tocar fechas
+        if (!existingDeal) {
+          sheet.getRange(dupRow, DEAL_ID_COL).setValue(dealId);
+          existingDeal = dealId;
+        }
         duplicateOfDealId = existingDeal;
         action = 'skipped_duplicate';
-        // No escribe nada: evita repetir el cliente en Eventos
+        try {
+          ensureWeeklyPipeline_(SpreadsheetApp.getActiveSpreadsheet());
+        } catch (pipeDupErr) {}
         var infoDup = spreadsheetInfo_();
         return json_({
           ok: true,
@@ -1479,17 +2159,20 @@ function doPost(e) {
           fingerprint: fingerprint,
           sheetName: sheetName,
           message:
-            'Cliente/evento ya estaba en el Sheet (misma fecha, horario y tipo). No se volvió a subir.',
+            'Cliente/evento ya estaba en el Sheet (misma fecha evento, horario y tipo). No se volvió a subir.',
           existingSheets: infoDup.existingSheets,
         });
       }
       rowIndex = nextRow;
       sheet.getRange(rowIndex, 1, 1, DEAL_ID_COL).setValues([values]);
+      sheet.getRange(rowIndex, 2, 1, 2).setNumberFormat('dd/mm/yyyy');
       applyCalcFormulas_(sheet, rowIndex);
       action = 'appended';
     }
 
-    // Crea Metricas Auto si falta (original intacta)
+    var calNueva = syncEventoCalendarByRow_(sheet, rowIndex);
+
+    // Metricas Auto: crear si falta, NUNCA recrear (pisa visitas/ads)
     var pipe = { ok: false };
     try {
       pipe = ensureWeeklyPipeline_(SpreadsheetApp.getActiveSpreadsheet()) || {
@@ -1510,6 +2193,7 @@ function doPost(e) {
       dealId: dealId,
       fingerprint: fingerprint,
       sheetName: sheetName,
+      calendar: calNueva,
       metricasAuto: pipe,
       metricasAutoExists:
         (infoPipe.existingSheets || []).indexOf(METRICAS_AUTO_SHEET) !== -1,
@@ -1608,13 +2292,13 @@ function setupAllSilent_() {
 }
 
 /**
- * Si falta Metricas Auto, la crea (copia). Luego llena formulas
- * en la tabla semanal existente (no agrega columnas nuevas).
+ * Tras un cierre: crea Metricas Auto si falta y normaliza fechas.
+ * NO borra Auto (restoreMetricasSemanal_ es el único que recrea).
  */
 function ensureWeeklyPipeline_(ss) {
   ss = ss || SpreadsheetApp.getActiveSpreadsheet();
   try {
-    return ensureMetricasSemanal_(ss);
+    return ensureMetricasAutoKeepData_(ss);
   } catch (err) {
     Logger.log('ensureWeeklyPipeline_ fatal: ' + err);
     return { ok: false, error: String(err) };
@@ -1627,6 +2311,9 @@ function ensureEventosSheet_(ss) {
   if (String(sh.getRange(1, 1).getValue()).trim() !== 'Cliente') {
     sh.getRange(1, 1, 1, EVENTOS_HEADERS.length).setValues([EVENTOS_HEADERS]);
     sh.setFrozenRows(1);
+  }
+  if (!String(sh.getRange(1, CAL_EVENT_ID_COL).getValue()).trim()) {
+    sh.getRange(1, CAL_EVENT_ID_COL).setValue('Calendar Event ID');
   }
   return sh;
 }
@@ -1756,7 +2443,8 @@ function normLabel_(v) {
 function parseHeaderDate_(hv) {
   if (hv instanceof Date && !isNaN(hv.getTime())) return hv;
   if (typeof hv === 'number' && hv > 30000 && hv < 60000) {
-    return new Date(Math.round((hv - 25569) * 86400 * 1000));
+    var utc = new Date(Math.round((hv - 25569) * 86400 * 1000));
+    return new Date(utc.getUTCFullYear(), utc.getUTCMonth(), utc.getUTCDate());
   }
   var s = String(hv || '').trim();
   if (!s) return null;
@@ -2108,6 +2796,79 @@ function fillMetricasWeekFormulas_(sh, layout) {
   return filled;
 }
 
+function metricasKpiHasFormula_(sh, layout) {
+  if (!layout || !layout.ingresosRow || !layout.weekCols || !layout.weekCols.length) {
+    return false;
+  }
+  var f = '';
+  try {
+    f = String(sh.getRange(layout.ingresosRow, layout.weekCols[0].col).getFormula() || '');
+  } catch (e) {
+    return false;
+  }
+  return f.toUpperCase().indexOf('SUMIFS') >= 0;
+}
+
+/**
+ * Crea Metricas Auto si falta y pone formulas KPI si aún no hay.
+ * Nunca borra la pestaña (para no perder visitas/ads).
+ */
+function ensureMetricasAutoKeepData_(ss) {
+  ss = ss || SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss.getSheetByName(EVENTOS_SHEET)) {
+    return { ok: false, error: 'Falta ' + EVENTOS_SHEET };
+  }
+  ensureEventosSheet_(ss);
+  var norm = normalizeEventosFechasCierre_();
+
+  var created = ensureMetricasAutoSheet_(ss);
+  if (!created.sheet) {
+    return { ok: false, error: created.error || 'No Metricas Auto' };
+  }
+  var sh = created.sheet;
+  var layout = detectMetricasWeekLayout_(sh);
+  if (!layout.ok) return layout;
+  if (!layout.weekCols || !layout.weekCols.length) {
+    return {
+      ok: false,
+      error:
+        'No encontre columnas de semana con fechas en el encabezado. En la original, cada semana debe tener fecha (ej. 20/07/2026).',
+      headerRow: layout.headerRow,
+      ingresosRow: layout.ingresosRow,
+    };
+  }
+
+  var filled = 0;
+  var wroteFormulas = false;
+  if (
+    created.duplicated ||
+    created.createdBlank ||
+    !metricasKpiHasFormula_(sh, layout)
+  ) {
+    filled = fillMetricasWeekFormulas_(sh, layout);
+    wroteFormulas = true;
+  }
+
+  return {
+    ok: true,
+    sheet: METRICAS_AUTO_SHEET,
+    originalUntouched: METRICAS_SHEET,
+    recreated: false,
+    created: Boolean(created.duplicated || created.createdBlank),
+    wroteFormulas: wroteFormulas,
+    marker: METRICAS_SEMANAL_MARKER,
+    version: SCRIPT_VERSION,
+    headerRow: layout.headerRow,
+    ingresosRow: layout.ingresosRow,
+    eventosRow: layout.eventosRow,
+    weekCols: layout.weekCols.length,
+    cellsFilled: filled,
+    fechasNormalizadas: norm.converted || 0,
+    note:
+      'Metricas Auto conservada. No se recrea en cada cierre. Fechas Eventos normalizadas.',
+  };
+}
+
 function ensureMetricasSemanal_(ss) {
   try {
     return ensureMetricasSemanalBody_(ss);
@@ -2410,35 +3171,41 @@ function normalizeEventosFechasCierre_() {
   var sh = ss.getSheetByName(EVENTOS_SHEET);
   if (!sh) return { ok: false, error: 'Falta ' + EVENTOS_SHEET, version: SCRIPT_VERSION };
 
-  var lastRow = Math.max(sh.getLastRow(), 2);
-  var range = sh.getRange(2, 3, lastRow, 3); // C
+  var lastRow = sh.getLastRow();
+  if (lastRow < 2) {
+    return { ok: true, version: SCRIPT_VERSION, converted: 0, scanned: 0, samples: [] };
+  }
+  var range = sh.getRange(2, 2, lastRow - 1, 2); // B y C
   var values = range.getValues();
   var converted = 0;
   var samples = [];
 
   for (var i = 0; i < values.length; i++) {
-    var v = values[i][0];
-    if (v === '' || v == null) continue;
-    if (v instanceof Date && !isNaN(v.getTime())) {
-      if (samples.length < 5) {
-        samples.push({
-          row: i + 2,
-          before: 'Date',
-          after: Utilities.formatDate(v, Session.getScriptTimeZone(), 'dd/MM/yyyy'),
-        });
+    for (var c = 0; c < 2; c++) {
+      var v = values[i][c];
+      if (v === '' || v == null) continue;
+      if (v instanceof Date && !isNaN(v.getTime())) {
+        if (samples.length < 5 && c === 1) {
+          samples.push({
+            row: i + 2,
+            before: 'Date',
+            after: Utilities.formatDate(v, Session.getScriptTimeZone(), 'dd/MM/yyyy'),
+          });
+        }
+        continue;
       }
-      continue;
-    }
-    var d = parseHeaderDate_(v);
-    if (d) {
-      values[i][0] = d;
-      converted++;
-      if (samples.length < 8) {
-        samples.push({
-          row: i + 2,
-          before: String(v),
-          after: Utilities.formatDate(d, Session.getScriptTimeZone(), 'dd/MM/yyyy'),
-        });
+      var d = parseHeaderDate_(v);
+      if (d) {
+        values[i][c] = d;
+        converted++;
+        if (samples.length < 8) {
+          samples.push({
+            row: i + 2,
+            col: c === 0 ? 'B' : 'C',
+            before: String(v),
+            after: Utilities.formatDate(d, Session.getScriptTimeZone(), 'dd/MM/yyyy'),
+          });
+        }
       }
     }
   }

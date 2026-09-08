@@ -13,6 +13,7 @@ import {
   probeKommoMailApis,
   type KommoPipeline,
 } from "./kommoApi";
+import { shouldWriteWeekCell_ } from "./metricasWeek";
 
 function pad2_(n: number): string {
   return String(n).padStart(2, "0");
@@ -418,7 +419,12 @@ export async function syncMetricasLeadsWa(opts?: {
     if (w.date.getTime() + 7 * 86400000 < lookbackStart) return false;
     const leadsRow = layout.values[layout.rows.leads - 1] || [];
     const empty = isEmptyCell_(leadsRow[w.col - 1]);
-    return force || empty;
+    return shouldWriteWeekCell_({
+      weekStartMs: w.date.getTime(),
+      todayUtc,
+      empty,
+      force,
+    });
   });
 
   if (!targetWeeks.length) {

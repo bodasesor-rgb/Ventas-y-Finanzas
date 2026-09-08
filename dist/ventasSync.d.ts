@@ -1,3 +1,4 @@
+import { type KommoTaskResult } from "./kommoTasks";
 import type { FilaVentas, KommoWebhookBody } from "./types";
 export interface VentasSyncResult {
     startedAt: string;
@@ -15,6 +16,8 @@ export interface VentasSyncResult {
         version?: string;
         error?: string;
     };
+    /** Recordatorios en el calendario de Kommo (el de Google lo pone Apps Script). */
+    kommoTasks?: KommoTaskResult;
     headers: readonly string[];
 }
 declare let lastAccepted: {

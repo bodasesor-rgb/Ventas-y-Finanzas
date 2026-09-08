@@ -10,6 +10,7 @@ const fingerprintStore_1 = require("./fingerprintStore");
 const kommoApi_1 = require("./kommoApi");
 const mapDealToFila_1 = require("./mapDealToFila");
 const sheetEventosReader_1 = require("./sheetEventosReader");
+const kommoTasks_1 = require("./kommoTasks");
 /** Evita import circular: poller marca estado tras sync exitoso. */
 function markPollSyncedSafe_(dealId, closedAt) {
     try {
@@ -70,18 +71,19 @@ async function syncDealToSheet(leadId, webhookBody) {
             const year = (0, mapDealToFila_1.yearFromFecha)(fila.fechaDeCierre) || new Date().getUTCFullYear();
             const sheetName = `Eventos ${year}`;
             const fp = (0, eventFingerprint_1.eventFingerprintFromFila)(fila);
-            // 1) cache local  2) leer Eventos del Sheet (CSV)  3) Apps Script
+            // Si el deal ya está, Apps Script v37 rellena Venta/Pagado/Fecha vacíos
+            // sin pisar Fecha de cierre.
             let dupDeal = (0, fingerprintStore_1.findDuplicateDealId)(fp, fila.kommoDealId);
             let dupSource = dupDeal ? "cache" : "";
             if (!dupDeal) {
                 const inSheet = await (0, sheetEventosReader_1.findDuplicateInSheet)(fp, fila.kommoDealId, year);
-                if (inSheet) {
+                if (inSheet && inSheet.dealId && inSheet.dealId !== fila.kommoDealId) {
                     dupDeal = inSheet.dealId;
                     dupSource = "sheet_csv";
                     sheetWrite.row = inSheet.row;
                 }
             }
-            if (dupDeal) {
+            if (dupDeal && dupDeal !== fila.kommoDealId) {
                 sheetWrite.ok = true;
                 sheetWrite.action = "skipped_duplicate";
                 (0, fingerprintStore_1.rememberFingerprint)(fp, dupDeal);
@@ -135,6 +137,16 @@ async function syncDealToSheet(leadId, webhookBody) {
     else {
         console.log("[ventas][fase1] FILA QUE SE APPENDARÍA (sin URL Apps Script /exec)");
     }
+    // Los recordatorios no deben tumbar el sync: si Kommo falla, la fila ya está.
+    let kommoTasks;
+    if (sheetWrite.ok && sheetWrite.action !== "skipped_duplicate") {
+        try {
+            kommoTasks = await (0, kommoTasks_1.ensureEventReminderTasks)(lead, fila);
+        }
+        catch (taskErr) {
+            console.error("[ventas][calendario] tareas Kommo FAIL", taskErr instanceof Error ? taskErr.message : String(taskErr));
+        }
+    }
     const result = {
         startedAt,
         finishedAt: new Date().toISOString(),
@@ -144,6 +156,7 @@ async function syncDealToSheet(leadId, webhookBody) {
         fila,
         values,
         sheetWrite,
+        kommoTasks,
         headers: mapDealToFila_1.SHEET_HEADERS,
     };
     lastSync = result;

@@ -6,6 +6,7 @@ exports.brevoSyncStatus = brevoSyncStatus;
 const googleapis_1 = require("googleapis");
 const googleAuth_1 = require("./googleAuth");
 const brevoClient_1 = require("./brevoClient");
+const metricasWeek_1 = require("./metricasWeek");
 function pad2_(n) {
     return String(n).padStart(2, "0");
 }
@@ -217,7 +218,12 @@ async function syncMetricasBrevo(opts) {
         const row = layout.values[(layout.rows.correos > 0 ? layout.rows.correos : layout.rows.contactos) -
             1] || [];
         const empty = isEmptyCell_(row[w.col - 1]);
-        return force || empty;
+        return (0, metricasWeek_1.shouldWriteWeekCell_)({
+            weekStartMs: w.date.getTime(),
+            todayUtc,
+            empty,
+            force,
+        });
     });
     if (!targetWeeks.length) {
         return {
