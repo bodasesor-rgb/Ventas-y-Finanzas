@@ -121,8 +121,8 @@ async function loadEventosSheetIndex(year = new Date().getUTCFullYear(), force =
     return cache;
 }
 /**
- * El Sheet muestra las fechas como dd/mm/yyyy, pero gviz a veces las devuelve
- * como Date(2026,9,9) o con un solo dígito.
+ * gviz devuelve lo que muestra la celda, y el Sheet mezcla formatos:
+ * "10/9/2026", "9/10/26" (año corto) y a veces Date(2026,9,9).
  */
 function normalizeSheetFecha_(raw) {
     const s = String(raw || "").trim();
@@ -134,13 +134,14 @@ function normalizeSheetFecha_(raw) {
         const mm = String(Number(gviz[2]) + 1).padStart(2, "0");
         return `${dd}/${mm}/${gviz[1]}`;
     }
-    const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (dmy) {
-        return `${dmy[1].padStart(2, "0")}/${dmy[2].padStart(2, "0")}/${dmy[3]}`;
-    }
     const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (iso)
         return `${iso[3]}/${iso[2]}/${iso[1]}`;
+    const dmy = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/);
+    if (dmy) {
+        const year = dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3];
+        return `${dmy[1].padStart(2, "0")}/${dmy[2].padStart(2, "0")}/${year}`;
+    }
     return "";
 }
 function rowToEvento_(values, row) {
