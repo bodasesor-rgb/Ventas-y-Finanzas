@@ -1,0 +1,79 @@
+# Motor de respaldo de los recordatorios de eventos.
+#
+# Misma idea que ventas-poll-keepalive: no depender de un solo mecanismo.
+# Google desactiva los triggers de Apps Script tras varios fallos seguidos, y
+# si eso pasa nadie se entera hasta que se pierde un evento. Estos jobs
+# empujan lo mismo desde fuera; todas las acciones son idempotentes, asi que
+# si el trigger ya corrio esto no duplica nada.
+name: eventos-recordatorios
+
+on:
+  schedule:
+    # 12:30 UTC = 6:30am Mexico — reagenda Calendar y repasa tareas Kommo
+    - cron: "30 12 * * *"
+    # 13:30 UTC lunes = 7:30am Mexico — media hora despues del trigger propio,
+    # para que el primario gane y esto solo cubra si fallo
+    - cron: "30 13 * * 1"
+  workflow_dispatch:
+    inputs:
+      forzar_resumen:
+        description: "Mandar el resumen aunque ya se haya enviado hoy"
+        type: boolean
+        default: false
+
+jobs:
+  recordatorios:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BASE: ${{ vars.VENTAS_BASE_URL || 'https://lightcyan-reindeer-284498.hostingersite.com' }}
+    steps:
+      - name: Verificar conexion Hostinger - Apps Script
+        run: |
+          echo "GET $BASE/api/ventas/conexion-check"
+          code=$(curl -sS -o /tmp/conexion.json -w "%{http_code}" --max-time 120 \
+            "$BASE/api/ventas/conexion-check" || echo "000")
+          echo "HTTP $code"
+          cat /tmp/conexion.json || true
+          echo
+          if [ "$code" != "200" ]; then
+            echo "::error::La conexion Hostinger - Apps Script tiene problemas (ver JSON arriba)."
+            echo "::error::Suele ser URL_BODASESOR_DIRECCION_SHEETS apuntando a una implementacion vieja."
+            exit 1
+          fi
+
+      - name: Reagendar eventos en Google Calendar
+        if: always()
+        run: |
+          echo "GET $BASE/api/ventas/calendar-sync"
+          code=$(curl -sS -o /tmp/cal.json -w "%{http_code}" --max-time 300 \
+            "$BASE/api/ventas/calendar-sync" || echo "000")
+          echo "HTTP $code"
+          head -c 4000 /tmp/cal.json || true
+          echo
+          [ "$code" = "200" ] || { echo "::error::calendar-sync fallo"; exit 1; }
+
+      - name: Repasar tareas de recordatorio en Kommo
+        if: always()
+        run: |
+          echo "GET $BASE/api/ventas/kommo-tasks-backfill"
+          code=$(curl -sS -o /tmp/tasks.json -w "%{http_code}" --max-time 300 \
+            "$BASE/api/ventas/kommo-tasks-backfill" || echo "000")
+          echo "HTTP $code"
+          head -c 4000 /tmp/tasks.json || true
+          echo
+          [ "$code" = "200" ] || { echo "::error::kommo-tasks-backfill fallo"; exit 1; }
+
+      # Solo el cron del lunes y el disparo manual mandan el resumen.
+      - name: Resumen de la semana (respaldo del trigger del lunes)
+        if: always() && (github.event.schedule == '30 13 * * 1' || github.event_name == 'workflow_dispatch')
+        run: |
+          FORCE=0
+          if [ "${{ github.event.inputs.forzar_resumen }}" = "true" ]; then FORCE=1; fi
+          echo "GET $BASE/api/ventas/calendar-digest?force=$FORCE"
+          code=$(curl -sS -o /tmp/digest.json -w "%{http_code}" --max-time 240 \
+            "$BASE/api/ventas/calendar-digest?force=$FORCE" || echo "000")
+          echo "HTTP $code"
+          head -c 4000 /tmp/digest.json || true
+          echo
+          [ "$code" = "200" ] || { echo "::error::calendar-digest fallo"; exit 1; }

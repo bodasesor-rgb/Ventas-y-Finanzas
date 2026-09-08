@@ -7,6 +7,8 @@
  * Luego: Nueva implementación /exec → URL en Hostinger → reiniciar Node.
  *
  * REPARACIONES acumuladas:
+ *   v39: el resumen del lunes verifica la conexión con Hostinger (URL /exec
+ *        vieja, version desfasada) y solo se manda una vez al dia
  *   v38: cada evento cerrado se agenda en Google Calendar (recordatorio la
  *        víspera) + resumen "esta semana" los lunes 7am
  *   v37: rellena Venta/Pagado/Fecha vacíos sin pisar Fecha de cierre;
@@ -18,10 +20,10 @@
  * luego installEventosCalendarTriggers -> ▶ Ejecutar.
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-09-08-v38';
+var SCRIPT_VERSION = '2026-09-08-v39';
+var HOSTINGER_BASE = 'https://lightcyan-reindeer-284498.hostingersite.com';
 /** Hostinger: tick cada minuto para que los cierres suban al Sheet al momento. */
-var VENTAS_TICK_URL =
-  'https://lightcyan-reindeer-284498.hostingersite.com/api/ventas/tick';
+var VENTAS_TICK_URL = HOSTINGER_BASE + '/api/ventas/tick';
 var METRICAS_MARKER = 'BOT_METRICAS_V14';
 var METRICAS_SEMANAL_MARKER = 'BOT_METRICAS_SEMANAL_V28';
 var PNL_MARKER = 'BOT_PNL_MESES_V17';
@@ -48,6 +50,8 @@ var CAL_TIMEZONE = 'America/Mexico_City';
 var CAL_TAG_PREFIX = '[bodasesor-deal:';
 var CAL_DIGEST_PREFIX = '📅 ';
 var CAL_DIGEST_HOUR = 8;
+/** Evita que el motor de respaldo mande un segundo resumen el mismo día. */
+var DIGEST_LAST_DAY_KEY = 'EVENTOS_DIGEST_LAST_DAY';
 /** Duración por defecto cuando el Horario sí trae hora de inicio. */
 var CAL_EVENT_HOURS = 5;
 var DIAS_ES = [
@@ -759,6 +763,83 @@ function syncEventosCalendar_(data) {
   };
 }
 
+function fetchJsonHostinger_(path) {
+  try {
+    var res = UrlFetchApp.fetch(HOSTINGER_BASE + path, {
+      method: 'get',
+      muteHttpExceptions: true,
+      followRedirects: true,
+    });
+    if (res.getResponseCode() !== 200) {
+      return { ok: false, error: 'HTTP ' + res.getResponseCode() };
+    }
+    return { ok: true, data: JSON.parse(res.getContentText()) };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+/**
+ * Revisa que Hostinger siga hablando con ESTA implementación.
+ *
+ * El fallo que ya nos pego dos veces: se publica una implementación nueva y
+ * la variable URL_BODASESOR_DIRECCION_SHEETS de Hostinger sigue apuntando a
+ * la vieja (o trae solo el ID). Como este código corre en la implementación
+ * nueva, si /api/pnl/apps-script-status reporta otra versión es que Hostinger
+ * está pegando a otro lado.
+ */
+function verificarConexion_() {
+  var problemas = [];
+  var health = fetchJsonHostinger_('/health');
+  var versionReportada = '';
+
+  if (!health.ok) {
+    problemas.push('Hostinger no responde /health (' + health.error + ')');
+  } else {
+    var env = health.data.env || {};
+    if (!env.hasAppsScriptUrl) {
+      problemas.push('Falta URL_BODASESOR_DIRECCION_SHEETS en Hostinger');
+    } else if (!env.appsScriptUrlLooksValid) {
+      problemas.push(
+        'URL_BODASESOR_DIRECCION_SHEETS mal puesta: debe ser la URL completa ' +
+          'https://script.google.com/macros/s/<ID>/exec'
+      );
+    }
+    if (!env.hasKommoAccessToken || !env.hasKommoBaseUrl) {
+      problemas.push('Faltan credenciales de Kommo en Hostinger');
+    }
+    var ga4 = health.data.ga4 || {};
+    if (ga4.ok === false) {
+      problemas.push(
+        'GA4 sin credenciales (' + (ga4.missing || []).join(', ') + ')'
+      );
+    }
+  }
+
+  var status = fetchJsonHostinger_('/api/pnl/apps-script-status');
+  if (!status.ok) {
+    problemas.push('Hostinger no pudo hablar con el Apps Script (' + status.error + ')');
+  } else {
+    versionReportada = String(status.data.version || '');
+    if (versionReportada && versionReportada !== SCRIPT_VERSION) {
+      problemas.push(
+        'Hostinger sigue pegando a una implementación vieja: reporta ' +
+          versionReportada +
+          ' y este script es ' +
+          SCRIPT_VERSION +
+          '. Publica implementación nueva y pon su URL /exec en Hostinger.'
+      );
+    }
+  }
+
+  return {
+    ok: problemas.length === 0,
+    version: SCRIPT_VERSION,
+    versionReportadaPorHostinger: versionReportada,
+    problemas: problemas,
+  };
+}
+
 /** Lunes 00:00 de la semana de d. */
 function startOfWeekMonday_(d) {
   var day = d.getDay(); // 0 domingo
@@ -769,9 +850,15 @@ function startOfWeekMonday_(d) {
 /**
  * Resumen semanal: notifica en la computadora cuántos eventos hay esta semana.
  * Manda correo y crea un aviso en Calendar con popup, que es lo que dispara la
- * notificación de escritorio. Trigger: lunes 7am.
+ * notificación de escritorio.
+ *
+ * Lo empujan dos motores independientes (trigger de Apps Script los lunes 7am
+ * y GitHub Actions media hora después). Por eso solo se manda una vez al día:
+ * el segundo motor es respaldo, no una segunda notificación. data.force lo
+ * salta para probar a mano.
  */
-function weeklyEventosDigest() {
+function weeklyEventosDigest(data) {
+  data = data || {};
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(EVENTOS_SHEET);
   if (!sheet) {
@@ -779,6 +866,16 @@ function weeklyEventosDigest() {
   }
 
   var now = new Date();
+  var hoyKey = Utilities.formatDate(now, CAL_TIMEZONE, 'yyyy-MM-dd');
+  var props = PropertiesService.getScriptProperties();
+  if (!data.force && props.getProperty(DIGEST_LAST_DAY_KEY) === hoyKey) {
+    return {
+      ok: true,
+      version: SCRIPT_VERSION,
+      skipped: 'ya_se_envio_hoy',
+      dia: hoyKey,
+    };
+  }
   var lunes = startOfWeekMonday_(now);
   var domingo = new Date(
     lunes.getFullYear(),
@@ -835,14 +932,26 @@ function weeklyEventosDigest() {
     return a.fecha.getTime() - b.fecha.getTime();
   });
 
-  var titulo = semana.length
-    ? 'Esta semana: ' + semana.length + ' evento(s)'
-    : 'Esta semana: sin eventos agendados';
+  var conexion = verificarConexion_();
+
+  var titulo =
+    (conexion.ok ? '' : '⚠ REVISAR CONEXIÓN — ') +
+    (semana.length
+      ? 'Esta semana: ' + semana.length + ' evento(s)'
+      : 'Esta semana: sin eventos agendados');
 
   var cuerpo = [
     'Semana del ' + calFmtFecha_(lunes) + ' al ' + calFmtFecha_(domingo),
     '',
   ];
+
+  if (!conexion.ok) {
+    cuerpo.push('⚠ PROBLEMAS DE CONEXIÓN (los cierres pueden no estar subiendo):');
+    for (var c = 0; c < conexion.problemas.length; c++) {
+      cuerpo.push('• ' + conexion.problemas[c]);
+    }
+    cuerpo.push('');
+  }
   if (semana.length) {
     for (var i = 0; i < semana.length; i++) {
       var e = semana[i];
@@ -893,9 +1002,13 @@ function weeklyEventosDigest() {
     Logger.log('weeklyEventosDigest mail: ' + errMail);
   }
 
+  // Marcar al final: si algo revienta antes, el respaldo debe reintentar.
+  props.setProperty(DIGEST_LAST_DAY_KEY, hoyKey);
+
   return {
     ok: true,
     version: SCRIPT_VERSION,
+    conexion: conexion,
     semanaDel: calFmtFecha_(lunes),
     semanaAl: calFmtFecha_(domingo),
     eventos: semana.length,
@@ -1986,7 +2099,10 @@ function doPost(e) {
       return json_(syncEventosCalendar_(data));
     }
     if (data && data.action === 'weeklyEventosDigest') {
-      return json_(weeklyEventosDigest());
+      return json_(weeklyEventosDigest(data));
+    }
+    if (data && data.action === 'verificarConexion') {
+      return json_(verificarConexion_());
     }
     if (data && data.action === 'installEventosCalendarTriggers') {
       return json_(installEventosCalendarTriggers());

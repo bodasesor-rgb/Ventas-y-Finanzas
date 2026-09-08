@@ -922,11 +922,16 @@ const handleCalendarSync = async (_req, res) => {
 };
 exports.ventasRouter.post("/api/ventas/calendar-sync", handleCalendarSync);
 exports.ventasRouter.get("/api/ventas/calendar-sync", handleCalendarSync);
-/** Dispara el resumen "esta semana" sin esperar al lunes. */
-const handleCalendarDigest = async (_req, res) => {
+/**
+ * Resumen "esta semana". Sin force el Apps Script solo lo manda una vez al
+ * día, así que este endpoint sirve de respaldo del trigger del lunes sin
+ * duplicar el correo. force=1 para probar a mano.
+ */
+const handleCalendarDigest = async (req, res) => {
+    const force = req.query.force === "1" || req.query.force === "true";
     try {
-        const result = await (0, appsScriptClient_1.postToAppsScript)({ action: "weeklyEventosDigest" }, { timeoutMs: 180000 });
-        res.status(200).json({ ok: true, result });
+        const result = await (0, appsScriptClient_1.postToAppsScript)({ action: "weeklyEventosDigest", force }, { timeoutMs: 180000 });
+        res.status(200).json({ ok: true, force, result });
     }
     catch (err) {
         res.status(502).json({
@@ -937,6 +942,25 @@ const handleCalendarDigest = async (_req, res) => {
 };
 exports.ventasRouter.post("/api/ventas/calendar-digest", handleCalendarDigest);
 exports.ventasRouter.get("/api/ventas/calendar-digest", handleCalendarDigest);
+/**
+ * ¿Hostinger sigue hablando con la implementación actual del Apps Script?
+ * Devuelve 503 si no, para que un monitor externo lo note.
+ */
+const handleConexionCheck = async (_req, res) => {
+    try {
+        const result = await (0, appsScriptClient_1.postToAppsScript)({ action: "verificarConexion" });
+        const ok = result.ok !== false && !result.problemas?.length;
+        res.status(ok ? 200 : 503).json({ ok, result });
+    }
+    catch (err) {
+        res.status(503).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+};
+exports.ventasRouter.post("/api/ventas/conexion-check", handleConexionCheck);
+exports.ventasRouter.get("/api/ventas/conexion-check", handleConexionCheck);
 /** Instala los triggers de Apps Script (lunes 7am + reagenda diaria 5am). */
 const handleCalendarInstall = async (_req, res) => {
     try {
