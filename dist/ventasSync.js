@@ -65,18 +65,50 @@ async function syncDealToSheet(leadId, webhookBody) {
         attempted: false,
         ok: false,
     };
+    // Sin cliente (típico cuando Kommo API da 401 y el webhook viene vacío)
+    // NUNCA escribir fila fantasma: ensucia el Sheet y dispara "duplicados" vacíos.
+    const clienteOk = Boolean(String(fila.cliente || "").trim());
+    if (!clienteOk) {
+        sheetWrite.attempted = true;
+        sheetWrite.ok = false;
+        sheetWrite.action = "skipped_incomplete";
+        sheetWrite.error = kommoApiError
+            ? `Sin datos de cliente (Kommo API falló: ${kommoApiError.slice(0, 180)})`
+            : "Sin nombre de cliente; no se escribe al Sheet";
+        console.warn("[ventas][fase2] SKIP incompleto", {
+            dealId: fila.kommoDealId,
+            dataSource,
+            kommoApiError,
+        });
+        const incomplete = {
+            startedAt,
+            finishedAt: new Date().toISOString(),
+            dealId: fila.kommoDealId,
+            dataSource,
+            kommoApiError,
+            fila,
+            values,
+            sheetWrite,
+            headers: mapDealToFila_1.SHEET_HEADERS,
+        };
+        lastSync = incomplete;
+        // No marcar poll synced: cuando el token vuelva, reintenta.
+        return incomplete;
+    }
     if (appsScriptUrl()) {
         sheetWrite.attempted = true;
         try {
             const year = (0, mapDealToFila_1.yearFromFecha)(fila.fechaDeCierre) || new Date().getUTCFullYear();
             const sheetName = `Eventos ${year}`;
             const fp = (0, eventFingerprint_1.eventFingerprintFromFila)(fila);
+            // 1) cache local  2) leer Eventos del Sheet (CSV)  3) Apps Script
             // Si el deal ya está, Apps Script v37 rellena Venta/Pagado/Fecha vacíos
             // sin pisar Fecha de cierre.
             let dupDeal = (0, fingerprintStore_1.findDuplicateDealId)(fp, fila.kommoDealId);
             let dupSource = dupDeal ? "cache" : "";
             if (!dupDeal) {
                 const inSheet = await (0, sheetEventosReader_1.findDuplicateInSheet)(fp, fila.kommoDealId, year);
+                // Misma huella con OTRO dealId → duplicado real. Mismo deal → dejar pasar.
                 if (inSheet && inSheet.dealId && inSheet.dealId !== fila.kommoDealId) {
                     dupDeal = inSheet.dealId;
                     dupSource = "sheet_csv";

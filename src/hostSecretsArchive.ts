@@ -12,7 +12,8 @@ export type HostSecretKey =
   | "google-service-account"
   | "meta-token"
   | "brevo"
-  | "google-ads";
+  | "google-ads"
+  | "kommo-token";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 
@@ -21,6 +22,7 @@ const LOCAL_PATH: Record<HostSecretKey, string> = {
   "meta-token": path.join(DATA_DIR, "meta-token.json"),
   brevo: path.join(DATA_DIR, "brevo.json"),
   "google-ads": path.join(DATA_DIR, "google-ads.json"),
+  "kommo-token": path.join(DATA_DIR, "kommo-token.json"),
 };
 
 export function localSecretPath(key: HostSecretKey): string {
@@ -105,6 +107,7 @@ const HOST_SECRET_KEYS: HostSecretKey[] = [
   "meta-token",
   "brevo",
   "google-ads",
+  "kommo-token",
 ];
 
 async function restoreAllHostSecrets_(): Promise<
@@ -133,6 +136,7 @@ export function restoreHostSecretsOnBoot(): Promise<
         "meta-token": "error",
         brevo: "error",
         "google-ads": "error",
+        "kommo-token": "error",
       } as Record<HostSecretKey, string>;
     });
   }

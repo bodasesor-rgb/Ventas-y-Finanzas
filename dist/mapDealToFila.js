@@ -350,11 +350,12 @@ function monthKey_(raw) {
         .normalize("NFD")
         .replace(/\p{M}/gu, "");
 }
-/** "14 ago", "Septiembre 1, 2026", "September 1 2026" → DD/MM/YYYY */
+/** "14 ago", "14-agosto", "Septiembre 1, 2026", "September 1 2026" → DD/MM/YYYY */
 function extractFechaFromText(text, defaultYear) {
     if (!text)
         return "";
     const yearFallback = defaultYear || new Date().getFullYear();
+    // 14/08/2026 or 14-08-2026
     const dmy = text.match(/\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/);
     if (dmy) {
         let year = dmy[3];
@@ -362,9 +363,11 @@ function extractFechaFromText(text, defaultYear) {
             year = `20${year}`;
         return formatFechaDMY(dmy[1], dmy[2], year);
     }
+    // 2026-08-14 → 14/08/2026
     const iso = text.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
     if (iso)
         return formatFechaDMY(iso[3], iso[2], iso[1]);
+    // Lucy / EN: "Septiembre 1, 2026" / "September 1st 2026"
     const monthFirst = text.match(/\b([A-Za-zÁÉÍÓÚáéíóú]+)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(20\d{2}))?\b/i);
     if (monthFirst) {
         const month = MES_ES[monthKey_(monthFirst[1])];
@@ -373,6 +376,7 @@ function extractFechaFromText(text, defaultYear) {
             return formatFechaDMY(monthFirst[2], month, year);
         }
     }
+    // ES: 14 ago / 14 de agosto / 14-agosto
     const named = text.match(/\b(\d{1,2})\s*(?:de\s+)?[-\s]?([A-Za-zÁÉÍÓÚáéíóú]+)(?:\s+(20\d{2}))?\b/i);
     if (named) {
         const month = MES_ES[monthKey_(named[2])];
@@ -390,6 +394,7 @@ function looksLikeTimeOnly(s) {
     const t = s.trim().toLowerCase();
     if (!t)
         return false;
+    // "7pm a 12am", "19:00-00:00", "7 pm - 12 am"
     if (/\b\d{1,2}\s*(:\d{2})?\s*(am|pm)\b/.test(t) &&
         !/\b\d{1,2}[\/\-.]\d{1,2}/.test(t) &&
         !/\b(?:ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic|jan|apr|aug|dec)/i.test(t)) {
@@ -408,6 +413,7 @@ function extractHorarioBit_(s) {
 }
 /**
  * Campo Kommo "Fecha y horario" → columnas Fecha del evento + Horario.
+ * Acepta unix, ISO, "14/08/2026 18:00", "Septiembre 1, 2026", "7pm a 12am".
  */
 function parseFechaYHorario(raw) {
     if (raw === undefined || raw === null || raw === "") {
@@ -421,16 +427,20 @@ function parseFechaYHorario(raw) {
         const n = Number(s);
         return mexicoParts(n > 1e12 ? Math.floor(n / 1000) : n);
     }
+    // Solo día de la semana ("martes") — no es fecha ni horario útil
     if (looksLikeWeekdayOnly(s)) {
         return { fecha: "", horario: "" };
     }
+    // Solo horario: "7pm a 12am"
     if (looksLikeTimeOnly(s)) {
         return { fecha: "", horario: s };
     }
+    // ISO / "2026-08-14T18:00:00"
     const isoMs = Date.parse(s);
     if (!Number.isNaN(isoMs) && /\d{4}-\d{2}-\d{2}/.test(s)) {
         return mexicoParts(Math.floor(isoMs / 1000));
     }
+    // "14/08/2026 18:00" o "14-08-2026 18:00"
     const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?:\s+(\d{1,2}):(\d{2}))?/);
     if (m) {
         let year = m[3];
@@ -444,6 +454,7 @@ function parseFechaYHorario(raw) {
     if (fechaNamed) {
         return { fecha: fechaNamed, horario: extractHorarioBit_(s) };
     }
+    // YYYY-MM-DD → DD/MM/YYYY
     const isoOnly = s.match(/^(20\d{2})-(\d{2})-(\d{2})$/);
     if (isoOnly) {
         return {
@@ -451,6 +462,7 @@ function parseFechaYHorario(raw) {
             horario: "",
         };
     }
+    // Texto raro: no tirar la fecha a Horario
     return { fecha: "", horario: looksLikeTimeOnly(s) ? s : "" };
 }
 function mesFromFechaCierre(fecha) {
@@ -480,7 +492,7 @@ function mapDealToFilaVentas(lead) {
     // de semana en Metricas (bug Mariana y similares).
     const fechaDeCierre = mexicoFechaDMY(lead.closed_at);
     let { fecha: fechaDelEvento, horario } = parseFechaYHorario(customFieldRaw(fields, kommoFieldIds_1.KOMMO_FIELD_IDS.FECHA_Y_HORARIO));
-    // Fallback fecha: Requerimientos, link, resumen Lucy, nombre
+    // Fallback fecha: Requerimientos, link cotización, resumen Lucy, nombre
     if (!fechaDelEvento) {
         const yearHint = yearFromFecha(fechaDeCierre) ?? undefined;
         const lucyResumen = customFieldValue(fields, 1048786);

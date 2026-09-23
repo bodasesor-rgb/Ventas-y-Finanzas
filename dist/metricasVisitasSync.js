@@ -253,8 +253,9 @@ function buildWeekPayload_(layout, daily, opts) {
             todayUtc,
             empty: !alreadyFilled,
             force: force || !onlyEmpty,
-        }))
+        })) {
             continue;
+        }
         // Para semana actual, sumar solo hasta ayer
         let endCap = weekEnd;
         if (weekEnd > todayUtc) {

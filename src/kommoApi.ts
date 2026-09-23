@@ -1,7 +1,8 @@
+import { getKommoAccessToken, getKommoBaseUrl } from "./kommoAuth";
 import type { KommoContactEmbedded, KommoLead, KommoWebhookBody } from "./types";
 
-const KOMMO_BASE = () => process.env.KOMMO_BASE_URL?.replace(/\/$/, "");
-const KOMMO_TOKEN = () => process.env.KOMMO_ACCESS_TOKEN;
+const KOMMO_BASE = () => getKommoBaseUrl();
+const KOMMO_TOKEN = () => getKommoAccessToken();
 
 type LeadLike = Partial<KommoLead> & { id?: number | string };
 

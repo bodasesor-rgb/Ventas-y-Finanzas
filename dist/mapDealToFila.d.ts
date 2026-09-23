@@ -15,11 +15,11 @@ export declare function companyFromEmailDomain_(email: string): string;
 export declare function resolveClienteName(contact: KommoContactEmbedded | undefined, leadName: string | undefined, email: string): string;
 /** Año desde DD/MM/YYYY o YYYY-MM-DD */
 export declare function yearFromFecha(fecha: string): number | null;
-/** "14 ago", "14-agosto", "14 de agosto 2026" → DD/MM/YYYY */
+/** "14 ago", "14-agosto", "Septiembre 1, 2026", "September 1 2026" → DD/MM/YYYY */
 export declare function extractFechaFromText(text: string, defaultYear?: number): string;
 /**
  * Campo Kommo "Fecha y horario" → columnas Fecha del evento + Horario.
- * Acepta unix, ISO, o texto tipo "14/08/2026 18:00" / "7pm a 12am".
+ * Acepta unix, ISO, "14/08/2026 18:00", "Septiembre 1, 2026", "7pm a 12am".
  */
 export declare function parseFechaYHorario(raw: unknown): {
     fecha: string;

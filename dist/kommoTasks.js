@@ -1,4 +1,8 @@
 "use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.mxUnixAt_ = mxUnixAt_;
+exports.ensureEventReminderTasks = ensureEventReminderTasks;
+exports.backfillEventReminderTasks = backfillEventReminderTasks;
 /**
  * Recordatorios de eventos cerrados en el calendario de Kommo.
  *
@@ -9,10 +13,6 @@
  * Google Calendar lleva el evento en sí; esto es para que el equipo lo vea
  * dentro de Kommo sin salir del CRM.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.mxUnixAt_ = mxUnixAt_;
-exports.ensureEventReminderTasks = ensureEventReminderTasks;
-exports.backfillEventReminderTasks = backfillEventReminderTasks;
 const kommoApi_1 = require("./kommoApi");
 const mapDealToFila_1 = require("./mapDealToFila");
 const sheetEventosReader_1 = require("./sheetEventosReader");
@@ -22,10 +22,12 @@ const REMINDER_HOUR = 9;
 /** Marca en el texto para no duplicar tareas al re-sincronizar el deal. */
 const TASK_TAG = "[evt";
 function kommoAuth_() {
-    const base = process.env.KOMMO_BASE_URL?.replace(/\/$/, "");
-    const token = process.env.KOMMO_ACCESS_TOKEN;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getKommoAccessToken, getKommoBaseUrl } = require("./kommoAuth");
+    const base = getKommoBaseUrl();
+    const token = getKommoAccessToken();
     if (!base || !token) {
-        throw new Error("Faltan KOMMO_BASE_URL o KOMMO_ACCESS_TOKEN en variables de entorno");
+        throw new Error("Faltan KOMMO_BASE_URL o KOMMO_ACCESS_TOKEN (env o data/kommo-token.json)");
     }
     return { base, token };
 }
@@ -50,7 +52,7 @@ function mxUnixAt_(fechaDMY, hour) {
     const naive = Date.UTC(Number(m[3]), Number(m[2]) - 1, Number(m[1]), hour);
     if (!Number.isFinite(naive))
         return null;
-    return Math.floor((naive - mxOffsetMinutes_(naive) * 60000) / 1000);
+    return Math.floor((naive - mxOffsetMinutes_(naive) * 60_000) / 1000);
 }
 function fmtMx_(unixSeconds) {
     return new Intl.DateTimeFormat("es-MX", {
@@ -245,3 +247,4 @@ async function backfillEventReminderTasks() {
     }
     return { eventosFuturos: proximos.length, creadas, items };
 }
+//# sourceMappingURL=kommoTasks.js.map

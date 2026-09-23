@@ -69,6 +69,12 @@ import {
 } from "./metaSocialClient";
 import { listMetaAdAccounts } from "./metaAdsClient";
 import { saveServiceAccountJsonDurable } from "./googleAuth";
+import {
+  getKommoAccessToken,
+  getKommoBaseUrl,
+  kommoCredentialsSource,
+  saveKommoTokenStore,
+} from "./kommoAuth";
 import { restoreHostSecretsOnBoot } from "./hostSecretsArchive";
 
 function publicBaseUrl_(req?: { protocol?: string; get?: (h: string) => string | undefined }): string {
@@ -161,12 +167,13 @@ ventasRouter.post(
           );
         }
       } catch (err) {
-        console.error("[ventas] Error en sync background", err);
-        try {
-          await syncDealToSheet(leadId, body);
-        } catch (err2) {
-          console.error("[ventas] sync fallback fail", err2);
-        }
+        // NUNCA escribir a ciegas: con token caído esto metía filas fantasma
+        // de leads abiertos (nombres raros / vacíos). Mejor reintentar en el poll.
+        console.error(
+          "[ventas] Error al verificar ganado; NO se escribe al Sheet",
+          leadId,
+          err instanceof Error ? err.message : err
+        );
       }
       try {
         await runPollTick();
@@ -633,6 +640,128 @@ ventasRouter.post("/api/ventas/meta-setup", async (req, res) => {
   } catch (err) {
     res.status(400).json({
       ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+/**
+ * Guarda el access token de Kommo en data/ + Drive (Hostinger trunca env largos).
+ * Body: { access_token, base_url? }
+ */
+ventasRouter.post("/api/ventas/kommo-setup", async (req, res) => {
+  try {
+    const body = (req.body || {}) as {
+      access_token?: string;
+      token?: string;
+      base_url?: string;
+      baseUrl?: string;
+    };
+    const access_token = String(body.access_token || body.token || "").trim();
+    if (!access_token) {
+      res.status(400).json({
+        ok: false,
+        error: "Falta access_token",
+        hint: 'Body JSON: { "access_token": "...", "base_url": "https://xxx.kommo.com" }',
+      });
+      return;
+    }
+    const base_url = String(
+      body.base_url || body.baseUrl || process.env.KOMMO_BASE_URL || ""
+    )
+      .trim()
+      .replace(/\/$/, "");
+    const saved = saveKommoTokenStore({
+      access_token,
+      base_url: base_url || undefined,
+    });
+
+    let probe: {
+      ok: boolean;
+      status?: number;
+      bodyPreview?: string;
+      error?: string;
+    } = { ok: false };
+    const base = saved.base_url || getKommoBaseUrl();
+    if (!base) {
+      probe = {
+        ok: false,
+        error: "Falta base_url (pásala o define KOMMO_BASE_URL)",
+      };
+    } else {
+      try {
+        const r = await fetch(`${base}/api/v4/account`, {
+          headers: {
+            Authorization: `Bearer ${saved.access_token}`,
+            Accept: "application/json",
+          },
+        });
+        const text = await r.text();
+        probe = {
+          ok: r.ok,
+          status: r.status,
+          bodyPreview: text.slice(0, 200),
+        };
+      } catch (err) {
+        probe = {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    }
+
+    res.status(probe.ok ? 200 : 502).json({
+      ok: probe.ok,
+      saved: {
+        tokenLen: saved.access_token.length,
+        base_url: saved.base_url || null,
+        tokenFrom: "file",
+      },
+      probe,
+      message: probe.ok
+        ? "Token Kommo OK. Los cierres deberían volver a escribirse al Sheet."
+        : "Token guardado pero Kommo rechazó la prueba. Revisa el token / base_url.",
+      hint: "Tras guardar, GET /api/ventas/sync-latest o espera el próximo webhook/tick.",
+    });
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+ventasRouter.get("/api/ventas/kommo-status", async (_req, res) => {
+  const src = kommoCredentialsSource();
+  const base = getKommoBaseUrl();
+  const token = getKommoAccessToken();
+  if (!base || !token) {
+    res.status(200).json({
+      ok: false,
+      ...src,
+      error: "Faltan credenciales Kommo",
+      hint: 'POST /api/ventas/kommo-setup { "access_token", "base_url" }',
+    });
+    return;
+  }
+  try {
+    const r = await fetch(`${base}/api/v4/account`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
+    });
+    const text = await r.text();
+    res.status(r.ok ? 200 : 502).json({
+      ok: r.ok,
+      ...src,
+      status: r.status,
+      bodyPreview: text.slice(0, 200),
+    });
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      ...src,
       error: err instanceof Error ? err.message : String(err),
     });
   }
@@ -1298,8 +1427,9 @@ ventasRouter.get("/health", (_req, res) => {
     service: "ventas-y-finanzas",
     phase: scriptUrl ? 2 : 1,
     env: {
-      hasKommoBaseUrl: Boolean(process.env.KOMMO_BASE_URL),
-      hasKommoAccessToken: Boolean(process.env.KOMMO_ACCESS_TOKEN),
+      hasKommoBaseUrl: Boolean(getKommoBaseUrl()),
+      hasKommoAccessToken: Boolean(getKommoAccessToken()),
+      kommoTokenFrom: kommoCredentialsSource().tokenFrom,
       hasAppsScriptUrl: Boolean(scriptUrl),
       appsScriptUrlLooksValid:
         scriptUrl.includes("script.google.com") && scriptUrl.includes("/exec"),
@@ -1316,15 +1446,18 @@ ventasRouter.get("/health", (_req, res) => {
 });
 
 ventasRouter.get("/health/kommo", async (_req, res) => {
-  const base = process.env.KOMMO_BASE_URL?.replace(/\/$/, "");
-  const token = process.env.KOMMO_ACCESS_TOKEN;
+  const base = getKommoBaseUrl();
+  const token = getKommoAccessToken();
+  const src = kommoCredentialsSource();
 
   if (!base || !token) {
     res.status(500).json({
       ok: false,
-      error: "Faltan KOMMO_BASE_URL o KOMMO_ACCESS_TOKEN en el entorno",
+      error:
+        "Faltan KOMMO_BASE_URL o KOMMO_ACCESS_TOKEN (env o data/kommo-token.json)",
       hasKommoBaseUrl: Boolean(base),
       hasKommoAccessToken: Boolean(token),
+      ...src,
     });
     return;
   }
@@ -1338,11 +1471,13 @@ ventasRouter.get("/health/kommo", async (_req, res) => {
       ok: r.ok,
       status: r.status,
       bodyPreview: text.slice(0, 300),
+      ...src,
     });
   } catch (err) {
     res.status(502).json({
       ok: false,
       error: err instanceof Error ? err.message : String(err),
+      ...src,
     });
   }
 });

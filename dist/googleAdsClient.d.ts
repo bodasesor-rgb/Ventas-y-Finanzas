@@ -7,6 +7,10 @@ export type GoogleAdsCredentials = {
     login_customer_id?: string;
     /** Si true, intenta JWT del service account (requiere SA como usuario Ads + Workspace/MCC). */
     use_service_account?: boolean;
+    /** ga4 = inversión/clics desde Analytics; conversiones 10% clics. */
+    source?: "ga4" | "google_ads_api";
+    conversionRule?: string;
+    updatedAt?: string;
 };
 export type WeekGoogleAdsMetrics = {
     since: string;
@@ -20,6 +24,10 @@ export type WeekGoogleAdsMetrics = {
 };
 /** Carga credenciales: archivo → env GOOGLE_ADS (JSON) → vars sueltas. */
 export declare function loadGoogleAdsCredentials(): GoogleAdsCredentials | null;
+/** Recuerda que Google Ads se llena desde GA4 (sobrevive deploy vía Drive). */
+export declare function saveGoogleAdsGa4Mode(): {
+    localPath: string;
+};
 export declare function saveGoogleAdsCredentials(raw: Partial<GoogleAdsCredentials>): GoogleAdsCredentials;
 export declare function googleAdsApiConfigured(): {
     ok: boolean;
@@ -55,9 +63,11 @@ export declare function probeGoogleAdsApi(): Promise<{
     error?: string;
 }>;
 /**
- * Fallback: costo/clics desde GA4 (Google Ads vinculado).
- * Conversiones: regla de negocio Bodasesor = 10% de los clics
- * (no hay Google Ads API; el histórico del Sheet coincide ~10%).
+ * Costo/clics desde GA4 (Google Ads vinculado a la propiedad).
+ * advertiserAdCost exige una dimensión de campaña; date solo da 400.
+ * PMax llega como sessionCampaignName (p.ej. "Pmax - Banquetes") y en GA4
+ * se atribuye a google / cpc — no hay que filtrar source/medium.
+ * Conversiones: 10% de los clics (sin Ads API no hay conversions reales).
  */
 export declare function fetchGoogleAdsGa4Daily(opts: {
     since: string;

@@ -18,6 +18,7 @@ const LOCAL_PATH = {
     "meta-token": path_1.default.join(DATA_DIR, "meta-token.json"),
     brevo: path_1.default.join(DATA_DIR, "brevo.json"),
     "google-ads": path_1.default.join(DATA_DIR, "google-ads.json"),
+    "kommo-token": path_1.default.join(DATA_DIR, "kommo-token.json"),
 };
 function localSecretPath(key) {
     return LOCAL_PATH[key];
@@ -90,6 +91,7 @@ const HOST_SECRET_KEYS = [
     "meta-token",
     "brevo",
     "google-ads",
+    "kommo-token",
 ];
 async function restoreAllHostSecrets_() {
     const out = {};
@@ -98,6 +100,7 @@ async function restoreAllHostSecrets_() {
     }
     return out;
 }
+/** Tras deploy: recupera SA/Meta/Brevo/Ads desde Drive si falta el archivo. */
 function restoreHostSecretsOnBoot() {
     if (!restoreOnce) {
         restoreOnce = restoreAllHostSecrets_().catch((err) => {
@@ -108,6 +111,7 @@ function restoreHostSecretsOnBoot() {
                 "meta-token": "error",
                 brevo: "error",
                 "google-ads": "error",
+                "kommo-token": "error",
             };
         });
     }

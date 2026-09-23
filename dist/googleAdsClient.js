@@ -4,8 +4,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.loadGoogleAdsCredentials = loadGoogleAdsCredentials;
-exports.saveGoogleAdsCredentials = saveGoogleAdsCredentials;
 exports.saveGoogleAdsGa4Mode = saveGoogleAdsGa4Mode;
+exports.saveGoogleAdsCredentials = saveGoogleAdsCredentials;
 exports.googleAdsApiConfigured = googleAdsApiConfigured;
 exports.googleAdsGa4Configured = googleAdsGa4Configured;
 exports.listGoogleAdsEnvKeysPresent = listGoogleAdsEnvKeysPresent;
@@ -73,6 +73,7 @@ function loadGoogleAdsCredentials() {
     }
     return null;
 }
+/** Recuerda que Google Ads se llena desde GA4 (sobrevive deploy vía Drive). */
 function saveGoogleAdsGa4Mode() {
     const prev = readCredFile_() || {};
     const next = {
@@ -313,9 +314,11 @@ async function probeGoogleAdsApi() {
     }
 }
 /**
- * Costo/clics desde GA4. advertiserAdCost exige campaña (date solo = 400).
- * PMax llega en sessionCampaignName y en GA4 va como google / cpc.
- * Conversiones: 10% de los clics (sin Ads API).
+ * Costo/clics desde GA4 (Google Ads vinculado a la propiedad).
+ * advertiserAdCost exige una dimensión de campaña; date solo da 400.
+ * PMax llega como sessionCampaignName (p.ej. "Pmax - Banquetes") y en GA4
+ * se atribuye a google / cpc — no hay que filtrar source/medium.
+ * Conversiones: 10% de los clics (sin Ads API no hay conversions reales).
  */
 async function fetchGoogleAdsGa4Daily(opts) {
     const sa = (0, googleAuth_1.loadServiceAccountJson)();

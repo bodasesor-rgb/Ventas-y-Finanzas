@@ -3,7 +3,7 @@
  * Hostinger borra data/ en cada deploy; los PDFs ya se restauran desde Drive.
  * SA / Meta / Brevo deben vivir igual (Apps Script v32+).
  */
-export type HostSecretKey = "google-service-account" | "meta-token" | "brevo" | "google-ads";
+export type HostSecretKey = "google-service-account" | "meta-token" | "brevo" | "google-ads" | "kommo-token";
 export declare function localSecretPath(key: HostSecretKey): string;
 export declare function archiveHostSecret(secretKey: HostSecretKey, json: unknown): Promise<{
     ok: true;
@@ -21,7 +21,7 @@ export declare function fetchHostSecret(secretKey: HostSecretKey): Promise<{
 }>;
 /** Escribe en data/ si falta el archivo (tras deploy). */
 export declare function restoreHostSecretIfMissing(secretKey: HostSecretKey): Promise<"restored" | "present" | "missing" | "error">;
-/** Una vez por proceso Node: intenta recuperar SA/Meta/Brevo tras deploy. */
+/** Tras deploy: recupera SA/Meta/Brevo/Ads desde Drive si falta el archivo. */
 export declare function restoreHostSecretsOnBoot(): Promise<Record<HostSecretKey, string>>;
 /** Guarda local + intenta Drive (no bloquea si Apps Script aún no es v32). */
 export declare function persistHostSecret(secretKey: HostSecretKey, json: unknown): Promise<{

@@ -35,11 +35,13 @@ export interface KommoTaskResult {
 }
 
 function kommoAuth_(): { base: string; token: string } {
-  const base = process.env.KOMMO_BASE_URL?.replace(/\/$/, "");
-  const token = process.env.KOMMO_ACCESS_TOKEN;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { getKommoAccessToken, getKommoBaseUrl } = require("./kommoAuth") as typeof import("./kommoAuth");
+  const base = getKommoBaseUrl();
+  const token = getKommoAccessToken();
   if (!base || !token) {
     throw new Error(
-      "Faltan KOMMO_BASE_URL o KOMMO_ACCESS_TOKEN en variables de entorno"
+      "Faltan KOMMO_BASE_URL o KOMMO_ACCESS_TOKEN (env o data/kommo-token.json)"
     );
   }
   return { base, token };

@@ -22,6 +22,7 @@ const googleAdsClient_1 = require("./googleAdsClient");
 const metaSocialClient_1 = require("./metaSocialClient");
 const metaAdsClient_1 = require("./metaAdsClient");
 const googleAuth_1 = require("./googleAuth");
+const kommoAuth_1 = require("./kommoAuth");
 const hostSecretsArchive_1 = require("./hostSecretsArchive");
 function publicBaseUrl_(req) {
     const env = (process.env.PUBLIC_BASE_URL ||
@@ -97,13 +98,9 @@ exports.ventasRouter.post("/webhooks/kommo/deal-won", (req, res) => {
             }
         }
         catch (err) {
-            console.error("[ventas] Error en sync background", err);
-            try {
-                await (0, ventasSync_1.syncDealToSheet)(leadId, body);
-            }
-            catch (err2) {
-                console.error("[ventas] sync fallback fail", err2);
-            }
+            // NUNCA escribir a ciegas: con token caído esto metía filas fantasma
+            // de leads abiertos (nombres raros / vacíos). Mejor reintentar en el poll.
+            console.error("[ventas] Error al verificar ganado; NO se escribe al Sheet", leadId, err instanceof Error ? err.message : err);
         }
         try {
             await (0, pollClosedDeals_1.runPollTick)();
@@ -530,6 +527,116 @@ exports.ventasRouter.post("/api/ventas/meta-setup", async (req, res) => {
         });
     }
 });
+/**
+ * Guarda el access token de Kommo en data/ + Drive (Hostinger trunca env largos).
+ * Body: { access_token, base_url? }
+ */
+exports.ventasRouter.post("/api/ventas/kommo-setup", async (req, res) => {
+    try {
+        const body = (req.body || {});
+        const access_token = String(body.access_token || body.token || "").trim();
+        if (!access_token) {
+            res.status(400).json({
+                ok: false,
+                error: "Falta access_token",
+                hint: 'Body JSON: { "access_token": "...", "base_url": "https://xxx.kommo.com" }',
+            });
+            return;
+        }
+        const base_url = String(body.base_url || body.baseUrl || process.env.KOMMO_BASE_URL || "")
+            .trim()
+            .replace(/\/$/, "");
+        const saved = (0, kommoAuth_1.saveKommoTokenStore)({
+            access_token,
+            base_url: base_url || undefined,
+        });
+        let probe = { ok: false };
+        const base = saved.base_url || (0, kommoAuth_1.getKommoBaseUrl)();
+        if (!base) {
+            probe = {
+                ok: false,
+                error: "Falta base_url (pásala o define KOMMO_BASE_URL)",
+            };
+        }
+        else {
+            try {
+                const r = await fetch(`${base}/api/v4/account`, {
+                    headers: {
+                        Authorization: `Bearer ${saved.access_token}`,
+                        Accept: "application/json",
+                    },
+                });
+                const text = await r.text();
+                probe = {
+                    ok: r.ok,
+                    status: r.status,
+                    bodyPreview: text.slice(0, 200),
+                };
+            }
+            catch (err) {
+                probe = {
+                    ok: false,
+                    error: err instanceof Error ? err.message : String(err),
+                };
+            }
+        }
+        res.status(probe.ok ? 200 : 502).json({
+            ok: probe.ok,
+            saved: {
+                tokenLen: saved.access_token.length,
+                base_url: saved.base_url || null,
+                tokenFrom: "file",
+            },
+            probe,
+            message: probe.ok
+                ? "Token Kommo OK. Los cierres deberían volver a escribirse al Sheet."
+                : "Token guardado pero Kommo rechazó la prueba. Revisa el token / base_url.",
+            hint: "Tras guardar, GET /api/ventas/sync-latest o espera el próximo webhook/tick.",
+        });
+    }
+    catch (err) {
+        res.status(500).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+});
+exports.ventasRouter.get("/api/ventas/kommo-status", async (_req, res) => {
+    const src = (0, kommoAuth_1.kommoCredentialsSource)();
+    const base = (0, kommoAuth_1.getKommoBaseUrl)();
+    const token = (0, kommoAuth_1.getKommoAccessToken)();
+    if (!base || !token) {
+        res.status(200).json({
+            ok: false,
+            ...src,
+            error: "Faltan credenciales Kommo",
+            hint: 'POST /api/ventas/kommo-setup { "access_token", "base_url" }',
+        });
+        return;
+    }
+    try {
+        const r = await fetch(`${base}/api/v4/account`, {
+            headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: "application/json",
+            },
+        });
+        const text = await r.text();
+        res.status(r.ok ? 200 : 502).json({
+            ok: r.ok,
+            ...src,
+            status: r.status,
+            bodyPreview: text.slice(0, 200),
+        });
+    }
+    catch (err) {
+        res.status(502).json({
+            ok: false,
+            ...src,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+});
 async function handleSyncSeguidores(req, res) {
     try {
         await (0, hostSecretsArchive_1.restoreHostSecretsOnBoot)();
@@ -910,7 +1017,7 @@ exports.ventasRouter.get("/api/ventas/sync-latest", async (_req, res) => {
  */
 const handleCalendarSync = async (_req, res) => {
     try {
-        const result = await (0, appsScriptClient_1.postToAppsScript)({ action: "syncEventosCalendar" }, { timeoutMs: 300000 });
+        const result = await (0, appsScriptClient_1.postToAppsScript)({ action: "syncEventosCalendar" }, { timeoutMs: 300_000 });
         res.status(200).json({ ok: true, result });
     }
     catch (err) {
@@ -930,7 +1037,7 @@ exports.ventasRouter.get("/api/ventas/calendar-sync", handleCalendarSync);
 const handleCalendarDigest = async (req, res) => {
     const force = req.query.force === "1" || req.query.force === "true";
     try {
-        const result = await (0, appsScriptClient_1.postToAppsScript)({ action: "weeklyEventosDigest", force }, { timeoutMs: 180000 });
+        const result = await (0, appsScriptClient_1.postToAppsScript)({ action: "weeklyEventosDigest", force }, { timeoutMs: 180_000 });
         res.status(200).json({ ok: true, force, result });
     }
     catch (err) {
@@ -1117,8 +1224,9 @@ exports.ventasRouter.get("/health", (_req, res) => {
         service: "ventas-y-finanzas",
         phase: scriptUrl ? 2 : 1,
         env: {
-            hasKommoBaseUrl: Boolean(process.env.KOMMO_BASE_URL),
-            hasKommoAccessToken: Boolean(process.env.KOMMO_ACCESS_TOKEN),
+            hasKommoBaseUrl: Boolean((0, kommoAuth_1.getKommoBaseUrl)()),
+            hasKommoAccessToken: Boolean((0, kommoAuth_1.getKommoAccessToken)()),
+            kommoTokenFrom: (0, kommoAuth_1.kommoCredentialsSource)().tokenFrom,
             hasAppsScriptUrl: Boolean(scriptUrl),
             appsScriptUrlLooksValid: scriptUrl.includes("script.google.com") && scriptUrl.includes("/exec"),
             appsScriptUrlTail,
@@ -1133,14 +1241,16 @@ exports.ventasRouter.get("/health", (_req, res) => {
     });
 });
 exports.ventasRouter.get("/health/kommo", async (_req, res) => {
-    const base = process.env.KOMMO_BASE_URL?.replace(/\/$/, "");
-    const token = process.env.KOMMO_ACCESS_TOKEN;
+    const base = (0, kommoAuth_1.getKommoBaseUrl)();
+    const token = (0, kommoAuth_1.getKommoAccessToken)();
+    const src = (0, kommoAuth_1.kommoCredentialsSource)();
     if (!base || !token) {
         res.status(500).json({
             ok: false,
-            error: "Faltan KOMMO_BASE_URL o KOMMO_ACCESS_TOKEN en el entorno",
+            error: "Faltan KOMMO_BASE_URL o KOMMO_ACCESS_TOKEN (env o data/kommo-token.json)",
             hasKommoBaseUrl: Boolean(base),
             hasKommoAccessToken: Boolean(token),
+            ...src,
         });
         return;
     }
@@ -1153,12 +1263,14 @@ exports.ventasRouter.get("/health/kommo", async (_req, res) => {
             ok: r.ok,
             status: r.status,
             bodyPreview: text.slice(0, 300),
+            ...src,
         });
     }
     catch (err) {
         res.status(502).json({
             ok: false,
             error: err instanceof Error ? err.message : String(err),
+            ...src,
         });
     }
 });

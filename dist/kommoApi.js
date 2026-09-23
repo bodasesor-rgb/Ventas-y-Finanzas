@@ -14,8 +14,9 @@ exports.fetchRecentLeads = fetchRecentLeads;
 exports.listKommoWebhooks = listKommoWebhooks;
 exports.ensureKommoStatusWebhook = ensureKommoStatusWebhook;
 exports.fetchRecentlyClosedLeads = fetchRecentlyClosedLeads;
-const KOMMO_BASE = () => process.env.KOMMO_BASE_URL?.replace(/\/$/, "");
-const KOMMO_TOKEN = () => process.env.KOMMO_ACCESS_TOKEN;
+const kommoAuth_1 = require("./kommoAuth");
+const KOMMO_BASE = () => (0, kommoAuth_1.getKommoBaseUrl)();
+const KOMMO_TOKEN = () => (0, kommoAuth_1.getKommoAccessToken)();
 /** Normaliza leads[status] tanto si viene como array, objeto suelto o {0:{…}}. */
 function asLeadList(value) {
     if (value == null)

@@ -203,6 +203,7 @@ async function pollClosedDealsOnce(limit = 40, opts) {
             }
             if (prev >= closedAt) {
                 // Campos pueden llenarse DESPUÉS del cierre (Monto, Anticipo, fecha).
+                // Si Kommo actualizó el lead, re-sync para rellenar huecos sin pisar cierre.
                 const touched = lead.updated_at || 0;
                 if (touched <= prev) {
                     skippedAlreadySynced++;

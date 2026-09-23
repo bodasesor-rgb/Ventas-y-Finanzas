@@ -1,7 +1,8 @@
 "use strict";
 /**
  * Huella de evento para no repetir filas en Eventos.
- * cliente + fecha evento + horario + tipo (sin fecha de cierre).
+ * cliente + fecha evento + horario + tipo (sin fecha de cierre:
+ * si Kommo cambia closed_at no se crea otra fila).
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.eventFingerprintFromValues = eventFingerprintFromValues;

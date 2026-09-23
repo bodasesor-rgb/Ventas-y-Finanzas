@@ -30,6 +30,11 @@ export interface BackfillResult {
 }
 /**
  * Repasa los eventos futuros del Sheet y crea las tareas que falten.
+ *
+ * Se parte del Sheet y no de los cierres de Kommo por dos razones: Kommo
+ * ignora order[closed_at]=desc (devuelve los más viejos de la ventana) y
+ * muchas fechas de evento solo existen en el Sheet porque se corrigen a mano.
+ *
  * Es el reintento que hace que una caída de la API de Kommo durante el cierre
  * no deje al evento sin recordatorio para siempre.
  */

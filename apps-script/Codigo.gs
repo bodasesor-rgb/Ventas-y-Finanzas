@@ -1,12 +1,14 @@
 /**
  * ============================================================
  * Apps Script - Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-08-30-v37
+ * VERSION: 2026-09-22-v40
  * ============================================================
  * PEGAR TODO ESTE ARCHIVO (borrar lo anterior -> pegar -> Guardar)
  * Luego: Nueva implementación /exec → URL en Hostinger → reiniciar Node.
  *
  * REPARACIONES acumuladas:
+ *   v40: rellena Cliente/Fecha de cierre vacíos al re-sync; permite
+ *        backup Drive del token Kommo (kommo-token)
  *   v39: el resumen del lunes verifica la conexión con Hostinger (URL /exec
  *        vieja, version desfasada) y solo se manda una vez al dia
  *   v38: cada evento cerrado se agenda en Google Calendar (recordatorio la
@@ -20,7 +22,7 @@
  * luego installEventosCalendarTriggers -> ▶ Ejecutar.
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-09-08-v39';
+var SCRIPT_VERSION = '2026-09-22-v40';
 var HOSTINGER_BASE = 'https://lightcyan-reindeer-284498.hostingersite.com';
 /** Hostinger: tick cada minuto para que los cierres suban al Sheet al momento. */
 var VENTAS_TICK_URL = HOSTINGER_BASE + '/api/ventas/tick';
@@ -448,12 +450,34 @@ function writeRowValues_(sheet, rowIndex, values) {
  */
 function fillMissingEventoFields_(sheet, rowIndex, values) {
   var filled = [];
+  var prevCliente = sheet.getRange(rowIndex, 1).getValue();
   var prevFecha = sheet.getRange(rowIndex, 2).getValue();
+  var prevCierre = sheet.getRange(rowIndex, 3).getValue();
   var prevHorario = sheet.getRange(rowIndex, 9).getValue();
+  var newCliente = values[0];
   var newFecha = values[1];
+  var newCierre = values[2];
   var newHorario = values[8];
   var newVenta = values[9];
   var newPagado = values[11];
+
+  // Filas fantasma (token Kommo caído): rellenar Cliente / Fecha de cierre
+  // solo si estaban vacíos. Nunca pisa un nombre o cierre ya capturado.
+  if (isEmptySheetCell_(prevCliente) && !isEmptySheetCell_(newCliente)) {
+    sheet.getRange(rowIndex, 1).setValue(newCliente);
+    filled.push('cliente');
+  }
+  if (isEmptySheetCell_(prevCierre) && !isEmptySheetCell_(newCierre)) {
+    sheet.getRange(rowIndex, 3).setValue(coerceEventosDate_(newCierre));
+    sheet.getRange(rowIndex, 3).setNumberFormat('dd/mm/yyyy');
+    filled.push('fechaCierre');
+    // Mes cierre (col Q = 17) solo si también estaba vacío
+    var prevMes = sheet.getRange(rowIndex, 17).getValue();
+    if (isEmptySheetCell_(prevMes) && !isEmptySheetCell_(values[16])) {
+      sheet.getRange(rowIndex, 17).setValue(values[16]);
+      filled.push('mesCierre');
+    }
+  }
 
   if (isEmptySheetCell_(prevFecha) && !isEmptySheetCell_(newFecha)) {
     sheet.getRange(rowIndex, 2).setValue(coerceEventosDate_(newFecha));
@@ -1912,6 +1936,7 @@ var HOST_SECRET_KEYS = {
   'meta-token': true,
   brevo: true,
   'google-ads': true,
+  'kommo-token': true,
 };
 
 function hostSecretFileName_(secretKey) {
@@ -2192,6 +2217,16 @@ function doPost(e) {
         ok: false,
         version: SCRIPT_VERSION,
         error: 'Falta dealId',
+      });
+    }
+    var clienteIn = String(values[0] || '').trim();
+    if (!clienteIn) {
+      return json_({
+        ok: false,
+        version: SCRIPT_VERSION,
+        action: 'skipped_incomplete',
+        error: 'Sin nombre de cliente; no se escribe fila fantasma',
+        dealId: dealId,
       });
     }
     if (!isWritableSheet_(sheetName)) {
