@@ -18,6 +18,14 @@ const MX_TZ = "America/Mexico_City";
 const REMINDER_HOUR = 9;
 /** Marca en el texto para no duplicar tareas al re-sincronizar el deal. */
 const TASK_TAG = "[evt";
+/** Solo status ganado de Kommo/amoCRM (evitar import circular con pollClosedDeals). */
+const WON_STATUS_ID = 142;
+const LOST_STATUS_ID = 143;
+
+function isWonLead_(lead: KommoLead): boolean {
+  if (lead.status_id === LOST_STATUS_ID) return false;
+  return lead.status_id === WON_STATUS_ID;
+}
 
 export type ReminderKind = "semana" | "vispera";
 
@@ -135,9 +143,68 @@ async function postTasks_(payload: Record<string, unknown>[]): Promise<void> {
   }
 }
 
+async function deleteTasksById_(ids: number[]): Promise<void> {
+  if (!ids.length) return;
+  const { base, token } = kommoAuth_();
+  const res = await fetch(`${base}/api/v4/tasks`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(ids.map((id) => ({ id }))),
+  });
+  if (!res.ok && res.status !== 204) {
+    const text = await res.text();
+    throw new Error(
+      `Kommo borrar tareas HTTP ${res.status}: ${text.slice(0, 300)}`
+    );
+  }
+}
+
+function isOurReminderTask_(text: string): boolean {
+  return text.includes(TASK_TAG + ":") && text.includes("]");
+}
+
+/**
+ * Borra las tareas de recordatorio Bodasesor ([evt:semana|vispera:dealId])
+ * de un lead. Útil para limpiar las que se crearon por error en leads abiertos.
+ */
+export async function deleteEventReminderTasks(
+  leadId: number
+): Promise<{ ok: boolean; dealId: string; deleted: number; texts: string[]; error?: string }> {
+  const dealId = String(leadId);
+  try {
+    const tasks = await fetchLeadTasks_(leadId);
+    const ours = tasks.filter(
+      (t) => t.id && isOurReminderTask_(String(t.text || ""))
+    );
+    if (!ours.length) {
+      return { ok: true, dealId, deleted: 0, texts: [] };
+    }
+    await deleteTasksById_(ours.map((t) => Number(t.id)));
+    return {
+      ok: true,
+      dealId,
+      deleted: ours.length,
+      texts: ours.map((t) => String(t.text || "")),
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      dealId,
+      deleted: 0,
+      texts: [],
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 /**
  * Crea las tareas de recordatorio que falten para un deal cerrado.
  * Idempotente: relee las tareas del lead y salta las que ya tienen la marca.
+ * NUNCA crea tareas en leads que no estén ganados (status 142).
  */
 export async function ensureEventReminderTasks(
   lead: KommoLead,
@@ -151,6 +218,10 @@ export async function ensureEventReminderTasks(
     alreadyThere: [],
     tooLate: [],
   };
+
+  if (!isWonLead_(lead)) {
+    return { ...base, skipped: "no_ganado" };
+  }
 
   // Kommo suele traer la fecha vacía o como "viernes"; el Sheet es donde se
   // corrige a mano, así que ahí buscamos antes de rendirnos.

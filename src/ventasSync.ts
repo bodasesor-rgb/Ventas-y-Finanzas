@@ -226,11 +226,28 @@ export async function syncDealToSheet(
     );
   }
 
-  // Los recordatorios no deben tumbar el sync: si Kommo falla, la fila ya está.
+  // Solo en ganados: recordatorios en chats abiertos ensucian Kommo.
   let kommoTasks: KommoTaskResult | undefined;
-  if (sheetWrite.ok && sheetWrite.action !== "skipped_duplicate") {
+  if (
+    sheetWrite.ok &&
+    sheetWrite.action !== "skipped_duplicate" &&
+    sheetWrite.action !== "skipped_incomplete"
+  ) {
     try {
-      kommoTasks = await ensureEventReminderTasks(lead, fila);
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { isClosedWonLead } = require("./pollClosedDeals") as typeof import("./pollClosedDeals");
+      if (isClosedWonLead(lead)) {
+        kommoTasks = await ensureEventReminderTasks(lead, fila);
+      } else {
+        kommoTasks = {
+          ok: true,
+          dealId: fila.kommoDealId,
+          created: [],
+          alreadyThere: [],
+          tooLate: [],
+          skipped: "no_ganado",
+        };
+      }
     } catch (taskErr) {
       console.error(
         "[ventas][calendario] tareas Kommo FAIL",

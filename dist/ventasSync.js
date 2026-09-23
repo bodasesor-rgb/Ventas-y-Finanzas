@@ -169,11 +169,27 @@ async function syncDealToSheet(leadId, webhookBody) {
     else {
         console.log("[ventas][fase1] FILA QUE SE APPENDARÍA (sin URL Apps Script /exec)");
     }
-    // Los recordatorios no deben tumbar el sync: si Kommo falla, la fila ya está.
+    // Solo en ganados: recordatorios en chats abiertos ensucian Kommo.
     let kommoTasks;
-    if (sheetWrite.ok && sheetWrite.action !== "skipped_duplicate") {
+    if (sheetWrite.ok &&
+        sheetWrite.action !== "skipped_duplicate" &&
+        sheetWrite.action !== "skipped_incomplete") {
         try {
-            kommoTasks = await (0, kommoTasks_1.ensureEventReminderTasks)(lead, fila);
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { isClosedWonLead } = require("./pollClosedDeals");
+            if (isClosedWonLead(lead)) {
+                kommoTasks = await (0, kommoTasks_1.ensureEventReminderTasks)(lead, fila);
+            }
+            else {
+                kommoTasks = {
+                    ok: true,
+                    dealId: fila.kommoDealId,
+                    created: [],
+                    alreadyThere: [],
+                    tooLate: [],
+                    skipped: "no_ganado",
+                };
+            }
         }
         catch (taskErr) {
             console.error("[ventas][calendario] tareas Kommo FAIL", taskErr instanceof Error ? taskErr.message : String(taskErr));

@@ -19,8 +19,20 @@ export interface KommoTaskResult {
 /** "DD/MM/YYYY" + hora local México → unix segundos. */
 export declare function mxUnixAt_(fechaDMY: string, hour: number): number | null;
 /**
+ * Borra las tareas de recordatorio Bodasesor ([evt:semana|vispera:dealId])
+ * de un lead. Útil para limpiar las que se crearon por error en leads abiertos.
+ */
+export declare function deleteEventReminderTasks(leadId: number): Promise<{
+    ok: boolean;
+    dealId: string;
+    deleted: number;
+    texts: string[];
+    error?: string;
+}>;
+/**
  * Crea las tareas de recordatorio que falten para un deal cerrado.
  * Idempotente: relee las tareas del lead y salta las que ya tienen la marca.
+ * NUNCA crea tareas en leads que no estén ganados (status 142).
  */
 export declare function ensureEventReminderTasks(lead: KommoLead, fila: FilaVentas): Promise<KommoTaskResult>;
 export interface BackfillResult {

@@ -1107,6 +1107,70 @@ const handleKommoTasks = async (req, res) => {
 };
 exports.ventasRouter.post("/api/ventas/kommo-tasks/:dealId", handleKommoTasks);
 exports.ventasRouter.get("/api/ventas/kommo-tasks/:dealId", handleKommoTasks);
+/**
+ * Borra recordatorios Bodasesor ([evt:...]) de un lead.
+ * Sirve para limpiar tareas creadas por error en chats abiertos.
+ */
+const handleKommoTasksDelete = async (req, res) => {
+    const dealId = Number(req.params.dealId);
+    if (!Number.isFinite(dealId) || dealId <= 0) {
+        res.status(400).json({ ok: false, error: "dealId inválido" });
+        return;
+    }
+    try {
+        const result = await (0, kommoTasks_1.deleteEventReminderTasks)(dealId);
+        res.status(result.ok ? 200 : 502).json(result);
+    }
+    catch (err) {
+        res.status(502).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+};
+exports.ventasRouter.delete("/api/ventas/kommo-tasks/:dealId", handleKommoTasksDelete);
+exports.ventasRouter.post("/api/ventas/kommo-tasks/:dealId/delete", handleKommoTasksDelete);
+/**
+ * Limpia recordatorios erróneos en leads NO ganados (p.ej. tras un sync a ciegas).
+ * Body/query opcional: ?ids=1,2,3 — si no, usa la lista de basura conocida del 22/09.
+ */
+exports.ventasRouter.post("/api/ventas/kommo-tasks-cleanup-open", async (req, res) => {
+    try {
+        const body = (req.body || {});
+        const raw = String(req.query.ids || "") ||
+            (Array.isArray(body.ids) ? body.ids.join(",") : String(body.ids || ""));
+        const defaultJunk = [
+            27397610, 27397416, 27397830, 27197320, 27397926, 27398166, 27398108,
+            27398434,
+        ];
+        const ids = (raw
+            ? raw.split(/[,\s]+/).map((s) => Number(s.trim()))
+            : defaultJunk).filter((n) => Number.isFinite(n) && n > 0);
+        const items = [];
+        let deleted = 0;
+        for (const id of ids) {
+            const lead = await (0, kommoApi_1.fetchLeadWithContact)(id);
+            if ((0, pollClosedDeals_1.isClosedWonLead)(lead)) {
+                items.push({
+                    dealId: String(id),
+                    skipped: "es_ganado_se_conserva",
+                    cliente: lead.name || null,
+                });
+                continue;
+            }
+            const result = await (0, kommoTasks_1.deleteEventReminderTasks)(id);
+            deleted += result.deleted;
+            items.push({ ...result, status_id: lead.status_id, cliente: lead.name || null });
+        }
+        res.status(200).json({ ok: true, deleted, items });
+    }
+    catch (err) {
+        res.status(502).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+});
 /** Fuerza el repaso de recordatorios sin esperar al tick de cada 6h. */
 const handleKommoTasksBackfill = async (_req, res) => {
     try {
