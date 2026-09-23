@@ -19,13 +19,15 @@ export interface KommoTaskResult {
 /** "DD/MM/YYYY" + hora local México → unix segundos. */
 export declare function mxUnixAt_(fechaDMY: string, hour: number): number | null;
 /**
- * Borra las tareas de recordatorio Bodasesor ([evt:semana|vispera:dealId])
- * de un lead. Útil para limpiar las que se crearon por error en leads abiertos.
+ * Quita las tareas de recordatorio Bodasesor ([evt:semana|vispera:dealId])
+ * de un lead. Intenta borrar; si el token no tiene scope DELETE, las completa.
  */
 export declare function deleteEventReminderTasks(leadId: number): Promise<{
     ok: boolean;
     dealId: string;
     deleted: number;
+    completed?: number;
+    method?: "deleted" | "completed";
     texts: string[];
     error?: string;
 }>;

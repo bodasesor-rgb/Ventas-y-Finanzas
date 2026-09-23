@@ -163,33 +163,79 @@ async function deleteTasksById_(ids: number[]): Promise<void> {
   }
 }
 
+/** Si el token no puede DELETE (scope), marcar completadas las saca del calendario activo. */
+async function completeTasksById_(ids: number[]): Promise<void> {
+  if (!ids.length) return;
+  const { base, token } = kommoAuth_();
+  const res = await fetch(`${base}/api/v4/tasks`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(ids.map((id) => ({ id, is_completed: true }))),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(
+      `Kommo completar tareas HTTP ${res.status}: ${text.slice(0, 300)}`
+    );
+  }
+}
+
 function isOurReminderTask_(text: string): boolean {
   return text.includes(TASK_TAG + ":") && text.includes("]");
 }
 
 /**
- * Borra las tareas de recordatorio Bodasesor ([evt:semana|vispera:dealId])
- * de un lead. Útil para limpiar las que se crearon por error en leads abiertos.
+ * Quita las tareas de recordatorio Bodasesor ([evt:semana|vispera:dealId])
+ * de un lead. Intenta borrar; si el token no tiene scope DELETE, las completa.
  */
 export async function deleteEventReminderTasks(
   leadId: number
-): Promise<{ ok: boolean; dealId: string; deleted: number; texts: string[]; error?: string }> {
+): Promise<{
+  ok: boolean;
+  dealId: string;
+  deleted: number;
+  completed?: number;
+  method?: "deleted" | "completed";
+  texts: string[];
+  error?: string;
+}> {
   const dealId = String(leadId);
   try {
     const tasks = await fetchLeadTasks_(leadId);
     const ours = tasks.filter(
-      (t) => t.id && isOurReminderTask_(String(t.text || ""))
+      (t) =>
+        t.id &&
+        !t.is_completed &&
+        isOurReminderTask_(String(t.text || ""))
     );
     if (!ours.length) {
       return { ok: true, dealId, deleted: 0, texts: [] };
     }
-    await deleteTasksById_(ours.map((t) => Number(t.id)));
-    return {
-      ok: true,
-      dealId,
-      deleted: ours.length,
-      texts: ours.map((t) => String(t.text || "")),
-    };
+    const ids = ours.map((t) => Number(t.id));
+    const texts = ours.map((t) => String(t.text || ""));
+    try {
+      await deleteTasksById_(ids);
+      return { ok: true, dealId, deleted: ids.length, method: "deleted", texts };
+    } catch (delErr) {
+      // Token largo-plazo a veces no trae scope de DELETE; completar basta.
+      console.warn(
+        "[kommo-tasks] DELETE falló, completando:",
+        delErr instanceof Error ? delErr.message : delErr
+      );
+      await completeTasksById_(ids);
+      return {
+        ok: true,
+        dealId,
+        deleted: ids.length,
+        completed: ids.length,
+        method: "completed",
+        texts,
+      };
+    }
   } catch (err) {
     return {
       ok: false,
