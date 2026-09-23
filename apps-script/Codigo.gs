@@ -1,12 +1,13 @@
 /**
  * ============================================================
  * Apps Script - Bodasesor Ventas / Finanzas (UN solo /exec)
- * VERSION: 2026-09-22-v40
+ * VERSION: 2026-09-22-v41
  * ============================================================
  * PEGAR TODO ESTE ARCHIVO (borrar lo anterior -> pegar -> Guardar)
  * Luego: Nueva implementación /exec → URL en Hostinger → reiniciar Node.
  *
  * REPARACIONES acumuladas:
+ *   v41: el resumen del lunes también dispara el aviso semanal en Kommo
  *   v40: rellena Cliente/Fecha de cierre vacíos al re-sync; permite
  *        backup Drive del token Kommo (kommo-token)
  *   v39: el resumen del lunes verifica la conexión con Hostinger (URL /exec
@@ -22,7 +23,7 @@
  * luego installEventosCalendarTriggers -> ▶ Ejecutar.
  * ============================================================
  */
-var SCRIPT_VERSION = '2026-09-22-v40';
+var SCRIPT_VERSION = '2026-09-22-v41';
 var HOSTINGER_BASE = 'https://lightcyan-reindeer-284498.hostingersite.com';
 /** Hostinger: tick cada minuto para que los cierres suban al Sheet al momento. */
 var VENTAS_TICK_URL = HOSTINGER_BASE + '/api/ventas/tick';
@@ -1026,6 +1027,27 @@ function weeklyEventosDigest(data) {
     Logger.log('weeklyEventosDigest mail: ' + errMail);
   }
 
+  // Misma semana en el calendario de Kommo (badge / notificación).
+  var kommoDigest = null;
+  try {
+    var kdUrl =
+      HOSTINGER_BASE +
+      '/api/ventas/kommo-week-digest' +
+      (data.force ? '?force=1' : '');
+    var kdRes = UrlFetchApp.fetch(kdUrl, {
+      method: 'get',
+      muteHttpExceptions: true,
+      followRedirects: true,
+    });
+    kommoDigest = {
+      http: kdRes.getResponseCode(),
+      body: String(kdRes.getContentText() || '').slice(0, 500),
+    };
+  } catch (errKd) {
+    kommoDigest = { error: String(errKd) };
+    Logger.log('weeklyEventosDigest kommo: ' + errKd);
+  }
+
   // Marcar al final: si algo revienta antes, el respaldo debe reintentar.
   props.setProperty(DIGEST_LAST_DAY_KEY, hoyKey);
 
@@ -1042,6 +1064,7 @@ function weeklyEventosDigest(data) {
     sinFechaEvento: sinFecha,
     avisoCalendarId: avisoId,
     correo: correo,
+    kommoDigest: kommoDigest,
     mensaje: texto,
   };
 }

@@ -27,6 +27,7 @@ import {
   backfillEventReminderTasks,
   deleteEventReminderTasks,
   ensureEventReminderTasks,
+  ensureWeeklyKommoDigest,
   type BackfillResult,
 } from "./kommoTasks";
 import { getFingerprintStoreStatus } from "./fingerprintStore";
@@ -1232,7 +1233,16 @@ const handleCalendarDigest = async (req: Request, res: Response) => {
       { action: "weeklyEventosDigest", force },
       { timeoutMs: 180_000 }
     );
-    res.status(200).json({ ok: true, force, result });
+    let kommoDigest: unknown = null;
+    try {
+      kommoDigest = await ensureWeeklyKommoDigest({ force });
+    } catch (err) {
+      kommoDigest = {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+    res.status(200).json({ ok: true, force, result, kommoDigest });
   } catch (err) {
     res.status(502).json({
       ok: false,
@@ -1242,6 +1252,22 @@ const handleCalendarDigest = async (req: Request, res: Response) => {
 };
 ventasRouter.post("/api/ventas/calendar-digest", handleCalendarDigest);
 ventasRouter.get("/api/ventas/calendar-digest", handleCalendarDigest);
+
+/** Solo la tarea semanal en calendario Kommo (lo llama Apps Script los lunes). */
+const handleKommoWeekDigest = async (req: Request, res: Response) => {
+  const force = req.query.force === "1" || req.query.force === "true";
+  try {
+    const result = await ensureWeeklyKommoDigest({ force });
+    res.status(result.ok ? 200 : 502).json(result);
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+};
+ventasRouter.post("/api/ventas/kommo-week-digest", handleKommoWeekDigest);
+ventasRouter.get("/api/ventas/kommo-week-digest", handleKommoWeekDigest);
 
 /**
  * ¿Hostinger sigue hablando con la implementación actual del Apps Script?

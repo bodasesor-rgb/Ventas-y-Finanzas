@@ -4,6 +4,7 @@ exports.mxUnixAt_ = mxUnixAt_;
 exports.deleteEventReminderTasks = deleteEventReminderTasks;
 exports.ensureEventReminderTasks = ensureEventReminderTasks;
 exports.backfillEventReminderTasks = backfillEventReminderTasks;
+exports.ensureWeeklyKommoDigest = ensureWeeklyKommoDigest;
 /**
  * Recordatorios de eventos cerrados en el calendario de Kommo.
  *
@@ -343,5 +344,127 @@ async function backfillEventReminderTasks() {
         }
     }
     return { eventosFuturos: proximos.length, creadas, items };
+}
+function mondayOfWeekMx_(now = new Date()) {
+    // Usar partes en CDMX para no desalinear el lunes.
+    const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: MX_TZ,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        weekday: "short",
+    }).formatToParts(now);
+    const y = Number(parts.find((p) => p.type === "year")?.value);
+    const m = Number(parts.find((p) => p.type === "month")?.value);
+    const d = Number(parts.find((p) => p.type === "day")?.value);
+    const wd = parts.find((p) => p.type === "weekday")?.value || "Mon";
+    const map = {
+        Mon: 0,
+        Tue: 1,
+        Wed: 2,
+        Thu: 3,
+        Fri: 4,
+        Sat: 5,
+        Sun: 6,
+    };
+    const offset = map[wd] ?? 0;
+    const utc = Date.UTC(y, m - 1, d - offset);
+    return new Date(utc);
+}
+function fmtDMYUtc_(ms) {
+    const dt = new Date(ms);
+    const dd = String(dt.getUTCDate()).padStart(2, "0");
+    const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+    return `${dd}/${mm}/${dt.getUTCFullYear()}`;
+}
+async function fetchOpenTasks_() {
+    const data = (await (0, kommoApi_1.kommoGetJson_)(`/api/v4/tasks?limit=250&filter[is_completed]=0`, "Kommo open tasks"));
+    return data?._embedded?.tasks || [];
+}
+async function currentUserId_() {
+    const env = Number(process.env.KOMMO_DIGEST_USER_ID || 0);
+    if (Number.isFinite(env) && env > 0)
+        return env;
+    try {
+        const acc = (await (0, kommoApi_1.kommoGetJson_)("/api/v4/account", "Kommo account"));
+        return acc?.current_user_id && acc.current_user_id > 0
+            ? acc.current_user_id
+            : null;
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * Tarea única en el calendario de Kommo: "Esta semana: N evento(s)".
+ * Aparece en Calendario (no en un chat de lead abierto). Idempotente por semana.
+ */
+async function ensureWeeklyKommoDigest(opts) {
+    const force = Boolean(opts?.force);
+    const lunes = mondayOfWeekMx_();
+    const domingoMs = lunes.getTime() + 6 * 86400000;
+    const weekKey = fmtDMYUtc_(lunes.getTime()).split("/").reverse().join("-"); // YYYY-MM-DD del lunes
+    const tag = `${TASK_TAG}:digest:${weekKey}]`;
+    const base = {
+        ok: true,
+        weekKey,
+        semanaDel: fmtDMYUtc_(lunes.getTime()),
+        semanaAl: fmtDMYUtc_(domingoMs),
+        eventos: 0,
+    };
+    const proximos = await (0, sheetEventosReader_1.loadEventosProximos)();
+    const deLaSemana = proximos.filter((e) => {
+        const m = e.fechaDelEvento.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+        if (!m)
+            return false;
+        const when = Date.UTC(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+        return when >= lunes.getTime() && when <= domingoMs + 86399999;
+    });
+    base.eventos = deLaSemana.length;
+    try {
+        const abiertas = await fetchOpenTasks_();
+        const ya = abiertas.find((t) => (t.text || "").includes(tag));
+        if (ya && !force) {
+            return { ...base, skipped: "ya_existe", text: ya.text };
+        }
+        const lineas = deLaSemana.map((e) => {
+            const bits = [e.fechaDelEvento, e.cliente];
+            if (e.tipoDeEvento)
+                bits.push(e.tipoDeEvento);
+            if (e.invitados)
+                bits.push(`${e.invitados} invitados`);
+            return `• ${bits.join(" — ")}`;
+        });
+        const titulo = deLaSemana.length
+            ? `Esta semana: ${deLaSemana.length} evento(s)`
+            : "Esta semana: sin eventos agendados";
+        const text = [`📅 ${titulo}`, "", ...lineas, "", tag]
+            .filter((x, i, arr) => !(x === "" && arr[i - 1] === ""))
+            .join("\n");
+        // Vence pronto para que Kommo dispare la notificación / badge de Calendario.
+        const completeTill = Math.floor(Date.now() / 1000) + 15 * 60;
+        const responsible = await currentUserId_();
+        await postTasks_([
+            {
+                text,
+                complete_till: completeTill,
+                task_type_id: 1,
+                ...(responsible ? { responsible_user_id: responsible } : {}),
+            },
+        ]);
+        return {
+            ...base,
+            created: true,
+            completeTill: fmtMx_(completeTill),
+            text,
+        };
+    }
+    catch (err) {
+        return {
+            ...base,
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+        };
+    }
 }
 //# sourceMappingURL=kommoTasks.js.map

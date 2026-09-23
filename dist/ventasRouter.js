@@ -1038,7 +1038,17 @@ const handleCalendarDigest = async (req, res) => {
     const force = req.query.force === "1" || req.query.force === "true";
     try {
         const result = await (0, appsScriptClient_1.postToAppsScript)({ action: "weeklyEventosDigest", force }, { timeoutMs: 180_000 });
-        res.status(200).json({ ok: true, force, result });
+        let kommoDigest = null;
+        try {
+            kommoDigest = await (0, kommoTasks_1.ensureWeeklyKommoDigest)({ force });
+        }
+        catch (err) {
+            kommoDigest = {
+                ok: false,
+                error: err instanceof Error ? err.message : String(err),
+            };
+        }
+        res.status(200).json({ ok: true, force, result, kommoDigest });
     }
     catch (err) {
         res.status(502).json({
@@ -1049,6 +1059,22 @@ const handleCalendarDigest = async (req, res) => {
 };
 exports.ventasRouter.post("/api/ventas/calendar-digest", handleCalendarDigest);
 exports.ventasRouter.get("/api/ventas/calendar-digest", handleCalendarDigest);
+/** Solo la tarea semanal en calendario Kommo (lo llama Apps Script los lunes). */
+const handleKommoWeekDigest = async (req, res) => {
+    const force = req.query.force === "1" || req.query.force === "true";
+    try {
+        const result = await (0, kommoTasks_1.ensureWeeklyKommoDigest)({ force });
+        res.status(result.ok ? 200 : 502).json(result);
+    }
+    catch (err) {
+        res.status(502).json({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+};
+exports.ventasRouter.post("/api/ventas/kommo-week-digest", handleKommoWeekDigest);
+exports.ventasRouter.get("/api/ventas/kommo-week-digest", handleKommoWeekDigest);
 /**
  * ¿Hostinger sigue hablando con la implementación actual del Apps Script?
  * Devuelve 503 si no, para que un monitor externo lo note.

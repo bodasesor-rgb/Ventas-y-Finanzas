@@ -53,3 +53,22 @@ export interface BackfillResult {
  * no deje al evento sin recordatorio para siempre.
  */
 export declare function backfillEventReminderTasks(): Promise<BackfillResult>;
+export interface WeeklyKommoDigestResult {
+    ok: boolean;
+    skipped?: string;
+    weekKey: string;
+    semanaDel: string;
+    semanaAl: string;
+    eventos: number;
+    created?: boolean;
+    completeTill?: string;
+    text?: string;
+    error?: string;
+}
+/**
+ * Tarea única en el calendario de Kommo: "Esta semana: N evento(s)".
+ * Aparece en Calendario (no en un chat de lead abierto). Idempotente por semana.
+ */
+export declare function ensureWeeklyKommoDigest(opts?: {
+    force?: boolean;
+}): Promise<WeeklyKommoDigestResult>;
